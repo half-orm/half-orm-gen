@@ -70,13 +70,15 @@ logging_config = LoggingConfig(
     }}
 )
 
+"""
+
+_FOOTER_TEMPLATE = """
 application = Litestar(
-    route_handlers={route_handlers},
+    route_handlers=[{route_handlers}],
     middleware=_auth_middleware + middlewares,
     logging_config=logging_config,
     debug=True,
 )
-
 """
 
 _IMPORT_TEMPLATE = "\nfrom {schema} import {module_name} as {module_alias}\n"
@@ -85,46 +87,34 @@ _GET_TEMPLATE = """
 @get({litestar_args})
 async def {full_name}({query_params}) -> typing.List[ho_baseclasses.{dc_name}]:
     return await {module_alias}.{class_name}().{name}({params})
-
-application.register({full_name})
 """
 
 _POST_TEMPLATE = """
 @post({litestar_args})
 async def {full_name}({query_params}) -> ho_baseclasses.{dc_name}:
     return await {module_alias}.{class_name}().{name}({params})
-
-application.register({full_name})
 """
 
 _PATCH_TEMPLATE = """
 @patch({litestar_args})
 async def {full_name}(request: "Request", data: ho_baseclasses.{dc_name}) -> ho_baseclasses.{dc_name}:
     return await {module_alias}.{class_name}().{name}({params})
-
-application.register({full_name})
 """
 
 _PUT_TEMPLATE = """
 @put({litestar_args})
 async def {full_name}(request: "Request", {path_params}) -> ho_baseclasses.{dc_name}:
     return await {module_alias}.{class_name}().{name}({params})
-
-application.register({full_name})
 """
 
 _DELETE_TEMPLATE = """
 @delete({litestar_args})
 async def {full_name}(request: "Request", {path_params}) -> None:
     return await {module_alias}.{class_name}().{name}({params})
-
-application.register({full_name})
 """
 
 _DIRECT_API_TEMPLATE = """
 from {module_str} import {function} as {function_alias}
-
-application.register({function_alias})
 """
 
 _HTTP_TEMPLATES = {
@@ -244,6 +234,21 @@ class GenApi:
         parts = [f'{var}: Any' for var, _ in re.findall(_RE_PATH_VAR, api_path)]
         return ', '.join(parts)
 
+    @staticmethod
+    def _annotation_str(annotation) -> str:
+        """Return a valid Python expression string for a type annotation."""
+        if hasattr(annotation, '__name__'):
+            # Simple types: int, str, float, bool, etc.
+            return annotation.__name__
+        if hasattr(annotation, '__module__') and hasattr(annotation, '__qualname__'):
+            # e.g. uuid.UUID, datetime.datetime
+            mod = annotation.__module__
+            if mod and mod != 'builtins':
+                return f'{mod}.{annotation.__qualname__}'
+            return annotation.__qualname__
+        # typing generics: List[int], Optional[str], …
+        return str(annotation)
+
     def _query_params(self, signature: inspect.Signature):
         params_decl = []
         params_call = []
@@ -253,7 +258,7 @@ class GenApi:
             params_call.append(name)
             decl = name
             if param.annotation is not inspect.Parameter.empty:
-                decl = f'{decl}: "{param.annotation}"'
+                decl = f'{decl}: {self._annotation_str(param.annotation)}'
             if param.default is not inspect.Parameter.empty:
                 decl = f'{decl}={param.default!r}'
             params_decl.append(decl)
@@ -422,10 +427,11 @@ class GenApi:
 
         # Write main.py
         route_handlers_str = ', '.join(route_handlers)
-        output = _HEADER_TEMPLATE.format(
-            module=self._module_name,
-            route_handlers=f'[{route_handlers_str}]',
-        ) + ''.join(blocks)
+        output = (
+            _HEADER_TEMPLATE.format(module=self._module_name)
+            + ''.join(blocks)
+            + _FOOTER_TEMPLATE.format(route_handlers=route_handlers_str)
+        )
 
         main_py = self._api_dir / 'main.py'
         main_py.write_text(output, encoding='utf-8')
