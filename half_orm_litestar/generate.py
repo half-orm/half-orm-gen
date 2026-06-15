@@ -278,7 +278,7 @@ class GenApi:
         # Path is always first positional argument
         if 'path' in litestar_params:
             version_prefix = f'/v{self._api_version}' if self._api_version is not None else ''
-            full_path = f"{version_prefix}/{self._module_name}{litestar_params['path']}"
+            full_path = f"{version_prefix}{litestar_params['path']}"
             args.append(f'"{full_path}"')
 
         kwargs = []
