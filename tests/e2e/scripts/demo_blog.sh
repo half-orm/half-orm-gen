@@ -144,23 +144,23 @@ PYEOF
 insert_crud_access "${PROJECT}/blog/author.py" \
 'CRUD_ACCESS = {
     "GET":    {"public": ["id", "name", "email"]},
-    "POST":   {"connected": None},
-    "PUT":    {"connected": None},
+    "POST":   {"connected": {"in": ["name", "email"]}},
+    "PUT":    {"connected": {"in": ["name", "email"]}},
     "DELETE": {"admin": None},
 }'
 
 insert_crud_access "${PROJECT}/blog/post.py" \
 'CRUD_ACCESS = {
     "GET":    {"public": ["id", "title", "published", "author_id"], "connected": None},
-    "POST":   {"connected": ["title", "content", "author_id"]},
-    "PUT":    {"connected": ["title", "content", "published"]},
+    "POST":   {"connected": {"in": ["title", "content", "author_id"]}},
+    "PUT":    {"connected": {"in": ["title", "content", "published"]}},
     "DELETE": {"admin": None},
 }'
 
 insert_crud_access "${PROJECT}/blog/comment.py" \
 'CRUD_ACCESS = {
     "GET":    {"public": ["id", "content", "post_id", "author_id", "comment_type"]},
-    "POST":   {"connected": ["content", "post_id", "author_id", "comment_type"]},
+    "POST":   {"connected": {"in": ["content", "post_id", "author_id", "comment_type"]}},
     "DELETE": {"admin": None},
 }'
 

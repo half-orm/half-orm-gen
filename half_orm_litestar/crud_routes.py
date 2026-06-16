@@ -7,6 +7,7 @@ by an @api_* decorated method.
 """
 
 import importlib
+import json
 from typing import Iterable, Tuple, Type
 
 from half_orm.relation import Relation
@@ -29,24 +30,20 @@ _LITESTAR_PATH_TYPE_MAP = {
 
 
 def _py_type_str(py_type) -> str:
-    """Return the fully-qualified Python type string for an annotation."""
     return _annotation_str(py_type)
 
 
 def _path_type_str(py_type) -> str:
-    """Return the Litestar path-param keyword for a Python type."""
     return _LITESTAR_PATH_TYPE_MAP.get(_py_type_str(py_type), 'str')
 
 
 def _instance(relation):
-    """Return a bare instance of the relation (no DB query)."""
     return relation()
 
 
 def _simple_pk(relation) -> Tuple[str, str, str] | None:
     """Return (pk_field_name, litestar_path_type, py_type_str) for single-column PKs.
 
-    Returns None for composite or absent PKs.
     _ho_pkey is an instance attribute, so we must instantiate the relation.
     """
     pkey = getattr(_instance(relation), '_ho_pkey', {})
@@ -56,29 +53,145 @@ def _simple_pk(relation) -> Tuple[str, str, str] | None:
     return field_name, _path_type_str(field_obj.py_type), _py_type_str(field_obj.py_type)
 
 
-def _filter_params_str(relation) -> Tuple[str, str]:
-    """Return (filter_params_block, filter_dict_str) for query-param filters.
-
-    _ho_fields is an instance attribute, so we must instantiate the relation.
-    """
-    fields = getattr(_instance(relation), '_ho_fields', {})
+def _filter_params_str(all_fields: dict) -> Tuple[str, str]:
+    """Return (filter_params_block, filter_dict_str) for query-param filters."""
     lines = []
     dict_items = []
-    for fname, fobj in fields.items():
+    for fname, fobj in all_fields.items():
         type_str = _py_type_str(fobj.py_type)
         lines.append(f'    {fname}: Optional[{type_str}] = None,\n')
         dict_items.append(f"'{fname}': {fname}")
-    filter_params = ''.join(lines)
-    filter_dict = ', '.join(dict_items)
-    return filter_params, filter_dict
+    return ''.join(lines), ', '.join(dict_items)
 
 
-def _typedict_name(relation) -> str:
-    """Return the ho_typeddicts class name for a relation."""
-    schema_cap = ''.join(p.capitalize() for p in relation._schemaname.split('_'))
-    table_cap = relation.__name__
-    return f'{schema_cap}{table_cap}Dict'
+# ---------------------------------------------------------------------------
+# CRUD_ACCESS parsing helpers
+# ---------------------------------------------------------------------------
 
+def _resolved_out(crud_access: dict, verb: str, role: str):
+    """Return the 'out' field list (or None) for role/verb, resolving GET inheritance."""
+    rv = crud_access.get(verb, {}).get(role)
+    if verb in ('GET', 'DELETE'):
+        return rv  # sugar form: value IS out (or None = all)
+    if not isinstance(rv, dict):
+        return None
+    if 'out' in rv:
+        return rv['out']
+    # inherit from GET
+    get_rv = crud_access.get('GET', {}).get(role)
+    return get_rv if not isinstance(get_rv, dict) else get_rv.get('out')
+
+
+def _resolved_in(crud_access: dict, verb: str, role: str):
+    """Return the 'in' field list (or None = all fields) for role/verb."""
+    rv = crud_access.get(verb, {}).get(role)
+    if not isinstance(rv, dict):
+        return None
+    return rv.get('in')
+
+
+def _gen_out_fields(crud_access: dict, verb: str, api_excluded: list, all_field_names: list) -> list:
+    """Union of out fields across all roles for a verb (generation-time, for TypedDicts)."""
+    collected = []
+    for role in crud_access.get(verb, {}):
+        out = _resolved_out(crud_access, verb, role)
+        if out is None:
+            return [f for f in all_field_names if f not in api_excluded]
+        collected.extend(out)
+    seen = set()
+    result = []
+    for f in collected:
+        if f not in seen and f not in api_excluded and f in all_field_names:
+            seen.add(f)
+            result.append(f)
+    return result
+
+
+def _gen_in_fields(crud_access: dict, verb: str, pk_field: str,
+                   api_excluded: list, all_field_names: list) -> list:
+    """Union of in fields across all roles for a verb, minus PK and excluded."""
+    collected = []
+    for role in crud_access.get(verb, {}):
+        in_val = _resolved_in(crud_access, verb, role)
+        if in_val is None:
+            return [f for f in all_field_names if f != pk_field and f not in api_excluded]
+        collected.extend(in_val)
+    seen = set()
+    result = []
+    for f in collected:
+        if f not in seen and f not in api_excluded and f != pk_field and f in all_field_names:
+            seen.add(f)
+            result.append(f)
+    return result
+
+
+def _typedict_block(class_name: str, field_names: list, all_fields: dict) -> str:
+    """Return a TypedDict class definition string."""
+    lines = [f'class {class_name}(TypedDict, total=False):']
+    valid = [(f, all_fields[f]) for f in field_names if f in all_fields]
+    if not valid:
+        lines.append('    pass')
+    else:
+        for fname, fobj in valid:
+            lines.append(f'    {fname}: Optional[{_py_type_str(fobj.py_type)}]')
+    return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
+# /access endpoint payload builder
+# ---------------------------------------------------------------------------
+
+def _build_access_entry(
+    crud_access: dict,
+    api_excluded: list,
+    all_names: list,
+    covered: set,
+    module_str: str,
+) -> dict:
+    """Build the access map entry for one relation (used by GET /access)."""
+    entry = {}
+    for verb in ('GET', 'POST', 'PUT', 'DELETE'):
+        if (module_str, verb) in covered:
+            continue
+        roles = crud_access.get(verb)
+        if not roles:
+            continue
+        verb_entry = {}
+        for role, rv in roles.items():
+            if verb == 'GET':
+                out = rv if not isinstance(rv, dict) else rv.get('out')
+                verb_entry[role] = {
+                    'out': (
+                        [f for f in all_names if f not in api_excluded]
+                        if out is None else
+                        [f for f in out if f not in api_excluded]
+                    )
+                }
+            elif verb == 'DELETE':
+                verb_entry[role] = 'allowed'
+            else:  # POST / PUT
+                in_val = _resolved_in(crud_access, verb, role)
+                out    = _resolved_out(crud_access, verb, role)
+                verb_entry[role] = {
+                    'in': (
+                        [f for f in all_names if f not in api_excluded]
+                        if in_val is None else
+                        [f for f in in_val if f not in api_excluded]
+                    ),
+                    'out': (
+                        [f for f in all_names if f not in api_excluded]
+                        if out is None else
+                        [f for f in out if f not in api_excluded]
+                    ),
+                }
+        if verb_entry:
+            entry[verb] = verb_entry
+    return entry
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI description
+# ---------------------------------------------------------------------------
 
 def _access_description(crud_access: dict, verb: str) -> str:
     """Format CRUD_ACCESS role/field info for a verb as an OpenAPI description."""
@@ -86,21 +199,45 @@ def _access_description(crud_access: dict, verb: str) -> str:
     if not roles:
         return ""
     lines = ["**Access**"]
-    for role, fields in roles.items():
-        if fields is None:
-            lines.append(f"- {role}: all fields")
+    for role, rv in roles.items():
+        if verb == 'GET':
+            if rv is None:
+                lines.append(f"- {role}: all fields")
+            else:
+                lines.append(f"- {role}: {', '.join(rv)}")
+        elif verb == 'DELETE':
+            lines.append(f"- {role}: allowed")
         else:
-            lines.append(f"- {role}: {', '.join(fields)}")
+            # POST / PUT — {"in": ..., "out": ...}
+            parts = []
+            in_val = rv.get('in') if isinstance(rv, dict) else None
+            parts.append("in=all" if in_val is None else f"in=[{', '.join(in_val)}]")
+            out = _resolved_out(crud_access, verb, role)
+            parts.append("out=all" if out is None else f"out=[{', '.join(out)}]")
+            lines.append(f"- {role}: {', '.join(parts)}")
     return "\\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
 def _validate_crud_access(crud_access: dict, module_str: str) -> None:
-    """Warn about known misconfiguration patterns in CRUD_ACCESS."""
     valid_verbs = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE'}
-    for verb in crud_access:
+    for verb, roles in crud_access.items():
         if verb not in valid_verbs:
             print(f'  WARNING {module_str}.CRUD_ACCESS: unknown verb "{verb}"')
+            continue
+        if verb == 'DELETE':
+            for role, rv in roles.items():
+                if isinstance(rv, dict):
+                    print(f'  WARNING {module_str}.CRUD_ACCESS["DELETE"]["{role}"]: '
+                          f'dict form has no effect on DELETE (no request body) — use None')
 
+
+# ---------------------------------------------------------------------------
+# Main generation
+# ---------------------------------------------------------------------------
 
 def generate_crud_routes(
     classes: Iterable[Tuple[Type[Relation], str]],
@@ -110,11 +247,11 @@ def generate_crud_routes(
     """Generate auto-CRUD blocks for all relations that define CRUD_ACCESS.
 
     Skips verbs already covered by @api_* (present in *covered* set).
-
     Returns (blocks, route_handler_names).
     """
     blocks: list[str] = []
     route_handlers: list[str] = []
+    access_map: dict = {}
 
     version_prefix = f'/v{api_version}' if api_version is not None else ''
 
@@ -136,14 +273,18 @@ def generate_crud_routes(
 
         _validate_crud_access(crud_access, module_str)
 
-        kind = getattr(relation, '_ho_kind', 'Table')
-        is_table = kind == 'Table'
-        schema_name = relation._schemaname.replace('.', '_')
-        table_name = relation.__name__.lower()
-        base_path = f'{version_prefix}/{schema_name}/{table_name}'
+        api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
+        kind         = getattr(relation, '_ho_kind', 'Table')
+        is_table     = kind == 'Table'
+        schema_name  = relation._schemaname.replace('.', '_')
+        table_name   = relation.__name__.lower()
+        base_path    = f'{version_prefix}/{schema_name}/{table_name}'
         handler_prefix = f'_crud_{module_alias}'
-        td_name = _typedict_name(relation)
-        pk_info = _simple_pk(relation)
+        pk_info      = _simple_pk(relation)
+
+        instance     = _instance(relation)
+        all_fields   = getattr(instance, '_ho_fields', {})
+        all_names    = list(all_fields.keys())
 
         blocks.append(T.CRUD_MODULE_IMPORT.format(
             schema=schema,
@@ -151,11 +292,17 @@ def generate_crud_routes(
             module_alias=module_alias,
         ))
 
-        filter_params, filter_dict = _filter_params_str(relation)
+        # Out TypedDict (driven by GET, used for all return types)
+        out_class  = f'_Out_{module_alias}'
+        out_names  = _gen_out_fields(crud_access, 'GET', api_excluded, all_names)
+        if not out_names:
+            out_names = [f for f in all_names if f not in api_excluded]
+        blocks.append('\n' + _typedict_block(out_class, out_names, all_fields) + '\n')
 
+        filter_params, filter_dict = _filter_params_str(all_fields)
         get_desc = _access_description(crud_access, 'GET')
 
-        # GET list — always generated (tables and views)
+        # GET list
         if (module_str, 'GET') not in covered and 'GET' in crud_access:
             handler_name = f'{handler_prefix}_list'
             blocks.append(T.CRUD_GET_LIST.format(
@@ -165,12 +312,12 @@ def generate_crud_routes(
                 filter_dict=filter_dict,
                 module_alias=module_alias,
                 class_name=relation.__name__,
-                typedict_name=td_name,
+                out_typedict=out_class,
                 access_description=get_desc,
             ))
             route_handlers.append(handler_name)
 
-        # GET /{pk} — only if single PK
+        # GET /{pk}
         if pk_info and (module_str, 'GET') not in covered and 'GET' in crud_access:
             pk_field, pk_path_type, pk_py_type = pk_info
             handler_name = f'{handler_prefix}_get'
@@ -182,7 +329,7 @@ def generate_crud_routes(
                 pk_py_type=pk_py_type,
                 module_alias=module_alias,
                 class_name=relation.__name__,
-                typedict_name=td_name,
+                out_typedict=out_class,
                 access_description=get_desc,
             ))
             route_handlers.append(handler_name)
@@ -192,18 +339,25 @@ def generate_crud_routes(
             pk_field, pk_path_type, pk_py_type = pk_info
 
             if (module_str, 'POST') not in covered and 'POST' in crud_access:
+                post_in_class = f'_In_{module_alias}_post'
+                post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names)
+                blocks.append('\n' + _typedict_block(post_in_class, post_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_create'
                 blocks.append(T.CRUD_POST.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     module_alias=module_alias,
                     class_name=relation.__name__,
-                    typedict_name=td_name,
+                    in_typedict=post_in_class,
+                    out_typedict=out_class,
                     access_description=_access_description(crud_access, 'POST'),
                 ))
                 route_handlers.append(handler_name)
 
             if (module_str, 'PUT') not in covered and 'PUT' in crud_access:
+                put_in_class = f'_In_{module_alias}_put'
+                put_in_names = _gen_in_fields(crud_access, 'PUT', pk_field, api_excluded, all_names)
+                blocks.append('\n' + _typedict_block(put_in_class, put_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_update'
                 blocks.append(T.CRUD_PUT.format(
                     path=base_path,
@@ -213,7 +367,8 @@ def generate_crud_routes(
                     pk_py_type=pk_py_type,
                     module_alias=module_alias,
                     class_name=relation.__name__,
-                    typedict_name=td_name,
+                    in_typedict=put_in_class,
+                    out_typedict=out_class,
                     access_description=_access_description(crud_access, 'PUT'),
                 ))
                 route_handlers.append(handler_name)
@@ -228,9 +383,26 @@ def generate_crud_routes(
                     pk_py_type=pk_py_type,
                     module_alias=module_alias,
                     class_name=relation.__name__,
-                    typedict_name=td_name,
                     access_description=_access_description(crud_access, 'DELETE'),
                 ))
                 route_handlers.append(handler_name)
+
+        # Accumulate access map entry
+        map_key = f'{schema_name}/{table_name}'
+        entry = _build_access_entry(crud_access, api_excluded, all_names, covered, module_str)
+        if entry:
+            access_map[map_key] = entry
+
+    # /ho_access endpoint — filtered by the caller's authorized_roles
+    if access_map:
+        json_str = json.dumps(access_map, indent=4)
+        blocks.append(
+            f'\n_ACCESS_MAP = {json_str}\n\n'
+            f'@get("{version_prefix}/ho_access", guards=[guards.public])\n'
+            f'async def _crud_access_map(request: Request) -> dict:\n'
+            f'    authorized_roles = getattr(request.state, "authorized_roles", ["public"])\n'
+            f'    return _filter_access_for_roles(_ACCESS_MAP, authorized_roles)\n'
+        )
+        route_handlers.append('_crud_access_map')
 
     return blocks, route_handlers

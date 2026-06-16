@@ -213,3 +213,4 @@ tmp
 .auto_venv
 .coveragerc
 .half_orm_cli
+blog_demo
