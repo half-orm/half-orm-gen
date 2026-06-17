@@ -359,7 +359,18 @@ def _layout(resources: list) -> str:
 """
 
 
-def _list_page(
+def _cname(schema_name: str, table_name: str) -> str:
+    """PascalCase component/interface name — e.g. BlogComment"""
+    return ''.join(p.capitalize() for p in f'{schema_name}_{table_name}'.split('_'))
+
+
+def _rname(schema_name: str, table_name: str) -> str:
+    """camelCase resource name — e.g. blogComment"""
+    parts = schema_name.split('_') + table_name.split('_')
+    return parts[0].lower() + ''.join(p.capitalize() for p in parts[1:])
+
+
+def _list_component(
     schema_name: str, table_name: str,
     stem: str, rname: str, iname: str,
     out_names: list, pk_info,
@@ -371,17 +382,12 @@ def _list_page(
     title    = _title(schema_name, table_name)
     fk_map   = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
 
-    # Table header — one column per out field + optional actions column
     th_cols = '\n        '.join(
         f'<th class="px-4 py-2 text-left text-sm font-semibold text-gray-600">{f}</th>'
         for f in out_names
     )
-    action_th = (
-        '<th class="px-4 py-2 w-20"></th>'
-        if has_del and pk_field else ''
-    )
+    action_th = '<th class="px-4 py-2 w-20"></th>' if has_del and pk_field else ''
 
-    # Table cells — FK fields are links to the related resource's detail page
     def _td(f: str) -> str:
         if f in fk_map:
             rs, rt = fk_map[f]
@@ -395,7 +401,6 @@ def _list_page(
 
     td_cols = '\n          '.join(_td(f) for f in out_names)
 
-    # Row click navigates to the detail page
     if pk_field:
         tr_open = (
             f'<tr class="border-t hover:bg-gray-50 cursor-pointer"'
@@ -405,7 +410,6 @@ def _list_page(
     else:
         tr_open = '<tr class="border-t hover:bg-gray-50">'
 
-    # Delete button — stops row click propagation
     action_td = ''
     if has_del and pk_field:
         action_td = (
@@ -418,22 +422,21 @@ def _list_page(
             f'        </td>'
         )
 
-    # "New" button
     new_btn = (
-        f'\n    {{#if canCreate}}\n'
-        f'      <a href="/{schema_name}/{table_name}/new"\n'
-        f'         class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
-        f'        New\n      </a>\n    {{/if}}'
+        f'\n  {{#if canCreate}}\n'
+        f'    <a href="/{schema_name}/{table_name}/new"\n'
+        f'       class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
+        f'      New\n    </a>\n  {{/if}}'
         if has_post else ''
     )
 
-    can_create = f"\n  const canCreate = $derived(!!access['{map_key}']?.POST);" if has_post else ''
+    can_create = f"\n  const canCreate = $derived(!embedded && !!access['{map_key}']?.POST);" if has_post else ''
     can_delete = f"\n  const canDelete  = $derived(!!access['{map_key}']?.DELETE);" if has_del else ''
     delete_fn  = (
         f'\n  async function handleDelete(id: string) {{\n'
         f'    if (confirm(\'Delete this item?\')) {{\n'
         f'      await {rname}Api.remove(id);\n'
-        f'      {rname}State.items = {rname}State.items.filter(i => i.{pk_field} !== id);\n'
+        f'      items = items.filter(i => i.{pk_field} !== id);\n'
         f'    }}\n'
         f'  }}'
         if has_del and pk_field else ''
@@ -442,43 +445,57 @@ def _list_page(
 
     return f"""\
 <script lang="ts">
-  import {{ {rname}State, {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
+  import {{ {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
+  import type {{ {iname}Out }} from '$lib/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ hoAccess }} from '$lib/stores/index.svelte.ts';
 {goto_import}
+  let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
+
+  let items  = $state<{iname}Out[]>([]);
   let access = $state<Record<string, any>>({{}});
 
   $effect(() => {{
     hoAccess(auth.token ?? undefined).then(a => {{ access = a; }});
-    {rname}Api.list().then(r => r.json()).then(d => {{ {rname}State.items = d; }});
+    {rname}Api.list(filters).then(r => r.json()).then(d => {{ items = d; }});
   }});
 {can_create}{can_delete}{delete_fn}
 </script>
 
-<div>
-  <div class="flex justify-between items-center mb-4">
-    <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
-  </div>
-
-  <div class="bg-white shadow-sm rounded-lg overflow-hidden">
-    <table class="w-full border-collapse">
-      <thead class="bg-gray-100">
-        <tr>
-        {th_cols}
-          {action_th}
-        </tr>
-      </thead>
-      <tbody>
-        {{#each {rname}State.items as item}}
-          {tr_open}
-          {td_cols}
-            {action_td}
-          </tr>
-        {{/each}}
-      </tbody>
-    </table>
-  </div>
+{{#if !embedded}}
+<div class="flex justify-between items-center mb-4">
+  <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
 </div>
+{{/if}}
+
+<div class="bg-white shadow-sm rounded-lg overflow-hidden">
+  <table class="w-full border-collapse">
+    <thead class="bg-gray-100">
+      <tr>
+      {th_cols}
+        {action_th}
+      </tr>
+    </thead>
+    <tbody>
+      {{#each items as item}}
+        {tr_open}
+        {td_cols}
+          {action_td}
+        </tr>
+      {{/each}}
+    </tbody>
+  </table>
+</div>
+"""
+
+
+def _list_page(stem: str) -> str:
+    return f"""\
+<script lang="ts">
+  import List from '$lib/components/{stem}_list.svelte';
+</script>
+
+<List />
 """
 
 
@@ -543,6 +560,7 @@ def _detail_page(
     pk_field: str, all_fields: dict,
     has_put: bool,
     fk_deps: list,
+    rev_fk_deps: list,
 ) -> str:
     title   = _title(schema_name, table_name)
     fk_map    = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
@@ -634,6 +652,83 @@ def _detail_page(
         if has_put and put_in_names else ''
     )
 
+    # Forward FK reference imports, states, effects, sections
+    def _fk_ref_imports(deps: list) -> str:
+        lines = []
+        for _, rs, rt, _ in deps:
+            s = f'{rs}_{rt}'
+            cn, rn = _cname(rs, rt), _rname(rs, rt)
+            lines.append(f"  import {{ {rn}Api }} from '$lib/stores/{s}.svelte.ts';")
+            lines.append(f"  import type {{ {cn}Out }} from '$lib/stores/{s}.svelte.ts';")
+        return ('\n' + '\n'.join(lines)) if lines else ''
+
+    def _fk_ref_states(deps: list) -> str:
+        lines = [
+            f"  let {_rname(rs, rt)}Ref = $state<{_cname(rs, rt)}Out | null>(null);"
+            for _, rs, rt, _ in deps
+        ]
+        return ('\n' + '\n'.join(lines)) if lines else ''
+
+    def _fk_ref_effects(deps: list) -> str:
+        blocks = []
+        for lf, rs, rt, _ in deps:
+            rn = _rname(rs, rt)
+            blocks.append(
+                f'  $effect(() => {{\n'
+                f'    if (item?.{lf})\n'
+                f'      {rn}Api.get(item.{lf}).then(r => r.json()).then(d => {{ {rn}Ref = d; }});\n'
+                f'  }});'
+            )
+        return ('\n' + '\n'.join(blocks)) if blocks else ''
+
+    def _fk_ref_section(lf: str, rs: str, rt: str, remote_pk: str) -> str:
+        rn = _rname(rs, rt)
+        return (
+            f'\n{{#if {rn}Ref}}\n'
+            f'<div class="max-w-2xl mx-auto mt-4 p-6 bg-white rounded-lg shadow">\n'
+            f'  <div class="flex justify-between items-center mb-3">\n'
+            f'    <h2 class="text-lg font-semibold">{_title(rs, rt)}</h2>\n'
+            f'    <a href="/{rs}/{rt}/{{{rn}Ref.{remote_pk}}}"'
+            f' class="text-sm text-blue-600 hover:underline">→</a>\n'
+            f'  </div>\n'
+            f'  <div class="space-y-1">\n'
+            f'    {{#each Object.entries({rn}Ref) as [k, v]}}\n'
+            f'      <div class="flex gap-2 items-baseline">\n'
+            f'        <span class="font-medium text-gray-600 w-36 shrink-0 text-sm">{{k}}</span>\n'
+            f'        <span class="text-sm break-all">{{String(v ?? \'\')}}</span>\n'
+            f'      </div>\n'
+            f'    {{/each}}\n'
+            f'  </div>\n'
+            f'</div>\n'
+            f'{{/if}}'
+        )
+
+    fk_imports   = _fk_ref_imports(fk_deps)
+    fk_states    = _fk_ref_states(fk_deps)
+    fk_effects   = _fk_ref_effects(fk_deps)
+    fk_sections  = '\n'.join(_fk_ref_section(*d) for d in fk_deps)
+
+    # Reverse FK imports and sections
+    rev_imports = '\n'.join(
+        f"  import {_cname(rs, rt)}List from '$lib/components/{rs}_{rt}_list.svelte';"
+        for rs, rt, _ in rev_fk_deps
+    )
+    if rev_imports:
+        rev_imports = '\n' + rev_imports
+
+    def _rev_section(rs: str, rt: str, fk_field: str) -> str:
+        cn = _cname(rs, rt)
+        return (
+            f'\n<div class="max-w-2xl mx-auto mt-4 p-6 bg-white rounded-lg shadow">\n'
+            f'  <h2 class="text-lg font-semibold mb-3">{_title(rs, rt)}</h2>\n'
+            f'  {{#if item}}\n'
+            f'    <{cn}List filters={{{{ {fk_field}: item.{pk_field} }}}} embedded />\n'
+            f'  {{/if}}\n'
+            f'</div>'
+        )
+
+    rev_sections = '\n'.join(_rev_section(rs, rt, fk) for rs, rt, fk in rev_fk_deps)
+
     return f"""\
 <script lang="ts">
   import {{ {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
@@ -641,8 +736,8 @@ def _detail_page(
   import {{ goto }} from '$app/navigation';
   import {{ page }} from '$app/state';
   import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ hoAccess }} from '$lib/stores/index.svelte.ts';
-
+  import {{ hoAccess }} from '$lib/stores/index.svelte.ts';{fk_imports}{rev_imports}
+{fk_states}
   let item   = $state<{iname}Out | null>(null);
   let access = $state<Record<string, any>>({{}});
 
@@ -650,7 +745,7 @@ def _detail_page(
     hoAccess(auth.token ?? undefined).then(a => {{ access = a; }});
     {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; }});
   }});
-{can_edit}{extra_script}
+{fk_effects}{can_edit}{extra_script}
 </script>
 
 {{#if item}}
@@ -672,6 +767,8 @@ def _detail_page(
   </div>{edit_section}
 </div>
 {{/if}}
+{fk_sections}
+{rev_sections}
 """
 
 
@@ -702,6 +799,30 @@ class SvelteAppGenerator(StoreGenerator):
             if (remote_schema, remote_table) not in crud_resources:
                 continue
             deps.append((local_field, remote_schema, remote_table, remote_pks[0]))
+        return deps
+
+    def _reverse_fk_deps(self, inst, pk_field: str | None, crud_resources: set) -> list:
+        """Return (remote_schema, remote_table, fk_field) for each reverse FK
+        whose remote table has CRUD_ACCESS. fk_field is the column in the remote
+        table that references our PK."""
+        if not pk_field:
+            return []
+        deps = []
+        for fk in getattr(inst, '_ho_fkeys', {}).values():
+            if not fk.is_reverse:
+                continue
+            our_pk_fields    = fk.names     # our PK columns being referenced
+            remote_fk_fields = fk.fk_names  # FK columns in the remote table
+            if len(our_pk_fields) != 1 or len(remote_fk_fields) != 1:
+                continue
+            if our_pk_fields[0] != pk_field:
+                continue
+            fqtn = fk.remote['fqtn']
+            remote_schema = fqtn[0].replace('.', '_')
+            remote_table  = fqtn[1]
+            if (remote_schema, remote_table) not in crud_resources:
+                continue
+            deps.append((remote_schema, remote_table, remote_fk_fields[0]))
         return deps
 
     def generate(self, classes, api_version, output_dir: Path) -> None:
@@ -779,13 +900,14 @@ class SvelteAppGenerator(StoreGenerator):
                 crud_access, 'PUT', pk_field, api_excluded, all_names
             ) if has_put else []
 
-            fk_deps = self._fk_deps(inst, out_names, crud_resources)
+            fk_deps     = self._fk_deps(inst, out_names, crud_resources)
+            rev_fk_deps = self._reverse_fk_deps(inst, pk_field, crud_resources)
 
             resources.append((
                 schema_name, table_name, stem, rname, iname,
                 out_names, pk_info, pk_field, all_fields,
                 has_post, has_put, has_del,
-                post_in_names, put_in_names, map_key, crud_access, fk_deps,
+                post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
             ))
 
         # --- layout + home ---
@@ -799,20 +921,28 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(routes_dir / 'login'  / '+page.svelte', _login_page(version_prefix))
         self._write(routes_dir / 'access' / '+page.svelte', _access_page(version_prefix))
 
+        # --- reusable list components ---
+        components_dir = output_dir / 'src' / 'lib' / 'components'
+        for (schema_name, table_name, stem, rname, iname,
+             out_names, pk_info, pk_field, all_fields,
+             has_post, has_put, has_del,
+             post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps) in resources:
+            self._write(
+                components_dir / f'{stem}_list.svelte',
+                _list_component(schema_name, table_name, stem, rname, iname,
+                                out_names, pk_info, has_post, has_del, map_key, fk_deps),
+            )
+
         # --- per-resource routes ---
         for (schema_name, table_name, stem, rname, iname,
              out_names, pk_info, pk_field, all_fields,
              has_post, has_put, has_del,
-             post_in_names, put_in_names, map_key, crud_access, fk_deps) in resources:
+             post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps) in resources:
 
             res_dir = routes_dir / schema_name / table_name
 
-            # list
-            self._write(
-                res_dir / '+page.svelte',
-                _list_page(schema_name, table_name, stem, rname, iname,
-                           out_names, pk_info, has_post, has_del, map_key, fk_deps),
-            )
+            # list page — thin wrapper around the reusable component
+            self._write(res_dir / '+page.svelte', _list_page(stem))
 
             # new (POST)
             if has_post:
@@ -828,7 +958,7 @@ class SvelteAppGenerator(StoreGenerator):
                     res_dir / '[id]' / '+page.svelte',
                     _detail_page(schema_name, table_name, stem, rname, iname,
                                  out_names, put_in_names, pk_field, all_fields,
-                                 has_put, fk_deps),
+                                 has_put, fk_deps, rev_fk_deps),
                 )
 
         print(f'\nSvelteKit app generated in {output_dir}')
