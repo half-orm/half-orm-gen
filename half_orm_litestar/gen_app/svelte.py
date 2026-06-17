@@ -130,24 +130,44 @@ _APP_CSS = """\
 @tailwind utilities;
 """
 
-_AUTH_STORE = """\
-class AuthState {
-    token = $state<string | null>(
+def _auth_store(version_prefix: str) -> str:
+    return f"""\
+class AuthState {{
+    token  = $state<string | null>(
         typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
     );
+    access = $state<Record<string, any>>({{}});
 
-    login(t: string) {
+    login(t: string) {{
         sessionStorage.setItem('ho_token', t);
         this.token = t;
-    }
+        this._fetchAccess();
+    }}
 
-    logout() {
+    logout() {{
         sessionStorage.removeItem('ho_token');
         this.token = null;
-    }
-}
+        this._fetchAccess();
+    }}
+
+    async _fetchAccess() {{
+        const hdrs: Record<string, string> = this.token
+            ? {{ Authorization: `Bearer ${{this.token}}` }}
+            : {{}};
+        try {{
+            const res = await fetch('{version_prefix}/ho_access', {{ headers: hdrs }});
+            this.access = res.ok ? await res.json() : {{}};
+        }} catch {{
+            this.access = {{}};
+        }}
+    }}
+}}
 
 export const auth = new AuthState();
+
+if (typeof window !== 'undefined') {{
+    auth._fetchAccess();
+}}
 """
 
 def _login_page(version_prefix: str) -> str:
@@ -210,13 +230,10 @@ def _access_page(version_prefix: str) -> str:
     return f"""\
 <script lang="ts">
   import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ hoAccess }} from '$lib/stores/index.svelte.ts';
   import {{ onMount }} from 'svelte';
 
   let roles        = $state<string[]>([]);
-  let access       = $state<Record<string, any>>({{}});
   let rolesLoading = $state(true);
-  let loading      = $state(true);
 
   const activeRole = $derived(auth.token ?? 'public');
 
@@ -226,19 +243,9 @@ def _access_page(version_prefix: str) -> str:
       .then(d => {{ roles = d; rolesLoading = false; }});
   }});
 
-  $effect(() => {{
-    loading = true;
-    hoAccess(auth.token ?? undefined)
-      .then(a => {{ access = a; loading = false; }})
-      .catch(() => {{ loading = false; }});
-  }});
-
   function selectRole(role: string) {{
-    if (role === 'public') {{
-      auth.logout();
-    }} else {{
-      auth.login(role);
-    }}
+    if (role === 'public') auth.logout();
+    else auth.login(role);
   }}
 
   const VERB_COLOR: Record<string, string> = {{
@@ -274,13 +281,11 @@ def _access_page(version_prefix: str) -> str:
       <span class="text-base font-normal text-gray-500">— {{activeRole}}</span>
     </h1>
 
-    {{#if loading}}
-      <p class="text-gray-400 text-sm">Loading…</p>
-    {{:else if Object.keys(access).length === 0}}
+    {{#if Object.keys(auth.access).length === 0}}
       <p class="text-gray-500 text-sm">No access granted for this role.</p>
     {{:else}}
       <div class="space-y-4">
-        {{#each Object.entries(access) as [resource, verbs]}}
+        {{#each Object.entries(auth.access) as [resource, verbs]}}
           <div class="bg-white rounded-lg shadow-sm overflow-hidden">
             <div class="px-4 py-2 bg-gray-100 font-semibold text-gray-700 text-sm">{{resource}}</div>
             <div class="divide-y">
@@ -430,8 +435,8 @@ def _list_component(
         if has_post else ''
     )
 
-    can_create = f"\n  const canCreate = $derived(!embedded && !!access['{map_key}']?.POST);" if has_post else ''
-    can_delete = f"\n  const canDelete  = $derived(!!access['{map_key}']?.DELETE);" if has_del else ''
+    can_create = f"\n  const canCreate = $derived(!embedded && !!auth.access['{map_key}']?.POST);" if has_post else ''
+    can_delete = f"\n  const canDelete  = $derived(!!auth.access['{map_key}']?.DELETE);" if has_del else ''
     delete_fn  = (
         f'\n  async function handleDelete(id: string) {{\n'
         f'    if (confirm(\'Delete this item?\')) {{\n'
@@ -448,15 +453,12 @@ def _list_component(
   import {{ {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
   import type {{ {iname}Out }} from '$lib/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ hoAccess }} from '$lib/stores/index.svelte.ts';
 {goto_import}
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
-  let items  = $state<{iname}Out[]>([]);
-  let access = $state<Record<string, any>>({{}});
+  let items = $state<{iname}Out[]>([]);
 
   $effect(() => {{
-    hoAccess(auth.token ?? undefined).then(a => {{ access = a; }});
     {rname}Api.list(filters).then(r => r.json()).then(d => {{ items = d; }});
   }});
 {can_create}{can_delete}{delete_fn}
@@ -646,7 +648,7 @@ def _detail_page(
 
     map_key       = f'{schema_name}/{table_name}'
     put_in_import = f', {iname}PutIn' if has_put else ''
-    can_edit      = f"\n  const canEdit = $derived(!!access['{map_key}']?.PUT);" if has_put else ''
+    can_edit      = f"\n  const canEdit = $derived(!!auth.access['{map_key}']?.PUT);" if has_put else ''
     edit_btn_wrap = (
         f'\n      {{#if canEdit}}{edit_btn}\n      {{/if}}'
         if has_put and put_in_names else ''
@@ -735,14 +737,11 @@ def _detail_page(
   import type {{ {iname}Out{put_in_import} }} from '$lib/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
   import {{ page }} from '$app/state';
-  import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ hoAccess }} from '$lib/stores/index.svelte.ts';{fk_imports}{rev_imports}
+  import {{ auth }} from '$lib/auth.svelte.ts';{fk_imports}{rev_imports}
 {fk_states}
-  let item   = $state<{iname}Out | null>(null);
-  let access = $state<Record<string, any>>({{}});
+  let item = $state<{iname}Out | null>(null);
 
   $effect(() => {{
-    hoAccess(auth.token ?? undefined).then(a => {{ access = a; }});
     {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; }});
   }});
 {fk_effects}{can_edit}{extra_script}
@@ -850,7 +849,7 @@ class SvelteAppGenerator(StoreGenerator):
         SvelteGenerator().generate(classes, api_version, stores_dir)
 
         # --- auth store ---
-        self._write(output_dir / 'src' / 'lib' / 'auth.svelte.ts', _AUTH_STORE)
+        self._write(output_dir / 'src' / 'lib' / 'auth.svelte.ts', _auth_store(version_prefix))
 
         # Pass 1: identify all resources that expose CRUD_ACCESS
         crud_resources: set[tuple[str, str]] = set()

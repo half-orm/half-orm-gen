@@ -143,7 +143,7 @@ PYEOF
 
 insert_crud_access "${PROJECT}/blog/author.py" \
 'CRUD_ACCESS = {
-    "GET":    {"public": ["id", "name", "email"]},
+    "GET":    {"public": ["id", "name"], "connected": ["id", "name", "email"]},
     "POST":   {"connected": {"in": ["name", "email"]}},
     "PUT":    {"connected": {"in": ["name", "email"]}},
     "DELETE": {"admin": None},
