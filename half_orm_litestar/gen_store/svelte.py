@@ -104,8 +104,23 @@ class SvelteGenerator(StoreGenerator):
 
             # State class
             lines.append(f'class {iname}State {{')
-            lines.append(f'    items   = $state<{iname}Out[]>([]);')
-            lines.append(f'    current = $state<{iname}Out | null>(null);')
+            lines.append(f'    items = $state<{iname}Out[]>([]);')
+            if pk_field:
+                lines.append(f'    byId  = $state(new Map<string, {iname}Out>());')
+                lines.append(f'')
+                lines.append(f'    setItems(data: {iname}Out[]) {{')
+                lines.append(f'        this.items = data;')
+                lines.append(f'        this.byId  = new Map(data.map(i => [String(i.{pk_field}), i]));')
+                lines.append(f'    }}')
+                lines.append(f'    setItem(item: {iname}Out) {{')
+                lines.append(f'        this.byId.set(String(item.{pk_field}), item);')
+                lines.append(f'        const idx = this.items.findIndex(i => i.{pk_field} === item.{pk_field});')
+                lines.append(f'        if (idx >= 0) this.items[idx] = item;')
+                lines.append(f'    }}')
+                lines.append(f'    removeItem(id: string) {{')
+                lines.append(f'        this.byId.delete(id);')
+                lines.append(f'        this.items = this.items.filter(i => String(i.{pk_field}) !== id);')
+                lines.append(f'    }}')
 
             if fk_deps:
                 lines.append('')

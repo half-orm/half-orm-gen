@@ -455,8 +455,8 @@ def _list_component(
     delete_fn  = (
         f'\n  async function handleDelete(id: string) {{\n'
         f'    if (confirm(\'Delete this item?\')) {{\n'
-        f'      await {rname}Api.remove(id);\n'
-        f'      items = items.filter(i => i.{pk_field} !== id);\n'
+        f'      const res = await {rname}Api.remove(id);\n'
+        f'      if (res.ok) {rname}State.removeItem(String(id));\n'
         f'    }}\n'
         f'  }}'
         if has_del and pk_field else ''
@@ -465,17 +465,15 @@ def _list_component(
 
     return f"""\
 <script lang="ts">
-  import {{ {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
+  import {{ {rname}State, {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
   import type {{ {iname}Out }} from '$lib/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ untrack }} from 'svelte';
 {goto_import}
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
-  let items = $state<{iname}Out[]>([]);
-
   function _fetchItems() {{
-    {rname}Api.list(filters).then(r => r.json()).then(d => {{ items = d; }});
+    {rname}Api.list(filters).then(r => r.json()).then(d => {{ {rname}State.setItems(d); }});
   }}
 
   $effect(() => {{ _fetchItems(); }});
@@ -501,7 +499,7 @@ def _list_component(
       </tr>
     </thead>
     <tbody>
-      {{#each items as item}}
+      {{#each {rname}State.items as item}}
         {tr_open}
         {td_cols}
           {action_td}
@@ -637,8 +635,9 @@ def _detail_page(
             f'    try {{\n'
             f'      const res = await {rname}Api.update(page.params.id, form);\n'
             f'      if (!res.ok) throw new Error(await res.text());\n'
+            f'      const updated = await res.json();\n'
+            f'      {rname}State.setItem(updated);\n'
             f'      editing = false;\n'
-            f'      {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; }});\n'
             f'    }} catch (err: any) {{\n'
             f'      error = err.message;\n'
             f'    }}\n'
@@ -681,15 +680,15 @@ def _detail_page(
         lines = []
         for _, rs, rt, _ in deps:
             s = f'{rs}_{rt}'
-            cn, rn = _cname(rs, rt), _rname(rs, rt)
-            lines.append(f"  import {{ {rn}Api }} from '$lib/stores/{s}.svelte.ts';")
-            lines.append(f"  import type {{ {cn}Out }} from '$lib/stores/{s}.svelte.ts';")
+            rn = _rname(rs, rt)
+            lines.append(f"  import {{ {rn}State, {rn}Api }} from '$lib/stores/{s}.svelte.ts';")
         return ('\n' + '\n'.join(lines)) if lines else ''
 
     def _fk_ref_states(deps: list) -> str:
         lines = [
-            f"  let {_rname(rs, rt)}Ref = $state<{_cname(rs, rt)}Out | null>(null);"
-            for _, rs, rt, _ in deps
+            f"  const {_rname(rs, rt)}Ref = $derived("
+            f"item?.{lf} ? ({_rname(rs, rt)}State.byId.get(String(item.{lf})) ?? null) : null);"
+            for lf, rs, rt, _ in deps
         ]
         return ('\n' + '\n'.join(lines)) if lines else ''
 
@@ -699,8 +698,8 @@ def _detail_page(
             rn = _rname(rs, rt)
             blocks.append(
                 f'  $effect(() => {{\n'
-                f'    if (item?.{lf})\n'
-                f'      {rn}Api.get(item.{lf}).then(r => r.json()).then(d => {{ {rn}Ref = d; }});\n'
+                f'    if (item?.{lf} && !{rn}State.byId.has(String(item.{lf})))\n'
+                f'      {rn}Api.get(item.{lf}).then(r => r.json()).then(d => {{ {rn}State.setItem(d); }});\n'
                 f'  }});'
             )
         return ('\n' + '\n'.join(blocks)) if blocks else ''
@@ -755,16 +754,25 @@ def _detail_page(
 
     return f"""\
 <script lang="ts">
-  import {{ {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
+  import {{ {rname}State, {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
   import type {{ {iname}Out{put_in_import} }} from '$lib/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
   import {{ page }} from '$app/state';
   import {{ auth }} from '$lib/auth.svelte.ts';{fk_imports}{rev_imports}
+
+  const item = $derived({rname}State.byId.get(page.params.id) ?? null);
 {fk_states}
-  let item = $state<{iname}Out | null>(null);
+  $effect(() => {{
+    if (!{rname}State.byId.has(page.params.id))
+      {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ {rname}State.setItem(d); }});
+  }});
 
   $effect(() => {{
-    {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; }});
+    const ev = auth.lastEvent;
+    if (ev?.resource === '{map_key}' && String(ev.id) === page.params.id) {{
+      if (ev.event === 'delete') goto('/{schema_name}/{table_name}');
+      else {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ {rname}State.setItem(d); }});
+    }}
   }});
 {fk_effects}{can_edit}{extra_script}
 </script>
