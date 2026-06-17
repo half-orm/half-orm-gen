@@ -320,7 +320,8 @@ async def {handler_name}_update(
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "PUT", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in dict(data).items() if v is not None and (not in_fields or k in in_fields)}}
-    result = await {module_alias}.{class_name}({pk_field}=id).ho_aupdate(**payload)
+    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "PUT", _get_roles(request), api_excluded)
+    result = await {module_alias}.{class_name}({pk_field}=id).ho_aupdate(*(authorized or ['*']), **payload)
     if not result:
         raise HTTPException(status_code=404)
     return result[0]
