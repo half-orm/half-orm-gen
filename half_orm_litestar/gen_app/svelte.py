@@ -72,7 +72,7 @@ export default defineConfig({{
   plugins: [sveltekit()],
   server: {{
     proxy: {{
-      '{version_prefix}': 'http://localhost:8000',
+      '{version_prefix}': {{ target: 'http://localhost:8000', ws: true }},
     }}
   }}
 }});
@@ -132,11 +132,14 @@ _APP_CSS = """\
 
 def _auth_store(version_prefix: str) -> str:
     return f"""\
+export type WsEvent = {{ event: 'create' | 'update' | 'delete'; resource: string; id: unknown }};
+
 class AuthState {{
-    token  = $state<string | null>(
+    token     = $state<string | null>(
         typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
     );
-    access = $state<Record<string, any>>({{}});
+    access    = $state<Record<string, any>>({{}});
+    lastEvent = $state<WsEvent | null>(null);
 
     login(t: string) {{
         sessionStorage.setItem('ho_token', t);
@@ -161,12 +164,24 @@ class AuthState {{
             this.access = {{}};
         }}
     }}
+
+    _connectWs() {{
+        const base = (import.meta.env.VITE_WS_BASE ?? '').replace(/^http/, 'ws')
+                     || `${{window.location.protocol === 'https:' ? 'wss' : 'ws'}}://${{window.location.host}}`;
+        const ws = new WebSocket(`${{base}}{version_prefix}/ws`);
+        ws.onmessage = (e) => {{
+            try {{ this.lastEvent = JSON.parse(e.data) as WsEvent; }} catch {{}}
+        }};
+        ws.onclose = () => {{ setTimeout(() => this._connectWs(), 2000); }};
+        ws.onerror = () => ws.close();
+    }}
 }}
 
 export const auth = new AuthState();
 
 if (typeof window !== 'undefined') {{
     auth._fetchAccess();
+    auth._connectWs();
 }}
 """
 
@@ -453,13 +468,20 @@ def _list_component(
   import {{ {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
   import type {{ {iname}Out }} from '$lib/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
+  import {{ untrack }} from 'svelte';
 {goto_import}
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
   let items = $state<{iname}Out[]>([]);
 
-  $effect(() => {{
+  function _fetchItems() {{
     {rname}Api.list(filters).then(r => r.json()).then(d => {{ items = d; }});
+  }}
+
+  $effect(() => {{ _fetchItems(); }});
+
+  $effect(() => {{
+    if (auth.lastEvent?.resource === '{map_key}') untrack(_fetchItems);
   }});
 {can_create}{can_delete}{delete_fn}
 </script>
@@ -848,8 +870,11 @@ class SvelteAppGenerator(StoreGenerator):
         stores_dir = output_dir / 'src' / 'lib' / 'stores'
         SvelteGenerator().generate(classes, api_version, stores_dir)
 
-        # --- auth store ---
+        # --- auth store + WS env var ---
         self._write(output_dir / 'src' / 'lib' / 'auth.svelte.ts', _auth_store(version_prefix))
+        env_local = output_dir / '.env.local'
+        if not env_local.exists():
+            self._write(env_local, 'VITE_WS_BASE=http://localhost:8000\n')
 
         # Pass 1: identify all resources that expose CRUD_ACCESS
         crud_resources: set[tuple[str, str]] = set()

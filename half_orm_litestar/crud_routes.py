@@ -288,6 +288,7 @@ def generate_crud_routes(
         schema_name  = relation._schemaname.replace('.', '_')
         table_name   = relation.__name__.lower()
         base_path    = f'{version_prefix}/{schema_name}/{table_name}'
+        resource     = f'{schema_name}/{table_name}'
         handler_prefix = f'_crud_{module_alias}'
         pk_info      = _simple_pk(relation)
 
@@ -360,6 +361,8 @@ def generate_crud_routes(
                     in_typedict=post_in_class,
                     out_typedict=out_class,
                     access_description=_access_description(crud_access, 'POST'),
+                    resource=resource,
+                    pk_field=pk_field,
                 ))
                 route_handlers.append(handler_name)
 
@@ -379,6 +382,7 @@ def generate_crud_routes(
                     in_typedict=put_in_class,
                     out_typedict=out_class,
                     access_description=_access_description(crud_access, 'PUT'),
+                    resource=resource,
                 ))
                 route_handlers.append(handler_name)
 
@@ -393,6 +397,7 @@ def generate_crud_routes(
                     module_alias=module_alias,
                     class_name=relation.__name__,
                     access_description=_access_description(crud_access, 'DELETE'),
+                    resource=resource,
                 ))
                 route_handlers.append(handler_name)
 
@@ -401,6 +406,12 @@ def generate_crud_routes(
         entry = _build_access_entry(crud_access, api_excluded, all_names, covered, module_str)
         if entry:
             access_map[map_key] = entry
+
+    # WebSocket push endpoint
+    if hasattr(templates, 'WS_HELPERS'):
+        blocks.append(templates.WS_HELPERS.format(version_prefix=version_prefix))
+        if getattr(templates, 'FRAMEWORK', 'litestar') == 'litestar':
+            route_handlers.append('_ws_handler')
 
     # /ho_roles endpoint — static list of all roles present in CRUD_ACCESS
     if roles:
