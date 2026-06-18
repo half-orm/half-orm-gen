@@ -268,6 +268,7 @@ def _proxy_conf(version_prefix: str) -> str:
 def _auth_service(version_prefix: str) -> str:
     return f"""\
 import {{ Injectable, signal }} from '@angular/core';
+import {{ Subject }} from 'rxjs';
 import {{ clearAllStates }} from './state-registry';
 
 export interface WsEvent {{
@@ -282,7 +283,7 @@ export class AuthService {{
     typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
   );
   readonly access     = signal<Record<string, any>>({{}});
-  readonly lastEvent  = signal<WsEvent | null>(null);
+  readonly wsEvent$   = new Subject<WsEvent>();
   readonly fetchedRoutes = new Set<string>();
 
   login(t: string): void {{
@@ -318,7 +319,7 @@ export class AuthService {{
     const host  = typeof window !== 'undefined' ? window.location.host : 'localhost:8000';
     const ws = new WebSocket(`${{proto}}://${{host}}{version_prefix}/ws`);
     ws.onmessage = (e) => {{
-      try {{ this.lastEvent.set(JSON.parse(e.data) as WsEvent); }} catch {{}}
+      try {{ this.wsEvent$.next(JSON.parse(e.data) as WsEvent); }} catch {{}}
     }};
     ws.onclose = () => {{ setTimeout(() => this.connectWs(), 2000); }};
     ws.onerror  = () => ws.close();
@@ -809,11 +810,12 @@ def _list_component(
         )
 
     ws_effect = (
-        f'\n    effect(() => {{\n'
-        f'      const ev = this.auth.lastEvent();\n'
-        f"      if (!ev || ev.resource !== '{map_key}') return;\n"
-        f'      if (ev.event === \'delete\') this.store.removeItem(String(ev.id));\n'
-        f'      else this.store.get(String(ev.id) as any).subscribe();\n'
+        f'\n    this.auth.wsEvent$.pipe(\n'
+        f"      filter(ev => ev.resource === '{map_key}'),\n"
+        f'      takeUntilDestroyed(),\n'
+        f'    ).subscribe(ev => {{\n'
+        f'      if (ev.event === \'delete\') untracked(() => this.store.removeItem(String(ev.id)));\n'
+        f'      else untracked(() => this.store.get(String(ev.id) as any).subscribe());\n'
         f'    }});'
         if pk_field else ''
     )
@@ -823,7 +825,9 @@ def _list_component(
         imports_list = "RouterLink"
 
     return f"""\
-import {{ Component, computed, effect, inject, Input }} from '@angular/core';
+import {{ Component, computed, effect, inject, Input, untracked }} from '@angular/core';
+import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
+import {{ filter }} from 'rxjs';
 import {{ RouterLink }} from '@angular/router';
 import {{ Router }} from '@angular/router';
 import {{ {iname}Store }} from '../../../stores/{schema_name}_{table_name}.store';
@@ -1116,12 +1120,13 @@ def _detail_component(
         )
 
     ws_effect = (
-        f'\n    effect(() => {{\n'
-        f'      const ev = this.auth.lastEvent();\n'
-        f"      if (!ev || ev.resource !== '{map_key}' || String(ev.id) !== this.id) return;\n"
+        f'\n    this.auth.wsEvent$.pipe(\n'
+        f"      filter(ev => ev.resource === '{map_key}' && String(ev.id) === this.id),\n"
+        f'      takeUntilDestroyed(),\n'
+        f'    ).subscribe(ev => {{\n'
         f'      if (ev.event === \'delete\') void this.router.navigate([\'/{schema_name}/{table_name}\']);\n'
-        f'      else this.store.get(this.id as any).subscribe(d => {{ if (d) this.item.set(d); }});\n'
-        f'    }}, {{ allowSignalWrites: true }});'
+        f'      else untracked(() => this.store.get(this.id as any).subscribe(d => {{ if (d) this.item.set(d); }}));\n'
+        f'    }});'
     )
 
     fk_fetch_effects = ''
@@ -1137,7 +1142,9 @@ def _detail_component(
         )
 
     return f"""\
-import {{ Component, computed, effect, inject, OnInit, signal }} from '@angular/core';
+import {{ Component, computed, effect, inject, signal, untracked }} from '@angular/core';
+import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
+import {{ filter }} from 'rxjs';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ {iname}Store }} from '../../../stores/{schema_name}_{table_name}.store';
