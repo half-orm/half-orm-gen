@@ -188,8 +188,12 @@ class SvelteGenerator(StoreGenerator):
                         f"    getUrl:  (id: {pk_ts_type}) => `${{_BASE}}/${{id}}`,"
                     )
                     api_entries.append(
-                        f"    get:     (id: {pk_ts_type}) =>\n"
-                        f"                 _fetch(`${{_BASE}}/${{id}}`, {{ headers: _hdrs() }}),"
+                        f"    get:     (id: {pk_ts_type}) => {{\n"
+                        f"                 const _c = {rname}State.byId.get(String(id));\n"
+                        f"                 if (_c) return Promise.resolve(new Response(JSON.stringify(_c),\n"
+                        f"                     {{ status: 200, headers: {{ 'Content-Type': 'application/json' }} }}));\n"
+                        f"                 return _fetch(`${{_BASE}}/${{id}}`, {{ headers: _hdrs() }});\n"
+                        f"             }},"
                     )
             if has_post:
                 api_entries.append(
