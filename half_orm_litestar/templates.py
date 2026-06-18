@@ -391,8 +391,38 @@ async def {handler_name}_delete(
     request: Request,
     id: {pk_py_type},
 ) -> None:
+    await _ws_broadcast_cascade(
+        {module_alias}.{class_name}({pk_field}=id), "{resource}", id
+    )
     result = await {module_alias}.{class_name}({pk_field}=id).ho_adelete('*')
     if not result:
         raise HTTPException(status_code=404)
     await _manager.broadcast({{"event": "delete", "resource": "{resource}", "id": id}})
+"""
+
+WS_CASCADE_HELPER = """
+_WS_RMAP: dict = {{
+{resource_entries}
+}}
+
+async def _ws_broadcast_cascade(inst, resource: str, pk_val, _seen: set | None = None) -> None:
+    if _seen is None:
+        _seen = set()
+    _key = (resource, str(pk_val))
+    if _key in _seen:
+        return
+    _seen.add(_key)
+    for _fk in inst._ho_fkeys.values():
+        if not _fk.is_reverse or len(_fk.fk_names) != 1:
+            continue
+        _fk_field = _fk.fk_names[0]
+        _fqtn     = _fk.remote['fqtn']
+        _r        = f"{{_fqtn[0].replace('.', '_')}}/{{_fqtn[1]}}"
+        if _r not in _WS_RMAP:
+            continue
+        _cls, _pk = _WS_RMAP[_r]
+        for _row in await _cls(**{{_fk_field: pk_val}}).ho_aselect(_pk):
+            _rid = _row[_pk]
+            await _ws_broadcast_cascade(_cls(**{{_pk: _rid}}), _r, _rid, _seen)
+            await _manager.broadcast({{"event": "delete", "resource": _r, "id": _rid}})
 """

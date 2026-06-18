@@ -253,10 +253,12 @@ def generate_crud_routes(
     if templates is None:
         templates = T
 
-    blocks: list[str] = []
+    decl_blocks: list[str] = []   # imports + typedicts
+    handler_blocks: list[str] = [] # route handlers
     route_handlers: list[str] = []
     access_map: dict = {}
     roles: set[str] = set()
+    crud_resource_map: list[tuple] = []  # (resource, module_alias, class_name, pk_field)
 
     version_prefix = f'/v{api_version}' if api_version is not None else ''
 
@@ -296,7 +298,7 @@ def generate_crud_routes(
         all_fields   = getattr(instance, '_ho_fields', {})
         all_names    = list(all_fields.keys())
 
-        blocks.append(templates.CRUD_MODULE_IMPORT.format(
+        decl_blocks.append(templates.CRUD_MODULE_IMPORT.format(
             schema=schema,
             module_name=module_name,
             module_alias=module_alias,
@@ -307,7 +309,7 @@ def generate_crud_routes(
         out_names  = _gen_out_fields(crud_access, 'GET', api_excluded, all_names)
         if not out_names:
             out_names = [f for f in all_names if f not in api_excluded]
-        blocks.append('\n' + templates.typedict_block(out_class, out_names, all_fields) + '\n')
+        decl_blocks.append('\n' + templates.typedict_block(out_class, out_names, all_fields) + '\n')
 
         filter_params, filter_dict = _filter_params_str(all_fields)
         get_desc = _access_description(crud_access, 'GET')
@@ -315,7 +317,7 @@ def generate_crud_routes(
         # GET list
         if (module_str, 'GET') not in covered and 'GET' in crud_access:
             handler_name = f'{handler_prefix}_list'
-            blocks.append(templates.CRUD_GET_LIST.format(
+            handler_blocks.append(templates.CRUD_GET_LIST.format(
                 path=base_path,
                 handler_name=handler_name,
                 filter_params=filter_params,
@@ -331,7 +333,7 @@ def generate_crud_routes(
         if pk_info and (module_str, 'GET') not in covered and 'GET' in crud_access:
             pk_field, pk_path_type, pk_py_type = pk_info
             handler_name = f'{handler_prefix}_get'
-            blocks.append(templates.CRUD_GET_ONE.format(
+            handler_blocks.append(templates.CRUD_GET_ONE.format(
                 path=base_path,
                 handler_name=handler_prefix,
                 pk_field=pk_field,
@@ -351,9 +353,9 @@ def generate_crud_routes(
             if (module_str, 'POST') not in covered and 'POST' in crud_access:
                 post_in_class = f'_In_{module_alias}_post'
                 post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names)
-                blocks.append('\n' + templates.typedict_block(post_in_class, post_in_names, all_fields) + '\n')
+                decl_blocks.append('\n' + templates.typedict_block(post_in_class, post_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_create'
-                blocks.append(templates.CRUD_POST.format(
+                handler_blocks.append(templates.CRUD_POST.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     module_alias=module_alias,
@@ -369,9 +371,9 @@ def generate_crud_routes(
             if (module_str, 'PUT') not in covered and 'PUT' in crud_access:
                 put_in_class = f'_In_{module_alias}_put'
                 put_in_names = _gen_in_fields(crud_access, 'PUT', pk_field, api_excluded, all_names)
-                blocks.append('\n' + templates.typedict_block(put_in_class, put_in_names, all_fields) + '\n')
+                decl_blocks.append('\n' + templates.typedict_block(put_in_class, put_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_update'
-                blocks.append(templates.CRUD_PUT.format(
+                handler_blocks.append(templates.CRUD_PUT.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     pk_field=pk_field,
@@ -388,7 +390,7 @@ def generate_crud_routes(
 
             if (module_str, 'DELETE') not in covered and 'DELETE' in crud_access:
                 handler_name = f'{handler_prefix}_delete'
-                blocks.append(templates.CRUD_DELETE.format(
+                handler_blocks.append(templates.CRUD_DELETE.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     pk_field=pk_field,
@@ -400,6 +402,7 @@ def generate_crud_routes(
                     resource=resource,
                 ))
                 route_handlers.append(handler_name)
+                crud_resource_map.append((resource, module_alias, relation.__name__, pk_field))
 
         # Accumulate access map entry
         map_key = f'{schema_name}/{table_name}'
@@ -407,11 +410,26 @@ def generate_crud_routes(
         if entry:
             access_map[map_key] = entry
 
-    # WebSocket push endpoint
+    # Assemble: decl_blocks first, then WS helpers, then route handlers
+    blocks = decl_blocks
+
+    # WebSocket push endpoint (defines _manager)
     if hasattr(templates, 'WS_HELPERS'):
         blocks.append(templates.WS_HELPERS.format(version_prefix=version_prefix))
         if getattr(templates, 'FRAMEWORK', 'litestar') == 'litestar':
             route_handlers.append('_ws_handler')
+
+    # Cascade broadcast helper (uses _manager, must come after WS_HELPERS)
+    if hasattr(templates, 'WS_CASCADE_HELPER') and crud_resource_map:
+        resource_entries = '\n'.join(
+            f'    "{res}": ({mod}.{cls}, "{pk}"),'
+            for res, mod, cls, pk in crud_resource_map
+        )
+        blocks.append(templates.WS_CASCADE_HELPER.format(
+            resource_entries=resource_entries,
+        ))
+
+    blocks.extend(handler_blocks)
 
     # /ho_roles endpoint — static list of all roles present in CRUD_ACCESS
     if roles:

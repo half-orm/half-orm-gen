@@ -477,6 +477,7 @@ def _list_component(
   import {{ {rname}State, {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
   import type {{ {iname}Out }} from '$lib/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
+  import {{ untrack }} from 'svelte';
 {goto_import}
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
@@ -504,11 +505,11 @@ def _list_component(
     const ev = auth.lastEvent;
     if (!ev || ev.resource !== '{map_key}') return;
     if (ev.event === 'delete') {{
-      {rname}State.removeItem(String(ev.id));
+      untrack(() => {rname}State.removeItem(String(ev.id)));
     }} else {{
-      {rname}Api.get(ev.id)
+      untrack(() => {rname}Api.get(ev.id)
         .then(r => r.ok ? r.json() : null)
-        .then(d => {{ if (d) {rname}State.setItem(d); }});
+        .then(d => {{ if (d) {rname}State.setItem(d); }}));
     }}
   }});
 {can_create}{can_delete}{delete_fn}
@@ -793,7 +794,8 @@ def _detail_page(
   import type {{ {iname}Out{put_in_import} }} from '$lib/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
   import {{ page }} from '$app/state';
-  import {{ auth }} from '$lib/auth.svelte.ts';{fk_imports}{rev_imports}
+  import {{ auth }} from '$lib/auth.svelte.ts';
+  import {{ untrack }} from 'svelte';{fk_imports}{rev_imports}
 
   let item      = $state<{iname}Out | null>({rname}State.byId.get(page.params.id) ?? null);
   let _lastToken = auth.token;
@@ -810,8 +812,8 @@ def _detail_page(
     const ev = auth.lastEvent;
     if (ev?.resource === '{map_key}' && String(ev.id) === page.params.id) {{
       if (ev.event === 'delete') goto('/{schema_name}/{table_name}');
-      else {rname}Api.get(page.params.id).then(r => r.ok ? r.json() : null)
-                .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }});
+      else untrack(() => {rname}Api.get(page.params.id).then(r => r.ok ? r.json() : null)
+                .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }}));
     }}
   }});
 {fk_effects}{can_edit}{extra_script}
