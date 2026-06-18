@@ -8,6 +8,7 @@ by an @api_* decorated method.
 
 import importlib
 import json
+import pprint
 from typing import Iterable, Tuple, Type
 
 from half_orm.relation import Relation
@@ -257,6 +258,7 @@ def generate_crud_routes(
     handler_blocks: list[str] = [] # route handlers
     route_handlers: list[str] = []
     access_map: dict = {}
+    ho_dev_map: dict = {}
     roles: set[str] = {'ho_dev'}
     crud_resource_map: list[tuple] = []  # (resource, module_alias, class_name, pk_field)
 
@@ -410,6 +412,23 @@ def generate_crud_routes(
         if entry:
             access_map[map_key] = entry
 
+        # ho_dev_map: full access entry for every generated resource
+        out_all = [f for f in all_names if f not in api_excluded]
+        ho_dev_entry: dict = {}
+        if 'GET' in crud_access and (module_str, 'GET') not in covered:
+            ho_dev_entry['GET'] = {'out': out_all}
+        if is_table and pk_info:
+            _pk = pk_info[0]
+            in_all = [f for f in all_names if f not in api_excluded and f != _pk]
+            if 'POST' in crud_access and (module_str, 'POST') not in covered:
+                ho_dev_entry['POST'] = {'in': in_all, 'out': out_all}
+            if 'PUT' in crud_access and (module_str, 'PUT') not in covered:
+                ho_dev_entry['PUT'] = {'in': in_all, 'out': out_all}
+            if 'DELETE' in crud_access and (module_str, 'DELETE') not in covered:
+                ho_dev_entry['DELETE'] = True
+        if ho_dev_entry:
+            ho_dev_map[map_key] = ho_dev_entry
+
     # Assemble: decl_blocks first, then WS helpers, then route handlers
     blocks = decl_blocks
 
@@ -442,7 +461,8 @@ def generate_crud_routes(
         route_handlers.append('_crud_roles_list')
 
     # /ho_access endpoint — filtered by the caller's authorized_roles
-    if access_map:
+    if ho_dev_map or access_map:
+        blocks.append(f'\n_HO_DEV_MAP = {pprint.pformat(ho_dev_map)}\n')
         json_str = json.dumps(access_map, indent=4)
         blocks.append(
             templates.HO_ACCESS_ROUTE.format(
