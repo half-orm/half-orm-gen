@@ -110,8 +110,10 @@ def add_commands(main_group):
             click.echo('\nTo run:  uvicorn api.app:application --reload')
 
     @litestar.command('frontend')
-    @click.option('--svelte', 'framework', flag_value='svelte', default=True,
-                  help='Generate a SvelteKit 5 application (default).')
+    @click.option('--svelte',   'framework', flag_value='svelte',
+                  help='Generate a SvelteKit 5 application.')
+    @click.option('--angular',  'framework', flag_value='angular',
+                  help='Generate an Angular 22 application (signal-based).')
     @click.option('--output', default=None,
                   help='Output directory (default: frontend/<framework>).')
     def frontend(framework, output):
@@ -145,16 +147,24 @@ def add_commands(main_group):
         api_version = _read_api_version()
         output_dir = Path(output) if output else Path('frontend') / framework
 
+        if not framework:
+            click.echo('Error: specify --svelte or --angular.', err=True)
+            sys.exit(1)
         if framework == 'svelte':
             from half_orm_litestar.gen_app.svelte import SvelteAppGenerator
             generator = SvelteAppGenerator()
+        elif framework == 'angular':
+            from half_orm_litestar.gen_app.angular import AngularAppGenerator
+            generator = AngularAppGenerator()
         else:
             click.echo(f'Error: unknown framework "{framework}".', err=True)
-            import sys; sys.exit(1)
+            sys.exit(1)
 
         from half_orm_litestar.gen_app import GenApp
         click.echo(f'Generating {framework} application → {output_dir}')
         GenApp(repo, generator=generator, output_dir=output_dir, api_version=api_version)
         if framework == 'svelte':
             click.echo(f'\nTo run:  cd {output_dir} && npm install && npm run dev')
+        elif framework == 'angular':
+            click.echo(f'\nTo run:  cd {output_dir} && npm install && npm start')
 
