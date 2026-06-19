@@ -702,6 +702,26 @@ def _is_required(f: str, all_fields: dict) -> bool:
     return bool(fo and fo.is_not_null() and fo.has_default_value is None)
 
 
+def _input_type(f: str, all_fields: dict) -> str:
+    if f not in all_fields:
+        return 'text'
+    fo = all_fields[f]
+    t = _py_type_str(fo.py_type)
+    if t == 'datetime.datetime':
+        return 'datetime-local'
+    if t == 'datetime.date':
+        return 'date'
+    try:
+        sql = fo._Field__sql_type.lower()
+        if 'timestamp' in sql:
+            return 'datetime-local'
+        if sql == 'date':
+            return 'date'
+    except AttributeError:
+        pass
+    return 'text'
+
+
 def _text_fields_js(field_names: list, all_fields: dict) -> str:
     text = [f for f in field_names if _is_text_field(f, all_fields)]
     return ', '.join(f"'{f}'" for f in text)
@@ -715,6 +735,7 @@ def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form') -> s
     req      = _is_required(f, all_fields)
     req_attr = ' required' if req else ''
     req_mark = ' <span class="text-red-500">*</span>' if req else ''
+    itype    = _input_type(f, all_fields)
     if _is_bool_field(f, all_fields):
         return (
             f'<div class="flex items-center gap-2">\n'
@@ -726,7 +747,7 @@ def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form') -> s
     return (
         f'<div>\n'
         f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
-        f'      <input id="f_{f}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
+        f'      <input id="f_{f}" type="{itype}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
         f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
         f'    </div>'
     )
@@ -842,11 +863,13 @@ def _detail_page(
             f'{f}: false' if _is_bool_field(f, all_fields) else f'{f}: ""'
             for f in put_in_names
         )
-        effect_body = '\n        '.join(
-            f'form.{f} = Boolean(item.{f});' if _is_bool_field(f, all_fields)
-            else f'form.{f} = (item.{f} as string) ?? "";'
-            for f in put_in_names
-        )
+        def _effect_assign(f: str) -> str:
+            if _is_bool_field(f, all_fields):
+                return f'form.{f} = Boolean(item.{f});'
+            if _input_type(f, all_fields) == 'datetime-local':
+                return f'form.{f} = item.{f} ? String(item.{f}).slice(0, 16) : "";'
+            return f'form.{f} = (item.{f} as string) ?? "";'
+        effect_body = '\n        '.join(_effect_assign(f) for f in put_in_names)
         put_text_fields_js = _text_fields_js(put_in_names, all_fields)
         extra_script = (
             f'\n  let editing = $state(false);\n'
