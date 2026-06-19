@@ -692,7 +692,7 @@ def _store(
         lines.append('    const m = new Map(this.byId());')
         lines.append(f'    data.forEach(i => m.set(String(i.{pk_field}), i));')
         lines.append('    this.byId.set(m);')
-        lines.append('    this.items.set(data);')
+        lines.append('    this.items.set([...m.values()]);')
         lines.append('  }')
         lines.append('')
         lines.append(f'  setItem(item: {iname}Out): void {{')
@@ -713,6 +713,7 @@ def _store(
         lines.append('  clear(): void { this.items.set([]); this.byId.set(new Map()); }')
     else:
         lines.append(f'  setItems(data: {iname}Out[]): void {{ this.items.set(data); }}')
+        lines.append(f'  mergeItems(data: {iname}Out[]): void {{ this.items.set(data); }}')
         lines.append('  clear(): void { this.items.set([]); }')
 
     lines.append('}')
@@ -727,24 +728,33 @@ def _store(
 def _list_component(
     schema_name: str, table_name: str,
     iname: str, map_key: str,
-    out_names: list, pk_field: str | None,
+    out_names: list, pk_field: str | None, pk_ts_type: str,
     has_post: bool, has_del: bool,
     fk_deps: list,
 ) -> str:
     title  = _title(schema_name, table_name)
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
-    # Store imports  (pages/{schema}/{table}/ → ../../../stores/)
+    # Store imports — deduplicated: skip self-referential FKs and multi-FK to same table
+    _seen: set[str] = {f'{schema_name}_{table_name}'}
+    _unique_fk_deps = []
+    for dep in fk_deps:
+        _, rs, rt, _ = dep
+        stem = f'{rs}_{rt}'
+        if stem not in _seen:
+            _seen.add(stem)
+            _unique_fk_deps.append(dep)
+
     fk_imports = '\n'.join(
         f"import {{ {_cname(rs, rt)}Store }} from '../../../stores/{rs}_{rt}.store';"
-        for _, rs, rt, _ in fk_deps
+        for _, rs, rt, _ in _unique_fk_deps
     )
     if fk_imports:
         fk_imports = '\n' + fk_imports
 
     fk_injects = '\n'.join(
         f'  private {_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store = inject({_cname(rs, rt)}Store);'
-        for _, rs, rt, _ in fk_deps
+        for _, rs, rt, _ in _unique_fk_deps
     )
     if fk_injects:
         fk_injects = '\n' + fk_injects
@@ -801,7 +811,7 @@ def _list_component(
     delete_fn = ''
     if has_del and pk_field:
         delete_fn = (
-            f'\n  handleDelete(id: string, e: Event): void {{\n'
+            f'\n  handleDelete(id: {pk_ts_type}, e: Event): void {{\n'
             f'    e.stopPropagation();\n'
             f"    if (confirm('Delete this item?')) {{\n"
             f'      this.store.remove(id).subscribe(() => this.store.removeItem(String(id)));\n'
@@ -823,6 +833,19 @@ def _list_component(
     imports_list = "RouterLink, NgFor"
     if pk_field:
         imports_list = "RouterLink"
+
+    if pk_field:
+        display_items_filter = (
+            'Array.from(this.store.byId().values()).filter(item =>\n'
+            '        Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v))\n'
+            '      )'
+        )
+    else:
+        display_items_filter = (
+            'this.store.items().filter(item =>\n'
+            '        Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v))\n'
+            '      )'
+        )
 
     return f"""\
 import {{ Component, computed, effect, inject, Input, untracked }} from '@angular/core';
@@ -874,9 +897,7 @@ export class {iname}ListComponent {{
   readonly displayItems = computed(() => {{
     const hasFilters = Object.keys(this.filters).length > 0;
     if (hasFilters) {{
-      return Array.from(this.store.byId().values()).filter(item =>
-        Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v))
-      );
+      return {display_items_filter};
     }}
     return this.store.items();
   }});
@@ -972,17 +993,26 @@ def _detail_component(
     title   = _title(schema_name, table_name)
     fk_map  = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
-    # FK store imports + injects
+    # FK store imports + injects — deduplicated: skip self-ref and multi-FK to same table
+    _seen: set[str] = {f'{schema_name}_{table_name}'}
+    _unique_fk_deps = []
+    for dep in fk_deps:
+        _, rs, rt, _ = dep
+        stem = f'{rs}_{rt}'
+        if stem not in _seen:
+            _seen.add(stem)
+            _unique_fk_deps.append(dep)
+
     fk_store_imports = '\n'.join(
         f"import {{ {_cname(rs, rt)}Store }} from '../../../stores/{rs}_{rt}.store';"
-        for _, rs, rt, _ in fk_deps
+        for _, rs, rt, _ in _unique_fk_deps
     )
     if fk_store_imports:
         fk_store_imports = '\n' + fk_store_imports
 
     fk_injects = '\n'.join(
         f'  protected {_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store = inject({_cname(rs, rt)}Store);'
-        for _, rs, rt, _ in fk_deps
+        for _, rs, rt, _ in _unique_fk_deps
     )
     if fk_injects:
         fk_injects = '\n' + fk_injects
@@ -1291,18 +1321,16 @@ class AngularAppGenerator(StoreGenerator):
                 mod = importlib.import_module(module_str)
             except ImportError:
                 continue
-            if not getattr(mod, 'CRUD_ACCESS', None):
-                continue
             schema_name = relation._schemaname.replace('.', '_')
             table_name  = relation.__name__.lower()
             crud_resources.add((schema_name, table_name))
-            crud_resources_map[(schema_name, table_name)] = mod.CRUD_ACCESS
+            crud_resources_map[(schema_name, table_name)] = getattr(mod, 'CRUD_ACCESS', {})
             raw.append((relation, mod))
 
         # Pass 2 — per-resource metadata
         resources = []
         for relation, mod in raw:
-            crud_access  = mod.CRUD_ACCESS
+            crud_access  = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
             api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
             schema_name  = relation._schemaname.replace('.', '_')
             table_name   = relation.__name__.lower()
@@ -1359,10 +1387,11 @@ class AngularAppGenerator(StoreGenerator):
 
         # --- app routes + app component ---
         route_meta = [
-            (r[0], r[1], r[2], r[10], r[11], r[8])  # sn, tn, mk, has_post, has_put, pk_info
+            (r[0], r[1], r[2], r[10], r[11],
+             bool(r[7]) and 'GET' in crud_resources_map.get((r[0], r[1]), {}))
             for r in resources
         ]
-        first_route = f'/{resources[0][0]}/{resources[0][1]}' if resources else '/'
+        first_route = f'/{resources[0][0]}/{resources[0][1]}' if resources else '/access'
         self._write(app_dir / 'app.routes.ts',
                     _app_routes(route_meta, first_route))
         self._write(app_dir / 'app.component.ts',
@@ -1385,7 +1414,7 @@ class AngularAppGenerator(StoreGenerator):
 
             self._write(res_dir / 'list.component.ts',
                         _list_component(schema_name, table_name, iname, map_key,
-                                        out_names, pk_field, has_post, has_del, fk_deps))
+                                        out_names, pk_field, pk_ts_type, has_post, has_del, fk_deps))
 
             if has_post:
                 self._write(res_dir / 'create.component.ts',
