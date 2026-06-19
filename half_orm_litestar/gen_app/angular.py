@@ -759,12 +759,34 @@ def _list_component(
     if fk_injects:
         fk_injects = '\n' + fk_injects
 
-    # Table headers
+    # Table headers (sortable)
     th_cols = '\n            '.join(
-        f'<th class="px-4 py-2 text-left text-sm font-semibold text-gray-600">{f}</th>'
+        f'<th (click)="sortBy(\'{f}\')"'
+        f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600'
+        f' cursor-pointer select-none hover:bg-gray-200">'
+        f'{f} {{{{ sortField() === \'{f}\' ? (sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
         for f in out_names
     )
     action_th = '<th class="px-4 py-2 w-20"></th>' if has_del and pk_field else ''
+
+    # Filter row (one input per column, hidden when embedded)
+    filter_inputs = '\n              '.join(
+        f'<th class="px-2 py-1">'
+        f'<input [value]="localFilters()[\'{f}\'] || \'\'"'
+        f' (input)="setFilter(\'{f}\', $any($event).target.value)"'
+        f' placeholder="…"'
+        f' class="w-full text-xs border rounded px-2 py-1" /></th>'
+        for f in out_names
+    )
+    action_filter_th = '<th></th>' if has_del and pk_field else ''
+    filter_row = (
+        f'\n          @if (!embedded) {{\n'
+        f'          <tr class="bg-white border-b">\n'
+        f'              {filter_inputs}\n'
+        f'              {action_filter_th}\n'
+        f'          </tr>\n'
+        f'          }}'
+    )
 
     def _td(f: str) -> str:
         if f in fk_map:
@@ -838,23 +860,44 @@ def _list_component(
     needs_router_link = has_post or bool(fk_deps)
 
     if pk_field:
-        display_items_filter = (
+        _fk_items_src = (
             'Array.from(this.store.byId().values()).filter(item =>\n'
-            '        Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v))\n'
-            '      )'
+            '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
         )
     else:
-        display_items_filter = (
+        _fk_items_src = (
             'this.store.items().filter(item =>\n'
-            '        Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v))\n'
-            '      )'
+            '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
         )
+
+    displayItems_block = f"""\
+  readonly displayItems = computed(() => {{
+    const hasFilters = Object.keys(this.filters).length > 0;
+    let items: {iname}Out[] = hasFilters
+      ? {_fk_items_src}
+      : this.store.items();
+    const lf = this.localFilters();
+    if (Object.values(lf).some(v => v))
+      items = items.filter(item =>
+        Object.entries(lf).every(([k, v]) =>
+          !v || String((item as any)[k] ?? '').toLowerCase().includes(v.toLowerCase())));
+    const sf = this.sortField();
+    if (sf) {{
+      const asc = this.sortAsc();
+      items = [...items].sort((a, b) => {{
+        const av = String((a as any)[sf] ?? '');
+        const bv = String((b as any)[sf] ?? '');
+        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      }});
+    }}
+    return items;
+  }});"""
 
     router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
     router_link_imp = 'RouterLink' if needs_router_link else ''
 
     return f"""\
-import {{ Component, computed, effect, inject, Input, untracked }} from '@angular/core';
+import {{ Component, computed, effect, inject, Input, signal, untracked }} from '@angular/core';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 {router_link_es}import {{ Router }} from '@angular/router';
@@ -878,7 +921,7 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
           <tr>
             {th_cols}
             {action_th}
-          </tr>
+          </tr>{filter_row}
         </thead>
         <tbody>
           @for (item of displayItems(); track $index) {{
@@ -898,14 +941,12 @@ export class {iname}ListComponent {{
 
   @Input() filters: Partial<{iname}Out> = {{}};
   @Input() embedded = false;
+
+  localFilters = signal<Record<string, string>>({{}});
+  sortField    = signal<string | null>(null);
+  sortAsc      = signal(true);
 {can_create}{can_delete}
-  readonly displayItems = computed(() => {{
-    const hasFilters = Object.keys(this.filters).length > 0;
-    if (hasFilters) {{
-      return {display_items_filter};
-    }}
-    return this.store.items();
-  }});
+{displayItems_block}
 
   constructor() {{
     effect(() => {{
@@ -916,6 +957,14 @@ export class {iname}ListComponent {{
       }}
       this.store.list(this.filters);
     }});{ws_effect}
+  }}
+
+  sortBy(f: string): void {{
+    if (this.sortField() === f) this.sortAsc.set(!this.sortAsc());
+    else {{ this.sortField.set(f); this.sortAsc.set(true); }}
+  }}
+  setFilter(f: string, v: string): void {{
+    this.localFilters.set({{ ...this.localFilters(), [f]: v }});
   }}{delete_fn}
 }}
 """
