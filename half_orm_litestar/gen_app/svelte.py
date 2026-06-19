@@ -345,7 +345,7 @@ def _access_page(version_prefix: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _title(schema_name: str, table_name: str) -> str:
-    return ' '.join(p.capitalize() for p in (schema_name + '_' + table_name).split('_'))
+    return f'{schema_name}.{table_name}'
 
 
 def _layout(resources: list) -> str:

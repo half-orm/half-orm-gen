@@ -35,7 +35,7 @@ def _selector(schema_name: str, table_name: str, suffix: str) -> str:
 
 
 def _title(schema_name: str, table_name: str) -> str:
-    return ' '.join(p.capitalize() for p in f'{schema_name}_{table_name}'.split('_'))
+    return f'{schema_name}.{table_name}'
 
 
 def _store_import_path(schema_name: str, table_name: str, depth: int) -> str:
