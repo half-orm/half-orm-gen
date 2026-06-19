@@ -457,13 +457,13 @@ def _list_component(
                 f'<a href="/{rs}/{rt}/{{item.{f}}}"'
                 f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/{rs}/{rt}/${{item.{f}}}`); }}}}'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
-                f' title="{{String(item.{f})}}">{{item.{f}}}</a>'
+                f' title="{{String(item.{f})}}">{{truncUuid(item.{f})}}</a>'
                 f'</td>'
             )
         return (
             f'<td class="px-4 py-2 text-sm">'
             f'<div class="truncate max-w-xs" title="{{String(item.{f} ?? \'\')}}">'
-            f'{{item.{f} ?? ""}}</div></td>'
+            f'{{truncUuid(item.{f})}}</div></td>'
         )
 
     td_cols = '\n          '.join(_td(f) for f in out_names)
@@ -595,6 +595,11 @@ def _list_component(
   }});
 """.rstrip()}
 {can_create}{can_delete}{delete_fn}
+  function truncUuid(v: unknown): string {{
+    const s = String(v ?? '');
+    return /^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$/i.test(s)
+      ? s.slice(0, 8) + '…' : s;
+  }}
 </script>
 
 {{#if !embedded}}

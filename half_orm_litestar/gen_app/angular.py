@@ -795,12 +795,12 @@ def _list_component(
                 f'<td class="px-4 py-2 text-sm">'
                 f'<a [routerLink]="[\'/{rs}/{rt}\', item.{f}]" (click)="$event.stopPropagation()"'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
-                f' [title]="item.{f}">{{{{ item.{f} }}}}</a>'
+                f' [title]="item.{f}">{{{{ truncUuid(item.{f}) }}}}</a>'
                 f'</td>'
             )
         return (
             f'<td class="px-4 py-2 text-sm">'
-            f'<div class="truncate max-w-xs" [title]="item.{f}">{{{{ item.{f} }}}}</div>'
+            f'<div class="truncate max-w-xs" [title]="item.{f}">{{{{ truncUuid(item.{f}) }}}}</div>'
             f'</td>'
         )
 
@@ -965,6 +965,11 @@ export class {iname}ListComponent {{
   }}
   setFilter(f: string, v: string): void {{
     this.localFilters.set({{ ...this.localFilters(), [f]: v }});
+  }}
+  truncUuid(v: unknown): string {{
+    const s = String(v ?? '');
+    return /^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$/i.test(s)
+      ? s.slice(0, 8) + '…' : s;
   }}{delete_fn}
 }}
 """
