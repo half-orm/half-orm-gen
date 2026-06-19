@@ -702,6 +702,14 @@ def _is_required(f: str, all_fields: dict) -> bool:
     return bool(fo and fo.is_not_null() and fo.has_default_value is None)
 
 
+def _is_server_generated(f: str, all_fields: dict) -> bool:
+    fo = all_fields.get(f)
+    if not fo or fo.has_default_value is None:
+        return False
+    dv = fo.has_default_value.lower().strip()
+    return dv.startswith('current') or dv in ('now()', 'clock_timestamp()')
+
+
 def _input_type(f: str, all_fields: dict) -> str:
     if f not in all_fields:
         return 'text'
@@ -760,15 +768,16 @@ def _new_page(
     optional_post_fields: frozenset = frozenset(),
 ) -> str:
     title = _title(schema_name, table_name)
+    visible_post = [f for f in post_in_names if not _is_server_generated(f, all_fields)]
     fields_init = ', '.join(
         f'{f}: false' if _is_bool_field(f, all_fields) else f'{f}: ""'
-        for f in post_in_names
+        for f in visible_post
     )
     optional_set_js = ', '.join(f"'{f}'" for f in optional_post_fields)
-    text_fields_js  = _text_fields_js(post_in_names, all_fields)
+    text_fields_js  = _text_fields_js(visible_post, all_fields)
     form_fields = '\n    '.join(
         _svelte_form_field(f, all_fields)
-        for f in post_in_names
+        for f in visible_post
     )
     return f"""\
 <script lang="ts">
@@ -776,7 +785,7 @@ def _new_page(
   import type {{ {iname}PostIn }} from '$lib/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
 
-  let form = $state<{iname}PostIn>({{ {fields_init} }});
+  let form = $state<Partial<{iname}PostIn>>({{ {fields_init} }});
   let error = $state('');
 
   const optionalFields = new Set([{optional_set_js}]);

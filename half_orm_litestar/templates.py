@@ -177,13 +177,15 @@ def _get_role_filter(crud_access, verb, authorized_roles):
 
 def _effective_out_fields(crud_access, verb, authorized_roles, api_excluded=None):
     api_excluded = api_excluded or []
+    if 'ho_dev' in authorized_roles:
+        return []  # ho_dev: unrestricted access to all fields
     role_map = crud_access.get(verb, {})
     get_map = crud_access.get('GET', {})
     fields = []
     for role in authorized_roles:
-        rv = role_map.get(role)
-        if rv is None:
-            return []
+        if role not in role_map:
+            return None  # role not authorized for this verb
+        rv = role_map[role]
         if isinstance(rv, dict):
             if 'out' in rv:
                 out = rv['out']
@@ -193,7 +195,7 @@ def _effective_out_fields(crud_access, verb, authorized_roles, api_excluded=None
         else:
             out = rv
         if out is None:
-            return []
+            return []  # role authorized, all fields
         fields.extend(out)
     return [f for f in dict.fromkeys(fields) if f not in api_excluded]
 
@@ -348,6 +350,8 @@ async def {handler_name}(
     filter_kwargs = {{{filter_dict}}}
     role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
     authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
+    if authorized is None:
+        return []
     if fields:
         projection = [f for f in fields if not authorized or f in authorized]
     else:
@@ -367,6 +371,8 @@ async def {handler_name}_get(
     roles = _get_roles(request)
     role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
     authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
+    if authorized is None:
+        raise HTTPException(status_code=403)
     rows = await {module_alias}.{class_name}({pk_instance_filter}, **role_filter).ho_aselect(*authorized)
     if not rows:
         raise HTTPException(status_code=404)
