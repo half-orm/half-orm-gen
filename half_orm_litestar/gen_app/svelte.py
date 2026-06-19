@@ -446,8 +446,8 @@ def _list_component(
             f'{f} {indicator}</th>'
         )
 
-    th_cols   = '\n        '.join(_sort_th(f) for f in out_names)
-    action_th = '<th class="px-4 py-2 w-20"></th>' if has_del and pk_field else ''
+    action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
+    th_cols   = (action_th + '\n        ' if action_th else '') + '\n        '.join(_sort_th(f) for f in out_names)
 
     filter_inputs = '\n        '.join(
         f'<th class="px-2 py-1">'
@@ -459,8 +459,8 @@ def _list_component(
     filter_row = (
         f'\n      {{#if !embedded}}\n'
         f'      <tr class="bg-white border-b">\n'
-        f'        {filter_inputs}\n'
         f'        {action_filter_th}\n'
+        f'        {filter_inputs}\n'
         f'      </tr>\n'
         f'      {{/if}}'
     )
@@ -502,7 +502,7 @@ def _list_component(
     action_td = ''
     if has_del and pk_field:
         action_td = (
-            f'<td class="px-4 py-2 text-right">\n'
+            f'<td class="px-2 py-2">\n'
             f'          {{#if canDelete}}\n'
             f'            <button'
             f' onclick={{(e) => {{ e.stopPropagation(); handleDelete({pk_item_expr}); }}}}'
@@ -650,8 +650,8 @@ def _list_component(
     <tbody>
       {{#each displayItems as item}}
         {tr_open}
-        {td_cols}
           {action_td}
+        {td_cols}
         </tr>
       {{/each}}
     </tbody>

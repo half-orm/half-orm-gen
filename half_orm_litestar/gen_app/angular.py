@@ -785,7 +785,7 @@ def _list_component(
         f'{f} {{{{ sortField() === \'{f}\' ? (sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
         for f in out_names
     )
-    action_th = '<th class="px-4 py-2 w-20"></th>' if has_del and pk_field else ''
+    action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
 
     # Filter row (one input per column, hidden when embedded)
     filter_inputs = '\n              '.join(
@@ -800,8 +800,8 @@ def _list_component(
     filter_row = (
         f'\n          @if (!embedded) {{\n'
         f'          <tr class="bg-white border-b">\n'
-        f'              {filter_inputs}\n'
         f'              {action_filter_th}\n'
+        f'              {filter_inputs}\n'
         f'          </tr>\n'
         f'          }}'
     )
@@ -836,7 +836,7 @@ def _list_component(
     action_td = ''
     if has_del and pk_field:
         action_td = (
-            '\n              <td class="px-4 py-2 text-right">\n'
+            '\n              <td class="px-2 py-2">\n'
             '                @if (canDelete()) {\n'
             f'                  <button (click)="handleDelete(item.{pk_field}, $event)"\n'
             '                          class="text-red-600 hover:underline text-sm">Delete</button>\n'
@@ -940,14 +940,15 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
       <table class="w-full border-collapse">
         <thead class="bg-gray-100">
           <tr>
-            {th_cols}
             {action_th}
+            {th_cols}
           </tr>{filter_row}
         </thead>
         <tbody>
           @for (item of displayItems(); track $index) {{
             <tr class="border-t hover:bg-gray-50{cursor}"{row_click}>
-              {td_cols}{action_td}
+              {action_td}
+              {td_cols}
             </tr>
           }}
         </tbody>
