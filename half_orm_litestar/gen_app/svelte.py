@@ -457,13 +457,19 @@ def _list_component(
                 f'<a href="/{rs}/{rt}/{{item.{f}}}"'
                 f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/{rs}/{rt}/${{item.{f}}}`); }}}}'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
-                f' title="{{String(item.{f})}}">{{truncUuid(item.{f})}}</a>'
+                f' title="{{cellTitle(item.{f})}}">{{fmtCell(item.{f})}}</a>'
                 f'</td>'
             )
+        cell_click = (
+            f"(e) => {{ const _j = (item as any).{f}; "
+            f"if (_j != null && typeof _j === 'object') {{ e.stopPropagation(); showJson(_j); }} }}"
+        )
         return (
-            f'<td class="px-4 py-2 text-sm">'
-            f'<div class="truncate max-w-xs" title="{{String(item.{f} ?? \'\')}}">'
-            f'{{truncUuid(item.{f})}}</div></td>'
+            f'<td class="px-4 py-2 text-sm" onclick={{{cell_click}}}>'
+            f'<div class="truncate max-w-xs" title="{{cellTitle(item.{f})}}"'
+            f' class:text-blue-600={{typeof (item as any).{f} === \'object\' && (item as any).{f} != null}}'
+            f' class:cursor-pointer={{typeof (item as any).{f} === \'object\' && (item as any).{f} != null}}>'
+            f'{{fmtCell(item.{f})}}</div></td>'
         )
 
     td_cols = '\n          '.join(_td(f) for f in out_names)
@@ -595,10 +601,19 @@ def _list_component(
   }});
 """.rstrip()}
 {can_create}{can_delete}{delete_fn}
-  function truncUuid(v: unknown): string {{
-    const s = String(v ?? '');
+  let jsonDialog = $state<string | null>(null);
+  function showJson(v: unknown): void {{ jsonDialog = JSON.stringify(v, null, 2); }}
+  function fmtCell(v: unknown): string {{
+    if (v == null) return '';
+    if (Array.isArray(v)) return `JSON [${{v.length}}]`;
+    if (typeof v === 'object') return 'JSON {{…}}';
+    const s = String(v);
     return /^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$/i.test(s)
       ? s.slice(0, 8) + '…' : s;
+  }}
+  function cellTitle(v: unknown): string {{
+    if (v == null || typeof v === 'object') return '';
+    return String(v);
   }}
 </script>
 
@@ -626,6 +641,25 @@ def _list_component(
     </tbody>
   </table>
 </div>
+
+{{#if jsonDialog !== null}}
+<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 cursor-default"
+     onclick={{() => jsonDialog = null}}
+     onkeydown={{(e) => e.key === 'Escape' && (jsonDialog = null)}}>
+  <div role="dialog" aria-modal="true" aria-label="JSON"
+       class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
+       onclick={{(e) => e.stopPropagation()}}
+       onkeydown={{(e) => e.stopPropagation()}}>
+    <div class="flex justify-between items-center mb-3">
+      <h3 class="font-semibold text-gray-800">JSON</h3>
+      <button onclick={{() => jsonDialog = null}}
+              class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+    </div>
+    <pre class="text-xs bg-gray-50 rounded p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap">{{jsonDialog}}</pre>
+  </div>
+</div>
+{{/if}}
 """
 
 

@@ -795,12 +795,15 @@ def _list_component(
                 f'<td class="px-4 py-2 text-sm">'
                 f'<a [routerLink]="[\'/{rs}/{rt}\', item.{f}]" (click)="$event.stopPropagation()"'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
-                f' [title]="item.{f}">{{{{ truncUuid(item.{f}) }}}}</a>'
+                f' [title]="cellTitle(item.{f})">{{{{ fmtCell(item.{f}) }}}}</a>'
                 f'</td>'
             )
         return (
-            f'<td class="px-4 py-2 text-sm">'
-            f'<div class="truncate max-w-xs" [title]="item.{f}">{{{{ truncUuid(item.{f}) }}}}</div>'
+            f'<td class="px-4 py-2 text-sm" (click)="cellClick($event, $any(item).{f})">'
+            f'<div class="truncate max-w-xs" [title]="cellTitle(item.{f})"'
+            f' [class.text-blue-600]="$any(item).{f} != null && typeof $any(item).{f} === \'object\'"'
+            f' [class.cursor-pointer]="$any(item).{f} != null && typeof $any(item).{f} === \'object\'">'
+            f'{{{{ fmtCell(item.{f}) }}}}</div>'
             f'</td>'
         )
 
@@ -932,6 +935,20 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
         </tbody>
       </table>
     </div>
+    @if (jsonDialogContent() !== null) {{
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+           (click)="jsonDialogContent.set(null)">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
+             (click)="$event.stopPropagation()">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="font-semibold text-gray-800">JSON</h3>
+            <button (click)="jsonDialogContent.set(null)"
+                    class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+          </div>
+          <pre class="text-xs bg-gray-50 rounded p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap">{{{{ jsonDialogContent() }}}}</pre>
+        </div>
+      </div>
+    }}
   `
 }})
 export class {iname}ListComponent {{
@@ -966,10 +983,22 @@ export class {iname}ListComponent {{
   setFilter(f: string, v: string): void {{
     this.localFilters.set({{ ...this.localFilters(), [f]: v }});
   }}
-  truncUuid(v: unknown): string {{
-    const s = String(v ?? '');
+  jsonDialogContent = signal<string | null>(null);
+  showJson(v: unknown): void {{ this.jsonDialogContent.set(JSON.stringify(v, null, 2)); }}
+  cellClick(e: Event, v: unknown): void {{
+    if (v != null && typeof v === 'object') {{ e.stopPropagation(); this.showJson(v); }}
+  }}
+  fmtCell(v: unknown): string {{
+    if (v == null) return '';
+    if (Array.isArray(v)) return `JSON [${{v.length}}]`;
+    if (typeof v === 'object') return 'JSON {{…}}';
+    const s = String(v);
     return /^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$/i.test(s)
       ? s.slice(0, 8) + '…' : s;
+  }}
+  cellTitle(v: unknown): string {{
+    if (v == null || typeof v === 'object') return '';
+    return String(v);
   }}{delete_fn}
 }}
 """
