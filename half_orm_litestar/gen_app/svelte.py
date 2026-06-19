@@ -363,7 +363,7 @@ def _layout(resources: list) -> str:
   let {{ children }} = $props();
 </script>
 
-<div class="min-h-screen flex bg-gray-50">
+<div class="h-screen flex bg-gray-50 overflow-hidden">
   <aside class="w-56 shrink-0 bg-white border-r flex flex-col">
     <div class="px-4 py-4 border-b">
       <span class="font-bold text-gray-800">API Browser</span>
@@ -929,8 +929,8 @@ def _detail_page(
 {fk_effects}{can_edit}{extra_script}
 </script>
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 px-4">
-  <div class="min-w-0">
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
+  <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
     {{#if item}}
     <div class="p-6 bg-white rounded-lg shadow">
       <div class="flex justify-between items-start mb-6">
@@ -951,7 +951,7 @@ def _detail_page(
     </div>
     {{/if}}
   </div>
-  <div class="min-w-0">
+  <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
     {right_col}
   </div>
 </div>
