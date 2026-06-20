@@ -26,11 +26,13 @@ class StoreGenerator(ABC):
 
     def resource_name(self, schema: str, table: str) -> str:
         """blogAuthor (camelCase)"""
+        schema = schema.replace('.', '_')
         parts = schema.split('_') + table.split('_')
         return parts[0].lower() + ''.join(p.capitalize() for p in parts[1:])
 
     def interface_name(self, schema: str, table: str) -> str:
         """BlogAuthor (PascalCase)"""
+        schema = schema.replace('.', '_')
         parts = schema.split('_') + table.split('_')
         return ''.join(p.capitalize() for p in parts)
 

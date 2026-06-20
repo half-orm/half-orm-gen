@@ -28,11 +28,13 @@ from half_orm_gen.gen_store.base import StoreGenerator
 
 def _cname(schema_name: str, table_name: str) -> str:
     """PascalCase — BlogAuthor"""
+    schema_name = schema_name.replace('.', '_')
     return ''.join(p.capitalize() for p in f'{schema_name}_{table_name}'.split('_'))
 
 
 def _selector(schema_name: str, table_name: str, suffix: str) -> str:
     """app-blog-author-list"""
+    schema_name = schema_name.replace('.', '_')
     slug = f'{schema_name}_{table_name}'.replace('_', '-')
     return f'app-{slug}-{suffix}'
 
@@ -874,24 +876,24 @@ def _list_component(
             rs, rt = fk_map[f]
             return (
                 f'<td class="px-4 py-2 text-sm">'
-                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', item.{f}]" (click)="$event.stopPropagation()"'
+                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', item[\'{f}\']]" (click)="$event.stopPropagation()"'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
-                f' [title]="cellTitle(item.{f})">{{{{ fmtCell(item.{f}) }}}}</a>'
+                f' [title]="cellTitle(item[\'{f}\'])">{{{{ fmtCell(item[\'{f}\']) }}}}</a>'
                 f'</td>'
             )
         return (
-            f'<td class="px-4 py-2 text-sm" (click)="cellClick($event, $any(item).{f})">'
-            f'<div class="truncate max-w-xs" [title]="cellTitle(item.{f})"'
-            f' [class.text-blue-600]="$any(item).{f} != null && typeof $any(item).{f} === \'object\'"'
-            f' [class.cursor-pointer]="$any(item).{f} != null && typeof $any(item).{f} === \'object\'">'
-            f'{{{{ fmtCell(item.{f}) }}}}</div>'
+            f'<td class="px-4 py-2 text-sm" (click)="cellClick($event, $any(item)[\'{f}\'])">'
+            f'<div class="truncate max-w-xs" [title]="cellTitle(item[\'{f}\'])"'
+            f' [class.text-blue-600]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'"'
+            f' [class.cursor-pointer]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'">'
+            f'{{{{ fmtCell(item[\'{f}\']) }}}}</div>'
             f'</td>'
         )
 
     td_cols = '\n              '.join(_td(f) for f in out_names)
 
     row_click = (
-        f' (click)="router.navigate([\'/ho_bo/{schema_name}/{table_name}\', item.{pk_field}])"'
+        f' (click)="router.navigate([\'/ho_bo/{schema_name}/{table_name}\', item[\'{pk_field}\']])"'
         if pk_field else ''
     )
     cursor = ' cursor-pointer' if pk_field else ''
@@ -901,7 +903,7 @@ def _list_component(
         action_td = (
             '\n              <td class="px-2 py-2">\n'
             '                @if (canDelete()) {\n'
-            f'                  <button (click)="handleDelete(item.{pk_field}, $event)"\n'
+            f'                  <button (click)="handleDelete(item[\'{pk_field}\'], $event)"\n'
             '                          class="text-red-600 hover:underline text-sm">Delete</button>\n'
             '                }\n'
             '              </td>'
@@ -1140,7 +1142,7 @@ def _ng_form_field(f: str, all_fields: dict) -> str:
     if _is_bool_field(f, all_fields):
         return (
             f'<div class="flex items-center gap-2">\n'
-            f'        <input type="checkbox" [(ngModel)]="form.{f}" name="{f}"\n'
+            f'        <input type="checkbox" [(ngModel)]="form[\'{f}\']" name="{f}"\n'
             f'               class="h-4 w-4 rounded border-gray-300" />\n'
             f'        <label class="text-sm font-medium text-gray-700">{f}</label>\n'
             f'      </div>'
@@ -1148,7 +1150,7 @@ def _ng_form_field(f: str, all_fields: dict) -> str:
     return (
         f'<div>\n'
         f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
-        f'        <input type="{itype}" [(ngModel)]="form.{f}" name="{f}"{req_attr}\n'
+        f'        <input type="{itype}" [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr}\n'
         f'               class="w-full border rounded px-3 py-2 text-sm" />\n'
         f'      </div>'
     )
@@ -1180,7 +1182,7 @@ def _create_component(
     null_map = "        .map(([k, v]): [string, unknown] => [k, !textFields.has(k) && v === '' ? null : v])\n"
 
     submit_body = (
-        f"    const textFields = new Set([{text_fields_ts}]);\n"
+        f"    const textFields = new Set<string>([{text_fields_ts}]);\n"
         "    const payload = Object.fromEntries(\n"
         "      Object.entries(this.form as unknown as Record<string, unknown>)\n"
         + (
@@ -1294,13 +1296,13 @@ def _detail_component(
             rs, rt = fk_map[f]
             return (
                 f'<div class="flex gap-2 items-baseline">{label}'
-                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', item()!.{f}]"'
-                f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item()!.{f} }}}}</a>'
+                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', item()![\'{f}\']]"'
+                f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item()![\'{f}\'] }}}}</a>'
                 f'</div>'
             )
         return (
             f'<div class="flex gap-2 items-baseline">{label}'
-            f'<span class="text-sm break-all">{{{{ item()!.{f} }}}}</span></div>'
+            f'<span class="text-sm break-all">{{{{ item()![\'{f}\'] }}}}</span></div>'
         )
 
     ro_rows = '\n    '.join(_ro_row(f) for f in out_names if f != pk_field)
@@ -1370,13 +1372,13 @@ def _detail_component(
         rn_store = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
         rt_title = _title(rs, rt)
         fk_sections += f"""
-    @if (item()?.{lf}) {{
+    @if (item() && item()!['{lf}']) {{
       <div class="mt-4 p-6 bg-white rounded-lg shadow">
         <div class="flex justify-between items-center mb-3">
           <h2 class="text-lg font-semibold">{rt_title}</h2>
-          <a [routerLink]="['/ho_bo/{rs}/{rt}', item()!.{lf}]" class="text-sm text-blue-600 hover:underline">→</a>
+          <a [routerLink]="['/ho_bo/{rs}/{rt}', item()!['{lf}']]" class="text-sm text-blue-600 hover:underline">→</a>
         </div>
-        @if ({rn_store}.byId().get(str(item()!.{lf})); as ref) {{
+        @if ({rn_store}.byId().get(str(item()!['{lf}'])); as ref) {{
           <div class="space-y-1">
             @for (entry of objectEntries(ref); track entry[0]) {{
               <div class="flex gap-2 items-baseline">
@@ -1400,7 +1402,7 @@ def _detail_component(
         <h2 class="text-lg font-semibold">{rt_title}</h2>
       </div>
       @if (item()) {{
-        <{_selector(rs, rt, 'list')} [filters]="{{ {fk_field}: item()!.{pk_field} }}" [embedded]="true" />
+        <{_selector(rs, rt, 'list')} [filters]="{{ {fk_field}: item()!['{pk_field}'] }}" [embedded]="true" />
       }}
     </div>"""
 
@@ -1419,7 +1421,7 @@ def _detail_component(
         put_text_fields_ts = _text_fields_ts(put_in_names, all_fields)
         handle_update = (
             f'\n  handleUpdate(): void {{\n'
-            f"    const textFields = new Set([{put_text_fields_ts}]);\n"
+            f"    const textFields = new Set<string>([{put_text_fields_ts}]);\n"
             f'    const putPayload = Object.fromEntries(\n'
             f'      Object.entries(this.form as unknown as Record<string, unknown>)\n'
             f'        .map(([k, v]): [string, unknown] => [k, !textFields.has(k) && v === \'\' ? null : v])\n'

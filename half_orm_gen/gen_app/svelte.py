@@ -416,11 +416,13 @@ def _layout(resources: list) -> str:
 
 def _cname(schema_name: str, table_name: str) -> str:
     """PascalCase component/interface name — e.g. BlogComment"""
+    schema_name = schema_name.replace('.', '_')
     return ''.join(p.capitalize() for p in f'{schema_name}_{table_name}'.split('_'))
 
 
 def _rname(schema_name: str, table_name: str) -> str:
     """camelCase resource name — e.g. blogComment"""
+    schema_name = schema_name.replace('.', '_')
     parts = schema_name.split('_') + table_name.split('_')
     return parts[0].lower() + ''.join(p.capitalize() for p in parts[1:])
 
