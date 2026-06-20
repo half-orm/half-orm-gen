@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "half_orm_litestar"
+name = "half_orm_gen"
 dynamic = ["version"]
 dependencies = [
     "half-orm>=1.0.0rc13,<1.1.0",
     "half-orm-dev>=1.0.0a32,<1.1.0",
     "litestar>=2.0.0",
 ]
-description = "Litestar API generation for halfORM projects."
+description = "API and frontend backoffice generation for halfORM projects."
 readme = "README.md"
-keywords = ["litestar", "half-orm", "rest", "api", "postgresql", "code-generation", "asgi", "orm"]
+keywords = ["litestar", "half-orm", "rest", "api", "postgresql", "code-generation", "asgi", "orm", "svelte", "angular"]
 authors = [
     {name = "Joël Maïzi", email = "joel.maizi@collorg.org"}
 ]
@@ -39,17 +39,17 @@ classifiers = [
 requires-python = ">=3.9"
 
 [project.urls]
-Homepage = "https://github.com/half-orm/half-orm-litestar"
+Homepage = "https://github.com/half-orm/half-orm-gen"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["half_orm_litestar*"]
+include = ["half_orm_gen*"]
 
 [tool.setuptools.package-data]
-half_orm_litestar = [
+half_orm_gen = [
     "version.txt",
     "scaffolding/*.py",
 ]
 
 [tool.setuptools.dynamic]
-version = {file = "half_orm_litestar/version.txt"}
+version = {file = "half_orm_gen/version.txt"}

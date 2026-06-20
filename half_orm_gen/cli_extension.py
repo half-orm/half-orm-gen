@@ -1,10 +1,10 @@
 """
-CLI extension for half-orm-litestar.
+CLI extension for half-orm-gen.
 
-Registers the ``litestar`` sub-command group under the ``half_orm`` CLI::
+Registers the ``gen`` sub-command group under the ``half_orm`` CLI::
 
-    half_orm litestar api
-    half_orm litestar frontend
+    half_orm gen api
+    half_orm gen frontend
 """
 
 import sys
@@ -31,11 +31,11 @@ def add_commands(main_group):
     """Required entry point for halfORM extensions."""
 
     @create_and_register_extension(main_group, sys.modules[__name__])
-    def litestar():
-        """Generate and manage a Litestar API from a halfORM project."""
+    def gen():
+        """Generate a Litestar API and frontend backoffice from a halfORM project."""
         pass
 
-    @litestar.command('api')
+    @gen.command('api')
     @click.option(
         '--dry-run', is_flag=True, default=False,
         help='Print what would be generated without writing any file.',
@@ -101,7 +101,7 @@ def add_commands(main_group):
             )
             return
 
-        from half_orm_litestar.generate import GenApi
+        from half_orm_gen.generate import GenApi
         click.echo(f'Generating {framework} API for project: {repo.name} (v{api_version})')
         GenApi(repo, api_version=api_version, framework=framework)
         if framework == 'litestar':
@@ -109,7 +109,7 @@ def add_commands(main_group):
         else:
             click.echo('\nTo run:  uvicorn api.app:application --reload')
 
-    @litestar.command('frontend')
+    @gen.command('frontend')
     @click.option('--svelte',   'framework', flag_value='svelte',
                   help='Generate a SvelteKit 5 application.')
     @click.option('--angular',  'framework', flag_value='angular',
@@ -117,11 +117,11 @@ def add_commands(main_group):
     @click.option('--output', default=None,
                   help='Output directory (default: frontend/<framework>).')
     def frontend(framework, output):
-        """Generate a SvelteKit backoffice from CRUD_ACCESS introspection.
+        """Generate a frontend backoffice from CRUD_ACCESS introspection.
 
-        Produces a complete SvelteKit application with Tailwind CSS, Svelte 5
-        runes, per-resource List/CreateForm/DetailView components in
-        src/lib/generated/, admin-only route pages, and a minimal JWT login.
+        Produces a complete SvelteKit or Angular application with Tailwind CSS,
+        per-resource List/CreateForm/DetailView components in generated/,
+        admin-only route pages, and a minimal JWT login.
 
         Must be run from inside a half-orm-dev project directory.
         """
@@ -133,7 +133,7 @@ def add_commands(main_group):
                 'Install it with: pip install half-orm-dev',
                 err=True,
             )
-            import sys; sys.exit(1)
+            sys.exit(1)
 
         try:
             repo = Repo()
@@ -143,7 +143,7 @@ def add_commands(main_group):
                 'Make sure you are inside a half-orm-dev project directory.',
                 err=True,
             )
-            import sys; sys.exit(1)
+            sys.exit(1)
 
         api_version = _read_api_version()
         output_dir = Path(output) if output else Path('frontend') / framework
@@ -152,20 +152,19 @@ def add_commands(main_group):
             click.echo('Error: specify --svelte or --angular.', err=True)
             sys.exit(1)
         if framework == 'svelte':
-            from half_orm_litestar.gen_app.svelte import SvelteAppGenerator
+            from half_orm_gen.gen_app.svelte import SvelteAppGenerator
             generator = SvelteAppGenerator()
         elif framework == 'angular':
-            from half_orm_litestar.gen_app.angular import AngularAppGenerator
+            from half_orm_gen.gen_app.angular import AngularAppGenerator
             generator = AngularAppGenerator()
         else:
             click.echo(f'Error: unknown framework "{framework}".', err=True)
             sys.exit(1)
 
-        from half_orm_litestar.gen_app import GenApp
+        from half_orm_gen.gen_app import GenApp
         click.echo(f'Generating {framework} application → {output_dir}')
         GenApp(repo, generator=generator, output_dir=output_dir, api_version=api_version)
         if framework == 'svelte':
             click.echo(f'\nTo run:  cd {output_dir} && npm install && npm run dev')
         elif framework == 'angular':
             click.echo(f'\nTo run:  cd {output_dir} && npm install && npm start')
-

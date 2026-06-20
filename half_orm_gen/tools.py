@@ -3,7 +3,7 @@ Decorators for exposing halfORM class methods as Litestar API routes.
 
 Usage in a halfORM relation class::
 
-    from half_orm_litestar import tools
+    from half_orm_gen import tools
 
     class MyRelation(MODEL.get_relation_class('schema.table')):
         @tools.api_get('/items/{id: uuid}', guards=['connected'])

@@ -12,14 +12,14 @@ import importlib
 import shutil
 from pathlib import Path
 
-from half_orm_litestar.crud_routes import (
+from half_orm_gen.crud_routes import (
     _gen_out_fields,
     _gen_in_fields,
     _simple_pk,
     _instance,
     _py_type_str,
 )
-from half_orm_litestar.gen_store.base import StoreGenerator
+from half_orm_gen.gen_store.base import StoreGenerator
 
 
 # ---------------------------------------------------------------------------

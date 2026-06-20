@@ -3,7 +3,7 @@ Frontend store generator for halfORM/Litestar projects.
 """
 
 from pathlib import Path
-from half_orm_litestar.gen_store.base import StoreGenerator
+from half_orm_gen.gen_store.base import StoreGenerator
 
 
 class GenStore:

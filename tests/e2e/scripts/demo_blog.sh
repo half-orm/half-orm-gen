@@ -2,7 +2,7 @@
 # Demo script: blog example end-to-end
 #
 # Creates a half-orm-dev project with the blog schema, adds CRUD_ACCESS to
-# the generated modules, then runs half_orm litestar generate.
+# the generated modules, then runs half_orm gen generate.
 #
 # Usage: bash demo_blog.sh
 #        bash demo_blog.sh --cleanup   (drop DB + remove project dir only)
@@ -188,10 +188,12 @@ half_orm dev patch merge
 half_orm dev release promote prod
 
 # ---------------------------------------------------------------------------
-# 9. Generate Litestar API
+# 9. Generate gen API
 # ---------------------------------------------------------------------------
-echo -e "${GREEN}=== GENERATE LITESTAR API ===${NC}"
-half_orm litestar generate
+echo -e "${GREEN}=== GENERATE gen API ===${NC}"
+half_orm gen api --litestar
+half_orm gen frontend --angular
+half_orm gen frontend --svelte
 
 echo ""
 echo -e "${GREEN}=== DONE ===${NC}"
@@ -204,4 +206,4 @@ echo "  ${PROJECT}/api/custom/routes.py"
 echo ""
 echo "To start the server:"
 echo "  cd ${PROJECT}"
-echo "  half_orm litestar run --reload"
+echo "  half_orm gen run --reload"

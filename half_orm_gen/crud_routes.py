@@ -13,8 +13,8 @@ from typing import Iterable, Tuple, Type
 
 from half_orm.relation import Relation
 
-from half_orm_litestar import templates as T
-from half_orm_litestar.api_routes import _annotation_str
+from half_orm_gen import templates as T
+from half_orm_gen.api_routes import _annotation_str
 
 
 _LITESTAR_PATH_TYPE_MAP = {

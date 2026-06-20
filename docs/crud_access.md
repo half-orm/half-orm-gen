@@ -3,7 +3,7 @@
 ## Overview
 
 For each halfORM relation module that defines a `CRUD_ACCESS` dict,
-`half_orm litestar generate` produces a complete set of CRUD route handlers —
+`half_orm gen generate` produces a complete set of CRUD route handlers —
 no manual coding required. Access control (which roles can call which verb, on
 which fields) is declared alongside the model, with distinct input and output
 field lists per role.

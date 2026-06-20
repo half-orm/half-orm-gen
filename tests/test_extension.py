@@ -1,5 +1,5 @@
 """
-Tests for half-orm-litestar extension.
+Tests for half-orm-gen extension.
 """
 
 import inspect
@@ -11,7 +11,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from half_orm_litestar.cli_extension import add_commands
+from half_orm_gen.cli_extension import add_commands
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ def _make_cli():
     def cli():
         pass
 
-    with patch('half_orm_litestar.cli_extension.create_and_register_extension') as mock_reg:
+    with patch('half_orm_gen.cli_extension.create_and_register_extension') as mock_reg:
         def _fake_register(main_group, module):
             def decorator(func):
                 group = click.group(
@@ -89,7 +89,7 @@ class TestCLI:
     def test_generate_dry_run(self):
         repo = _make_mock_repo(name='mydb')
         with _mock_half_orm_dev(repo):
-            with patch('half_orm_litestar.generate.GenApi'):
+            with patch('half_orm_gen.generate.GenApi'):
                 result = self.runner.invoke(self.cli, ['litestar', 'generate', '--dry-run'])
         assert result.exit_code == 0
         assert 'mydb' in result.output
@@ -97,7 +97,7 @@ class TestCLI:
     def test_generate_calls_genapi(self):
         repo = _make_mock_repo()
         with _mock_half_orm_dev(repo):
-            with patch('half_orm_litestar.generate.GenApi') as mock_genapi:
+            with patch('half_orm_gen.generate.GenApi') as mock_genapi:
                 result = self.runner.invoke(self.cli, ['litestar', 'generate'])
         assert result.exit_code == 0
         mock_genapi.assert_called_once_with(repo, api_version=0)
@@ -127,7 +127,7 @@ class TestCLI:
 class TestTools:
 
     def _import_tools(self):
-        from half_orm_litestar import tools
+        from half_orm_gen import tools
         return tools
 
     def test_api_get_marks_route(self):
@@ -239,7 +239,7 @@ class TestTools:
 class TestScaffolding:
 
     def test_creates_all_expected_files(self, tmp_path):
-        from half_orm_litestar.scaffold import scaffold_api_dir as _scaffold_api_dir
+        from half_orm_gen.scaffold import scaffold_api_dir as _scaffold_api_dir
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -253,7 +253,7 @@ class TestScaffolding:
         assert (api_dir / 'custom' / 'middlewares' / 'authorization.py').exists()
 
     def test_guards_py_contains_public_and_connected(self, tmp_path):
-        from half_orm_litestar.scaffold import scaffold_api_dir as _scaffold_api_dir
+        from half_orm_gen.scaffold import scaffold_api_dir as _scaffold_api_dir
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -264,7 +264,7 @@ class TestScaffolding:
         assert 'async def connected' in content
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
-        from half_orm_litestar.scaffold import scaffold_api_dir as _scaffold_api_dir
+        from half_orm_gen.scaffold import scaffold_api_dir as _scaffold_api_dir
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -278,7 +278,7 @@ class TestScaffolding:
         assert guards_py.read_text() == '# my custom guards'
 
     def test_partial_scaffold_fills_missing_only(self, tmp_path):
-        from half_orm_litestar.scaffold import scaffold_api_dir as _scaffold_api_dir
+        from half_orm_gen.scaffold import scaffold_api_dir as _scaffold_api_dir
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -299,7 +299,7 @@ class TestGenApiHelpers:
     """Unit tests for route-generation helpers (api_routes module)."""
 
     def setup_method(self):
-        from half_orm_litestar.api_routes import (
+        from half_orm_gen.api_routes import (
             _path_params, _query_params, _format_litestar_args,
             _extract_guards,
         )
@@ -385,8 +385,8 @@ class TestGenApi:
         return type(class_name, (), attrs)
 
     def test_generate_creates_app_py(self, tmp_path):
-        from half_orm_litestar.generate import GenApi
-        from half_orm_litestar import tools
+        from half_orm_gen.generate import GenApi
+        from half_orm_gen import tools
 
         @tools.api_get('/users', guards=['public'])
         async def get_users(self): pass
@@ -406,8 +406,8 @@ class TestGenApi:
         assert (tmp_path / 'api' / 'app.py').exists()
 
     def test_generated_app_py_contains_route(self, tmp_path):
-        from half_orm_litestar.generate import GenApi
-        from half_orm_litestar import tools
+        from half_orm_gen.generate import GenApi
+        from half_orm_gen import tools
 
         @tools.api_get('/users', guards=['public'])
         async def get_users(self): pass
@@ -430,7 +430,7 @@ class TestGenApi:
         assert 'mydb_actor_user_get_users' in content
 
     def test_generated_app_py_has_header(self, tmp_path):
-        from half_orm_litestar.generate import GenApi
+        from half_orm_gen.generate import GenApi
 
         with patch('importlib.import_module', return_value=Mock(spec=[])):
             GenApi(
@@ -444,7 +444,7 @@ class TestGenApi:
         assert 'application = Litestar(' in content
 
     def test_generate_scaffolds_missing_api_files(self, tmp_path):
-        from half_orm_litestar.generate import GenApi
+        from half_orm_gen.generate import GenApi
 
         with patch('importlib.import_module', return_value=Mock(spec=[])):
             GenApi(
@@ -457,7 +457,7 @@ class TestGenApi:
         assert (tmp_path / 'api' / 'custom' / 'routes.py').exists()
 
     def test_generate_does_not_overwrite_guards(self, tmp_path):
-        from half_orm_litestar.generate import GenApi
+        from half_orm_gen.generate import GenApi
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -475,7 +475,7 @@ class TestGenApi:
 
     def test_generate_overwrites_app_py(self, tmp_path):
         """app.py is always regenerated, even if it already exists."""
-        from half_orm_litestar.generate import GenApi
+        from half_orm_gen.generate import GenApi
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()

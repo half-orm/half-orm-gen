@@ -6,7 +6,7 @@ Only auto-CRUD routes (CRUD_ACCESS) are supported; @api_* decorators are
 Litestar-specific and are ignored in FastAPI mode.
 """
 
-from half_orm_litestar.templates import CRUD_HELPERS, CRUD_MODULE_IMPORT
+from half_orm_gen.templates import CRUD_HELPERS, CRUD_MODULE_IMPORT
 
 FRAMEWORK = 'fastapi'
 
@@ -253,7 +253,7 @@ async def _ws_broadcast_cascade(inst, resource: str, pk_val, _seen: set | None =
 
 
 def typedict_block(class_name: str, field_names: list, all_fields: dict) -> str:
-    from half_orm_litestar.crud_routes import _py_type_str
+    from half_orm_gen.crud_routes import _py_type_str
     lines = [f'class {class_name}(BaseModel):']
     valid = [(f, all_fields[f]) for f in field_names if f in all_fields]
     if not valid:

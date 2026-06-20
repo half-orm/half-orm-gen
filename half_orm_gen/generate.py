@@ -13,10 +13,10 @@ from typing import Iterable, Tuple, Type
 
 from half_orm.relation import Relation
 
-from half_orm_litestar import templates as T
-from half_orm_litestar.scaffold import scaffold_api_dir
-from half_orm_litestar.api_routes import generate_api_routes
-from half_orm_litestar.crud_routes import generate_crud_routes
+from half_orm_gen import templates as T
+from half_orm_gen.scaffold import scaffold_api_dir
+from half_orm_gen.api_routes import generate_api_routes
+from half_orm_gen.crud_routes import generate_crud_routes
 
 
 class GenApi:
@@ -71,7 +71,7 @@ class GenApi:
         os.environ.setdefault('API_GEN_MODE', '1')
 
         if self._framework == 'fastapi':
-            from half_orm_litestar import templates_fastapi as templates
+            from half_orm_gen import templates_fastapi as templates
             api_blocks, api_handlers, covered = [], [], set()
         else:
             templates = T

@@ -9,7 +9,7 @@ from typing import Iterable, Tuple, Type
 
 from half_orm.relation import Relation
 
-from half_orm_litestar import templates as T
+from half_orm_gen import templates as T
 
 _RE_PATH_VAR = re.compile(r'\{([^:]*):([^\}]*)\}')
 

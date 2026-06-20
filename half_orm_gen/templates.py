@@ -289,7 +289,7 @@ HO_ROLES_ROUTE = (
 
 
 def typedict_block(class_name: str, field_names: list, all_fields: dict) -> str:
-    from half_orm_litestar.crud_routes import _py_type_str
+    from half_orm_gen.crud_routes import _py_type_str
     lines = [f'class {class_name}(TypedDict, total=False):']
     valid = [(f, all_fields[f]) for f in field_names if f in all_fields]
     if not valid:
