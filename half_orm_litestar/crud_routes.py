@@ -401,6 +401,8 @@ def generate_crud_routes(
             if (module_str, 'PUT') not in covered and 'PUT' in crud_access:
                 put_in_class = f'_In_{module_alias}_put'
                 put_in_names = _gen_in_fields(crud_access, 'PUT', pk_field, api_excluded, all_names)
+                if not put_in_names:
+                    put_in_names = [f for f in all_names if f != pk_field and f not in api_excluded]
                 decl_blocks.append('\n' + templates.typedict_block(put_in_class, put_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_update'
                 handler_blocks.append(templates.CRUD_PUT.format(
