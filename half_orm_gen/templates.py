@@ -20,11 +20,13 @@ par_dir = os.path.join(cur_dir, os.path.pardir)
 sys.path.insert(0, par_dir)
 
 from litestar import Request, Litestar, get, post, patch, put, delete, Response, MediaType
+from litestar.params import Parameter
 from litestar.exceptions import HTTPException
 from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
 from litestar.logging import LoggingConfig
 from litestar.openapi import OpenAPIConfig
 from dataclasses import dataclass, field
+from typing import Annotated
 
 from {module} import ho_baseclasses
 from {module} import ho_typeddicts
@@ -262,6 +264,51 @@ def _filter_access_for_roles(access_map, authorized_roles):
             result[resource] = resource_entry
     return result
 
+
+# Composite primary key pattern: col_name:value::col_name:value
+# Column names must be valid Python identifiers
+_COMPOSITE_PK_PATTERN = r'^[a-zA-Z_][a-zA-Z0-9_]*:[^:]+(::[a-zA-Z_][a-zA-Z0-9_]*:[^:]+)*$'
+
+
+def _parse_composite_pk(pk_str: str, expected_cols: list[str]) -> dict[str, str]:
+    '''
+    Parse composite PK string 'col1:val1::col2:val2' into dict.
+
+    Validates:
+    - Format matches _COMPOSITE_PK_PATTERN
+    - Exactly the expected columns are present
+
+    Raises HTTPException(400) on validation failure.
+    '''
+    import re
+    if not re.match(_COMPOSITE_PK_PATTERN, pk_str):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid composite PK format. Expected: col:val::col:val, got: {pk_str}"
+        )
+
+    try:
+        parts = pk_str.split('::')
+        parsed = {col: val for col, val in (part.split(':', 1) for part in parts)}
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid composite PK format: {pk_str}"
+        )
+
+    if set(parsed.keys()) != set(expected_cols):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid PK columns. Expected: {expected_cols}, got: {list(parsed.keys())}"
+        )
+
+    return parsed
+
+
+def _format_composite_pk(result: dict, pk_names: list[str]) -> str:
+    '''Format dict result into composite PK string 'col1:val1::col2:val2'.'''
+    return '::'.join(f'{name}:{result.get(name, "")}' for name in pk_names)
+
 """
 
 CRUD_TYPEDICT = """
@@ -365,7 +412,7 @@ CRUD_GET_ONE = """
 @get("{path}/{{id: {pk_path_type}}}", description="{access_description}")
 async def {handler_name}_get(
     request: Request,
-    id: {pk_py_type},
+    id: {pk_type_annotation},
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     roles = _get_roles(request)
@@ -397,7 +444,7 @@ CRUD_PUT = """
 @put("{path}/{{id: {pk_path_type}}}", description="{access_description}")
 async def {handler_name}_update(
     request: Request,
-    id: {pk_py_type},
+    id: {pk_type_annotation},
     data: {in_typedict},
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
@@ -415,7 +462,7 @@ CRUD_DELETE = """
 @delete("{path}/{{id: {pk_path_type}}}", description="{access_description}")
 async def {handler_name}_delete(
     request: Request,
-    id: {pk_py_type},
+    id: {pk_type_annotation},
 ) -> None:
     await _ws_broadcast_cascade(
         {module_alias}.{class_name}({pk_instance_filter}), "{resource}", id

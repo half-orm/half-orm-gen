@@ -25,8 +25,9 @@ sys.path.insert(0, cur_dir)
 par_dir = os.path.join(cur_dir, os.path.pardir)
 sys.path.insert(0, par_dir)
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Path
 from pydantic import BaseModel
+from typing import Annotated
 
 from {module} import ho_baseclasses
 from {module} import ho_typeddicts
@@ -165,7 +166,7 @@ CRUD_GET_ONE = """
 @router.get("{path}/{{id}}", description="{access_description}")
 async def {handler_name}_get(
     request: Request,
-    id: {pk_py_type},
+    id: {pk_type_annotation},
 ) -> dict:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     roles = _get_roles(request)
@@ -195,7 +196,7 @@ CRUD_PUT = """
 @router.put("{path}/{{id}}", description="{access_description}")
 async def {handler_name}_update(
     request: Request,
-    id: {pk_py_type},
+    id: {pk_type_annotation},
     data: {in_typedict},
 ) -> dict:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
@@ -213,7 +214,7 @@ CRUD_DELETE = """
 @router.delete("{path}/{{id}}", description="{access_description}")
 async def {handler_name}_delete(
     request: Request,
-    id: {pk_py_type},
+    id: {pk_type_annotation},
 ) -> None:
     await _ws_broadcast_cascade(
         {module_alias}.{class_name}({pk_instance_filter}), "{resource}", id

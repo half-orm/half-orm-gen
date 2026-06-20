@@ -438,10 +438,15 @@ def _list_component(
     pk_field = pk_info[0][0] if pk_info else None
     if len(pk_info) == 1:
         pk_item_expr = f'item.{pk_field}'
+        pk_item_url = f'${{item.{pk_field}}}'
     elif len(pk_info) > 1:
-        pk_item_expr = '[' + ', '.join(f'item.{f}' for f, _, _ in pk_info) + '].map(String).join("::")'
+        # New format: col1:val1::col2:val2
+        parts = '::'.join(f'{f}:${{item.{f}}}' for f, _, _ in pk_info)
+        pk_item_expr = f'`{parts}`'  # For use in onclick handlers (standalone expression)
+        pk_item_url = parts  # For use in template strings (no outer backticks)
     else:
         pk_item_expr = None
+        pk_item_url = None
     title    = _title(schema_name, table_name)
     fk_map   = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
 
@@ -505,7 +510,7 @@ def _list_component(
     if pk_field:
         tr_open = (
             f'<tr class="border-t hover:bg-gray-50 cursor-pointer"'
-            f' onclick={{() => goto(`/ho_bo/{schema_name}/{table_name}/${{{pk_item_expr}}}`)}}'
+            f' onclick={{() => goto(`/ho_bo/{schema_name}/{table_name}/{pk_item_url}`)}}'
             f'>'
         )
     else:

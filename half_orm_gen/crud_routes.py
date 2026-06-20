@@ -309,15 +309,18 @@ def generate_crud_routes(
             pk_field, pk_path_type, pk_py_type = pk_cols[0]
             pk_instance_filter  = f'{pk_field}=id'
             pk_broadcast_expr   = f'result.get("{pk_field}")'
+            pk_is_composite     = False
         elif len(pk_cols) > 1:
             pk_field  = pk_cols[0][0]   # first field; used in WS cascade map
             pk_path_type = 'str'
             pk_py_type   = 'str'
             _pk_names = [f for f, _, _ in pk_cols]
-            pk_instance_filter = f"**dict(zip({_pk_names!r}, id.split('::')))"
-            pk_broadcast_expr  = f"'::'.join(str(result.get(f, '')) for f in {_pk_names!r})"
+            # New format: col1:val1::col2:val2 (parsed and validated by _parse_composite_pk)
+            pk_instance_filter = f"**_parse_composite_pk(id, {_pk_names!r})"
+            pk_broadcast_expr  = f"_format_composite_pk(result, {_pk_names!r})"
+            pk_is_composite     = True
         else:
-            pk_field = pk_path_type = pk_py_type = pk_instance_filter = pk_broadcast_expr = None
+            pk_field = pk_path_type = pk_py_type = pk_instance_filter = pk_broadcast_expr = pk_is_composite = None
 
         instance     = _instance(relation)
         all_fields   = getattr(instance, '_ho_fields', {})
@@ -357,12 +360,17 @@ def generate_crud_routes(
         # GET /{pk}
         if pk_info and (module_str, 'GET') not in covered and 'GET' in crud_access:
             handler_name = f'{handler_prefix}_get'
+            if pk_is_composite:
+                param_type = 'Path' if templates.FRAMEWORK == 'fastapi' else 'Parameter'
+                pk_type_annotation = f'Annotated[str, {param_type}(pattern=_COMPOSITE_PK_PATTERN)]'
+            else:
+                pk_type_annotation = pk_py_type
             handler_blocks.append(templates.CRUD_GET_ONE.format(
                 path=base_path,
                 handler_name=handler_prefix,
                 pk_instance_filter=pk_instance_filter,
                 pk_path_type=pk_path_type,
-                pk_py_type=pk_py_type,
+                pk_type_annotation=pk_type_annotation,
                 module_alias=module_alias,
                 class_name=relation.__name__,
                 out_typedict=out_class,
@@ -405,12 +413,17 @@ def generate_crud_routes(
                     put_in_names = [f for f in all_names if f != pk_field and f not in api_excluded]
                 decl_blocks.append('\n' + templates.typedict_block(put_in_class, put_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_update'
+                if pk_is_composite:
+                    param_type = 'Path' if templates.FRAMEWORK == 'fastapi' else 'Parameter'
+                    pk_type_annotation = f'Annotated[str, {param_type}(pattern=_COMPOSITE_PK_PATTERN)]'
+                else:
+                    pk_type_annotation = pk_py_type
                 handler_blocks.append(templates.CRUD_PUT.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     pk_instance_filter=pk_instance_filter,
                     pk_path_type=pk_path_type,
-                    pk_py_type=pk_py_type,
+                    pk_type_annotation=pk_type_annotation,
                     module_alias=module_alias,
                     class_name=relation.__name__,
                     in_typedict=put_in_class,
@@ -422,12 +435,17 @@ def generate_crud_routes(
 
             if (module_str, 'DELETE') not in covered and 'DELETE' in crud_access:
                 handler_name = f'{handler_prefix}_delete'
+                if pk_is_composite:
+                    param_type = 'Path' if templates.FRAMEWORK == 'fastapi' else 'Parameter'
+                    pk_type_annotation = f'Annotated[str, {param_type}(pattern=_COMPOSITE_PK_PATTERN)]'
+                else:
+                    pk_type_annotation = pk_py_type
                 handler_blocks.append(templates.CRUD_DELETE.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     pk_instance_filter=pk_instance_filter,
                     pk_path_type=pk_path_type,
-                    pk_py_type=pk_py_type,
+                    pk_type_annotation=pk_type_annotation,
                     module_alias=module_alias,
                     class_name=relation.__name__,
                     access_description=_access_description(crud_access, 'DELETE'),

@@ -16,6 +16,7 @@ from half_orm_gen.crud_routes import (
     _gen_out_fields,
     _gen_in_fields,
     _simple_pk,
+    _pk_info,
     _instance,
     _py_type_str,
 )
@@ -657,7 +658,7 @@ export class AccessComponent implements OnInit {{
 def _store(
     schema_name: str, table_name: str, base_path: str,
     iname: str,
-    out_names: list, all_fields: dict, pk_field: str | None, pk_ts_type: str,
+    out_names: list, all_fields: dict, pk_field: str | None, pk_ts_type: str, pk_extractor: str | None,
     has_post: bool, has_put: bool, has_del: bool,
     post_in_names: list, put_in_names: list,
 ) -> str:
@@ -712,11 +713,15 @@ def _store(
     lines.append('  }')
     lines.append('')
     lines.append(f'  listUrl(params: Partial<{iname}Out> = {{}}): string {{')
-    lines.append('    return `${_BASE}?${new URLSearchParams(params as any)}`;')
+    lines.append('    const filtered = Object.fromEntries(')
+    lines.append('      Object.entries(params).filter(([_, v]) => v != null && (typeof v !== \'string\' || v !== \'\'))')
+    lines.append('    );')
+    lines.append('    const qs = new URLSearchParams(filtered as any).toString();')
+    lines.append('    return qs ? `${_BASE}?${qs}` : _BASE;')
     lines.append('  }')
 
     if pk_field:
-        lines.append(f'  getUrl(id: {pk_ts_type}): string {{ return `${{_BASE}}/${{id}}`; }}')
+        lines.append(f'  getUrl(id: string): string {{ return `${{_BASE}}/${{id}}`; }}')
         lines.append('')
 
     lines.append(f'  list(params: Partial<{iname}Out> = {{}}): void {{')
@@ -731,8 +736,8 @@ def _store(
     lines.append('')
 
     if pk_field:
-        lines.append(f'  get(id: {pk_ts_type}) {{')
-        lines.append('    const cached = this.byId().get(String(id));')
+        lines.append(f'  get(id: string) {{')
+        lines.append('    const cached = this.byId().get(id);')
         lines.append('    if (cached) return of(cached);')
         lines.append('    const url = this.getUrl(id);')
         lines.append('    this.auth.fetchedRoutes.add(url);')
@@ -752,7 +757,7 @@ def _store(
         lines.append('')
 
     if has_put and pk_field:
-        lines.append(f'  update(id: {pk_ts_type}, data: {iname}PutIn) {{')
+        lines.append(f'  update(id: string, data: {iname}PutIn) {{')
         lines.append(f'    return this.http.put<{iname}Out>(`${{_BASE}}/${{id}}`, data, {{')
         lines.append("      headers: this.headers.append('Content-Type', 'application/json')")
         lines.append('    });')
@@ -760,7 +765,7 @@ def _store(
         lines.append('')
 
     if has_del and pk_field:
-        lines.append(f'  remove(id: {pk_ts_type}) {{')
+        lines.append(f'  remove(id: string) {{')
         lines.append(f'    return this.http.delete(`${{_BASE}}/${{id}}`, {{ headers: this.headers }});')
         lines.append('  }')
         lines.append('')
@@ -768,29 +773,29 @@ def _store(
     if pk_field:
         lines.append(f'  setItems(data: {iname}Out[]): void {{')
         lines.append('    this.items.set(data);')
-        lines.append(f'    this.byId.set(new Map(data.map(i => [String(i.{pk_field}), i])));')
+        lines.append(f'    this.byId.set(new Map(data.map(i => [({pk_extractor})(i), i])));')
         lines.append('  }')
         lines.append('')
         lines.append(f'  mergeItems(data: {iname}Out[]): void {{')
         lines.append('    const m = new Map(this.byId());')
-        lines.append(f'    data.forEach(i => m.set(String(i.{pk_field}), i));')
+        lines.append(f'    data.forEach(i => m.set(({pk_extractor})(i), i));')
         lines.append('    this.byId.set(m);')
         lines.append('    this.items.set([...m.values()]);')
         lines.append('  }')
         lines.append('')
         lines.append(f'  setItem(item: {iname}Out): void {{')
         lines.append('    const m = new Map(this.byId());')
-        lines.append(f'    m.set(String(item.{pk_field}), item);')
+        lines.append(f'    m.set(({pk_extractor})(item), item);')
         lines.append('    this.byId.set(m);')
         lines.append('    const arr = [...this.items()];')
-        lines.append(f'    const idx = arr.findIndex(i => String(i.{pk_field}) === String(item.{pk_field}));')
+        lines.append(f'    const idx = arr.findIndex(i => ({pk_extractor})(i) === ({pk_extractor})(item));')
         lines.append('    if (idx >= 0) arr[idx] = item; else arr.push(item);')
         lines.append('    this.items.set(arr);')
         lines.append('  }')
         lines.append('')
         lines.append('  removeItem(id: string): void {')
         lines.append('    const m = new Map(this.byId()); m.delete(id); this.byId.set(m);')
-        lines.append(f'    this.items.set(this.items().filter(i => String(i.{pk_field}) !== id));')
+        lines.append(f'    this.items.set(this.items().filter(i => ({pk_extractor})(i) !== id));')
         lines.append('  }')
         lines.append('')
         lines.append('  clear(): void { this.items.set([]); this.byId.set(new Map()); }')
@@ -811,7 +816,7 @@ def _store(
 def _list_component(
     schema_name: str, table_name: str,
     iname: str, map_key: str,
-    out_names: list, pk_field: str | None, pk_ts_type: str,
+    out_names: list, pk_field: str | None, pk_ts_type: str, pk_extractor: str | None,
     has_post: bool, has_del: bool,
     fk_deps: list,
 ) -> str:
@@ -876,7 +881,7 @@ def _list_component(
             rs, rt = fk_map[f]
             return (
                 f'<td class="px-4 py-2 text-sm">'
-                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', item[\'{f}\']]" (click)="$event.stopPropagation()"'
+                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item[\'{f}\'])]" (click)="$event.stopPropagation()"'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
                 f' [title]="cellTitle(item[\'{f}\'])">{{{{ fmtCell(item[\'{f}\']) }}}}</a>'
                 f'</td>'
@@ -893,7 +898,7 @@ def _list_component(
     td_cols = '\n              '.join(_td(f) for f in out_names)
 
     row_click = (
-        f' (click)="router.navigate([\'/ho_bo/{schema_name}/{table_name}\', item[\'{pk_field}\']])"'
+        f' (click)="router.navigate([\'/ho_bo/{schema_name}/{table_name}\', getPkId(item)])"'
         if pk_field else ''
     )
     cursor = ' cursor-pointer' if pk_field else ''
@@ -903,7 +908,7 @@ def _list_component(
         action_td = (
             '\n              <td class="px-2 py-2">\n'
             '                @if (canDelete()) {\n'
-            f'                  <button (click)="handleDelete(item[\'{pk_field}\'], $event)"\n'
+            f'                  <button (click)="handleDelete(getPkId(item), $event)"\n'
             '                          class="text-red-600 hover:underline text-sm">Delete</button>\n'
             '                }\n'
             '              </td>'
@@ -924,7 +929,7 @@ def _list_component(
     delete_fn = ''
     if has_del and pk_field:
         delete_fn = (
-            f'\n  handleDelete(id: {pk_ts_type}, e: Event): void {{\n'
+            f'\n  handleDelete(id: string, e: Event): void {{\n'
             f'    e.stopPropagation();\n'
             f"    if (confirm('Delete this item?')) {{\n"
             f'      this.store.remove(id).subscribe(() => this.store.removeItem(String(id)));\n'
@@ -981,6 +986,12 @@ def _list_component(
 
     router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
     router_link_imp = 'RouterLink' if needs_router_link else ''
+    if pk_extractor:
+        # Add type annotation to lambda parameter
+        typed_extractor = pk_extractor.replace('i =>', f'(i: {iname}Out) =>')
+        pk_id_line = f'\n  protected getPkId = {typed_extractor};'
+    else:
+        pk_id_line = ''
 
     return f"""\
 import {{ Component, computed, effect, inject, Input, signal, untracked }} from '@angular/core';
@@ -1039,6 +1050,7 @@ export class {iname}ListComponent {{
   protected store  = inject({iname}Store);
   protected auth   = inject(AuthService);
   protected router = inject(Router);{fk_injects}
+  protected String = String;  // For template use{pk_id_line}
 
   @Input() filters: Partial<{iname}Out> = {{}};
   @Input() embedded = false;
@@ -1245,7 +1257,7 @@ export class {iname}CreateComponent {{
 
 def _detail_component(
     schema_name: str, table_name: str,
-    iname: str, pk_field: str, pk_ts_type: str,
+    iname: str, pk_field: str, pk_ts_type: str, pk_extractor: str,
     out_names: list, put_in_names: list,
     has_put: bool, map_key: str,
     fk_deps: list, rev_fk_deps: list,
@@ -1296,7 +1308,7 @@ def _detail_component(
             rs, rt = fk_map[f]
             return (
                 f'<div class="flex gap-2 items-baseline">{label}'
-                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', item()![\'{f}\']]"'
+                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item()![\'{f}\'])]"'
                 f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item()![\'{f}\'] }}}}</a>'
                 f'</div>'
             )
@@ -1376,7 +1388,7 @@ def _detail_component(
       <div class="mt-4 p-6 bg-white rounded-lg shadow">
         <div class="flex justify-between items-center mb-3">
           <h2 class="text-lg font-semibold">{rt_title}</h2>
-          <a [routerLink]="['/ho_bo/{rs}/{rt}', item()!['{lf}']]" class="text-sm text-blue-600 hover:underline">→</a>
+          <a [routerLink]="['/ho_bo/{rs}/{rt}', String(item()!['{lf}'])]" class="text-sm text-blue-600 hover:underline">→</a>
         </div>
         @if ({rn_store}.byId().get(str(item()!['{lf}'])); as ref) {{
           <div class="space-y-1">
@@ -1453,10 +1465,14 @@ def _detail_component(
             f'\n    effect(() => {{\n'
             f'      const v = this.item()?.{lf};\n'
             f'      if (!v) return;\n'
-            f'      const url = this.{rn_store}.getUrl(v);\n'
-            f'      if (!this.auth.fetchedRoutes.has(url)) this.{rn_store}.get(v as any).subscribe();\n'
+            f'      const url = this.{rn_store}.getUrl(String(v));\n'
+            f'      if (!this.auth.fetchedRoutes.has(url)) this.{rn_store}.get(String(v)).subscribe();\n'
             f'    }});'
         )
+
+    # Add type annotation to lambda parameter
+    typed_extractor = pk_extractor.replace('i =>', f'(i: {iname}Out) =>')
+    pk_id_line = f'\n  protected getPkId = {typed_extractor};'
 
     return f"""\
 import {{ Component, computed, effect, inject, signal, untracked }} from '@angular/core';
@@ -1503,6 +1519,7 @@ export class {iname}DetailComponent {{
   protected auth   = inject(AuthService);
   protected router = inject(Router);
   private route    = inject(ActivatedRoute);{fk_injects}
+  protected String = String;  // For template use{pk_id_line}
 
   readonly id   = this.route.snapshot.params['id'] as string;
   readonly item = signal<{iname}Out | null>(this.store.byId().get(this.id) ?? null);
@@ -1599,13 +1616,20 @@ class AngularAppGenerator(StoreGenerator):
             inst         = _instance(relation)
             all_fields   = getattr(inst, '_ho_fields', {})
             all_names    = list(all_fields.keys())
-            pk_info      = _simple_pk(relation)
-            pk_field     = pk_info[0] if pk_info else None
-            pk_ts_type   = (
-                StoreGenerator.PY_TO_TS.get(
-                    _py_type_str(list(inst._ho_pkey.values())[0].py_type), 'string'
-                ) if pk_info else 'string'
-            )
+            pk_cols = _pk_info(relation)
+            if len(pk_cols) == 1:
+                pk_field = pk_cols[0][0]
+                pk_ts_type = StoreGenerator.PY_TO_TS.get(pk_cols[0][2], 'string')
+                pk_extractor = f'i => String(i[\'{pk_field}\'])'
+            elif len(pk_cols) > 1:
+                pk_field = pk_cols[0][0]  # first field for compatibility
+                pk_ts_type = 'string'
+                # New format: pk1:val1::pk2:val2
+                parts = '::'.join(f'{f}:${{i[\'{f}\']}}'  for f, _, _ in pk_cols)
+                pk_extractor = f'i => `{parts}`'
+            else:
+                pk_field = pk_ts_type = pk_extractor = None
+            pk_info = pk_field  # truthy if we have a PK
             iname   = self.interface_name(schema_name, table_name)
             map_key = f'{schema_name}/{table_name}'
 
@@ -1644,7 +1668,7 @@ class AngularAppGenerator(StoreGenerator):
 
             resources.append((
                 schema_name, table_name, map_key, iname, base_path,
-                all_fields, out_names, pk_info, pk_field, pk_ts_type,
+                all_fields, out_names, pk_info, pk_field, pk_ts_type, pk_extractor,
                 has_post, has_put, has_del, has_detail,
                 post_in_names, put_in_names,
                 fk_deps, rev_fk_deps,
@@ -1657,7 +1681,7 @@ class AngularAppGenerator(StoreGenerator):
         # --- stores ---
         stores_dir = app_dir / 'generated' / 'stores'
         for (schema_name, table_name, map_key, iname, base_path,
-             all_fields, out_names, pk_info, pk_field, pk_ts_type,
+             all_fields, out_names, pk_info, pk_field, pk_ts_type, pk_extractor,
              has_post, has_put, has_del, has_detail,
              post_in_names, put_in_names,
              fk_deps, rev_fk_deps,
@@ -1665,13 +1689,13 @@ class AngularAppGenerator(StoreGenerator):
             self._write(
                 stores_dir / f'{schema_name}_{table_name}.store.ts',
                 _store(schema_name, table_name, base_path, iname,
-                       out_names, all_fields, pk_field, pk_ts_type,
+                       out_names, all_fields, pk_field, pk_ts_type, pk_extractor,
                        has_post, has_put, has_del, post_in_names, put_in_names),
             )
 
         # --- app routes + app component ---
         route_meta = [
-            (r[0], r[1], r[2], r[10], r[11], r[13])  # sn, tn, mk, has_post, has_put, has_detail
+            (r[0], r[1], r[2], r[11], r[12], r[14])  # sn, tn, mk, has_post, has_put, has_detail
             for r in resources
         ]
         first_route = f'/ho_bo/{resources[0][0]}/{resources[0][1]}' if resources else '/ho_bo'
@@ -1690,7 +1714,7 @@ class AngularAppGenerator(StoreGenerator):
 
         # --- per-resource generated components ---
         for (schema_name, table_name, map_key, iname, base_path,
-             all_fields, out_names, pk_info, pk_field, pk_ts_type,
+             all_fields, out_names, pk_info, pk_field, pk_ts_type, pk_extractor,
              has_post, has_put, has_del, has_detail,
              post_in_names, put_in_names,
              fk_deps, rev_fk_deps,
@@ -1700,7 +1724,7 @@ class AngularAppGenerator(StoreGenerator):
 
             self._write(comp_dir / 'list.component.ts',
                         _list_component(schema_name, table_name, iname, map_key,
-                                        out_names, pk_field, pk_ts_type, has_post, has_del, fk_deps))
+                                        out_names, pk_field, pk_ts_type, pk_extractor, has_post, has_del, fk_deps))
 
             if has_post:
                 self._write(comp_dir / 'create.component.ts',
@@ -1710,7 +1734,7 @@ class AngularAppGenerator(StoreGenerator):
             if has_detail:
                 self._write(comp_dir / 'detail.component.ts',
                             _detail_component(schema_name, table_name, iname,
-                                              pk_field, pk_ts_type,
+                                              pk_field, pk_ts_type, pk_extractor,
                                               out_names, put_in_names, has_put,
                                               map_key, fk_deps, rev_fk_deps, all_fields))
 

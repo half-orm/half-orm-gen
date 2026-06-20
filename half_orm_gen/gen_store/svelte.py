@@ -59,7 +59,9 @@ class SvelteGenerator(StoreGenerator):
             elif len(pk_cols) > 1:
                 pk_field    = pk_cols[0][0]
                 pk_ts_type  = 'string'
-                pk_extractor = 'i => [' + ', '.join(f'i.{f}' for f, _, _ in pk_cols) + '].map(String).join("::")'
+                # New format: pk1:val1::pk2:val2
+                parts = '::'.join(f'{f}:${{i.{f}}}' for f, _, _ in pk_cols)
+                pk_extractor = f'i => `{parts}`'
             else:
                 pk_field = pk_ts_type = pk_extractor = None
 
@@ -166,13 +168,23 @@ class SvelteGenerator(StoreGenerator):
             api_entries = []
             if 'GET' in crud_access:
                 api_entries.append(
-                    f"    listUrl: (params: Partial<{iname}Out> = {{}}) =>\n"
-                    f"                 _BASE + '?' + new URLSearchParams(params as any),"
+                    f"    listUrl: (params: Partial<{iname}Out> = {{}}) => {{\n"
+                    f"                 const filtered = Object.fromEntries(\n"
+                    f"                   Object.entries(params).filter(([_, v]) => v != null && (typeof v !== 'string' || v !== ''))\n"
+                    f"                 );\n"
+                    f"                 const qs = new URLSearchParams(filtered as any).toString();\n"
+                    f"                 return qs ? _BASE + '?' + qs : _BASE;\n"
+                    f"             }},"
                 )
                 api_entries.append(
-                    f"    list:    (params: Partial<{iname}Out> = {{}}) =>\n"
-                    f"                 _fetch(_BASE + '?' + new URLSearchParams(params as any),\n"
-                    f"                        {{ headers: _hdrs() }}),"
+                    f"    list:    (params: Partial<{iname}Out> = {{}}) => {{\n"
+                    f"                 const filtered = Object.fromEntries(\n"
+                    f"                   Object.entries(params).filter(([_, v]) => v != null && (typeof v !== 'string' || v !== ''))\n"
+                    f"                 );\n"
+                    f"                 const qs = new URLSearchParams(filtered as any).toString();\n"
+                    f"                 const url = qs ? _BASE + '?' + qs : _BASE;\n"
+                    f"                 return _fetch(url, {{ headers: _hdrs() }});\n"
+                    f"             }},"
                 )
                 if pk_info:
                     api_entries.append(
