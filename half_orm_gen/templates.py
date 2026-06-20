@@ -389,23 +389,31 @@ CRUD_GET_LIST = """
 async def {handler_name}(
     request: Request,
 {filter_params}    fields: Optional[List[str]] = None,
-    limit: Optional[int] = None,
-    offset: Optional[int] = None,
-) -> list[{out_typedict}]:
+    limit: Optional[int] = 100,
+    offset: Optional[int] = 0,
+) -> dict:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     roles = _get_roles(request)
     filter_kwargs = {{{filter_dict}}}
     role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
     authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
     if authorized is None:
-        return []
+        return {{"data": [], "meta": {{"offset": offset, "limit": limit, "has_more": False}}}}
     if fields:
         projection = [f for f in fields if not authorized or f in authorized]
     else:
         projection = authorized
-    return await {module_alias}.{class_name}(**{{**filter_kwargs, **role_filter}}).ho_aselect(
+    data = await {module_alias}.{class_name}(**{{**filter_kwargs, **role_filter}}).ho_aselect(
         *projection, limit=limit, offset=offset
     )
+    return {{
+        "data": data,
+        "meta": {{
+            "offset": offset,
+            "limit": limit,
+            "has_more": len(data) == limit
+        }}
+    }}
 """
 
 CRUD_GET_ONE = """

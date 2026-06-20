@@ -508,13 +508,9 @@ def _list_component(
     td_cols = '\n          '.join(_td(f) for f in out_names)
 
     if pk_field:
-        tr_open = (
-            f'<tr class="border-t hover:bg-gray-50 cursor-pointer"'
-            f' onclick={{() => goto(`/ho_bo/{schema_name}/{table_name}/{pk_item_url}`)}}'
-            f'>'
-        )
+        tr_attrs = f'class="border-t hover:bg-gray-50 cursor-pointer" onclick={{() => goto(`/ho_bo/{schema_name}/{table_name}/{pk_item_url}`)}}'
     else:
-        tr_open = '<tr class="border-t hover:bg-gray-50">'
+        tr_attrs = 'class="border-t hover:bg-gray-50"'
 
     action_td = ''
     if has_del and pk_field:
@@ -610,16 +606,48 @@ def _list_component(
   }});
 """.rstrip()}
 
+  let hasMore = $state(true);
+  let currentOffset = $state(0);
+  let isLoading = $state(false);
+
   $effect(() => {{
+    // Don't reload if we already have data (for infinite scroll)
+    if ({rname}State.items.length > 0) return;
     const url = {rname}Api.listUrl(filters);
     if (!auth.fetchedRoutes.has(url)) {{
-      const filtered = hasFilters;
-      {rname}Api.list(filters).then(r => r.ok ? r.json() : []).then(d => {{
-        if (filtered) {rname}State.mergeItems(d);
-        else {rname}State.setItems(d);
+      isLoading = true;
+      {rname}Api.list(filters).then(result => {{
+        hasMore = result.has_more;
+        currentOffset = result.offset;
+        isLoading = false;
       }});
     }}
   }});
+
+  async function loadMore() {{
+    if (!hasMore || isLoading) return;
+    isLoading = true;
+    const result = await {rname}Api.list(filters, currentOffset);
+    hasMore = result.has_more;
+    currentOffset = result.offset;
+    isLoading = false;
+  }}
+
+  function onIntersect(node: HTMLElement, isLast: boolean) {{
+    if (!isLast) return {{ destroy() {{}} }};  // Only observe last element
+    const observer = new IntersectionObserver(
+      (entries) => {{
+        if (entries[0].isIntersecting) {{
+          loadMore();
+        }}
+      }},
+      {{ rootMargin: '0px 0px 400px 0px' }}
+    );
+    observer.observe(node);
+    return {{
+      destroy() {{ observer.disconnect(); }}
+    }};
+  }}
 {"" if not pk_field else f"""
   $effect(() => {{
     const ev = auth.lastEvent;
@@ -665,12 +693,15 @@ def _list_component(
       </tr>{filter_row}
     </thead>
     <tbody>
-      {{#each displayItems as item}}
-        {tr_open}
+      {{#each displayItems as item, i}}
+        <tr use:onIntersect={{i === displayItems.length - 1}} {tr_attrs}>
           {action_td}
         {td_cols}
         </tr>
       {{/each}}
+      {{#if isLoading}}
+        <tr><td colspan="100" class="text-center py-4 text-gray-500">Loading...</td></tr>
+      {{/if}}
     </tbody>
   </table>
 </div>

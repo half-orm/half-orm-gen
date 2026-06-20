@@ -705,6 +705,11 @@ def _store(
         lines.append(f'  readonly items = signal<{iname}Out[]>([]);')
 
     lines.append('')
+    lines.append('  private loadedFilters = new Map<string, boolean>();  // Track fully loaded filter combinations')
+    lines.append('  readonly hasMore = signal(true);  // Track if more data available')
+    lines.append('  readonly currentOffset = signal(0);  // Current pagination offset')
+    lines.append('  readonly isLoading = signal(false);  // Loading state')
+    lines.append('')
     lines.append('  constructor() { registerClear(() => this.clear()); }')
     lines.append('')
     lines.append('  private get headers(): HttpHeaders {')
@@ -726,14 +731,37 @@ def _store(
         lines.append(f'  getUrl(id: string): string {{ return `${{_BASE}}/${{id}}`; }}')
         lines.append('')
 
-    lines.append(f'  list(params: Partial<{iname}Out> = {{}}): void {{')
-    lines.append('    const url = this.listUrl(params);')
+    lines.append(f'  list(params: Partial<{iname}Out> = {{}}, offset: number = 0): void {{')
+    lines.append('    const filterKey = JSON.stringify(params);')
+    lines.append('    if (offset === 0 && this.loadedFilters.get(filterKey)) return;')
+    lines.append('    if (this.isLoading()) return;')
+    lines.append('')
+    lines.append('    const baseUrl = this.listUrl(params);')
+    lines.append('    const separator = baseUrl.includes(\'?\') ? \'&\' : \'?\';')
+    lines.append('    const urlParams = new URLSearchParams();')
+    lines.append('    if (offset > 0) urlParams.set(\'offset\', offset.toString());')
+    lines.append('    urlParams.set(\'limit\', \'100\');')
+    lines.append('    const queryString = urlParams.toString();')
+    lines.append('    const url = queryString ? `${baseUrl}${separator}${queryString}` : baseUrl;')
     lines.append('    if (this.auth.fetchedRoutes.has(url)) return;')
     lines.append('    this.auth.fetchedRoutes.add(url);')
-    lines.append('    const hasFilters = Object.keys(params).length > 0;')
-    lines.append(f'    this.http.get<{iname}Out[]>(url, {{ headers: this.headers }})')
-    lines.append(f'      .pipe(catchError(() => of([] as {iname}Out[])))')
-    lines.append('      .subscribe(data => { if (hasFilters) this.mergeItems(data); else this.setItems(data); });')
+    lines.append('')
+    lines.append('    this.isLoading.set(true);')
+    lines.append(f'    this.http.get<{{data: {iname}Out[], meta: {{offset: number, limit: number, has_more: boolean}}}}>(url, {{ headers: this.headers }})')
+    lines.append('      .pipe(catchError(() => of({ data: [], meta: { offset, limit: 100, has_more: false } })))')
+    lines.append('      .subscribe(response => {')
+    lines.append('        if (offset === 0) this.setItems(response.data);')
+    lines.append('        else this.mergeItems(response.data);')
+    lines.append('        this.hasMore.set(response.meta.has_more);')
+    lines.append('        this.currentOffset.set(offset + response.data.length);')
+    lines.append('        this.isLoading.set(false);')
+    lines.append('        if (!response.meta.has_more) this.loadedFilters.set(filterKey, true);')
+    lines.append('      });')
+    lines.append('  }')
+    lines.append('')
+    lines.append(f'  loadMore(params: Partial<{iname}Out> = {{}}): void {{')
+    lines.append('    if (!this.hasMore() || this.isLoading()) return;')
+    lines.append('    this.list(params, this.currentOffset());')
     lines.append('  }')
     lines.append('')
 
@@ -803,7 +831,7 @@ def _store(
         lines.append('  clear(): void { this.items.set([]); this.byId.set(new Map()); }')
     else:
         lines.append(f'  setItems(data: {iname}Out[]): void {{ this.items.set(data); }}')
-        lines.append(f'  mergeItems(data: {iname}Out[]): void {{ this.items.set(data); }}')
+        lines.append(f'  mergeItems(data: {iname}Out[]): void {{ this.items.set([...this.items(), ...data]); }}')
         lines.append('  clear(): void { this.items.set([]); }')
 
     lines.append('}')
@@ -996,7 +1024,7 @@ def _list_component(
         pk_id_line = ''
 
     return f"""\
-import {{ Component, computed, effect, inject, Input, signal, untracked }} from '@angular/core';
+import {{ Component, computed, effect, inject, Input, signal, untracked, DestroyRef, afterNextRender, ViewChildren, QueryList, ElementRef }} from '@angular/core';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 {router_link_es}import {{ Router }} from '@angular/router';
@@ -1024,10 +1052,13 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
         </thead>
         <tbody>
           @for (item of displayItems(); track $index) {{
-            <tr class="border-t hover:bg-gray-50{cursor}"{row_click}>
+            <tr #dataRow class="border-t hover:bg-gray-50{cursor}"{row_click}>
               {action_td}
               {td_cols}
             </tr>
+          }}
+          @if (store.isLoading()) {{
+            <tr><td colspan="100" class="text-center py-4 text-gray-500">Loading...</td></tr>
           }}
         </tbody>
       </table>
@@ -1053,6 +1084,11 @@ export class {iname}ListComponent {{
   protected auth   = inject(AuthService);
   protected router = inject(Router);{fk_injects}
   protected String = String;  // For template use{pk_id_line}
+  private destroyRef = inject(DestroyRef);
+
+  @ViewChildren('dataRow') dataRows!: QueryList<ElementRef<HTMLTableRowElement>>;
+  private observer?: IntersectionObserver;
+  private currentLastElement?: Element;
 
   @Input() filters: Partial<{iname}Out> = {{}};
   @Input() embedded = false;
@@ -1066,12 +1102,53 @@ export class {iname}ListComponent {{
   constructor() {{
     effect(() => {{
       const _token = this.auth.token();
+      // Don't reload if we already have data (for infinite scroll)
+      if (this.store.items().length > 0) {{
+        return;
+      }}
       if (Object.keys(this.filters).length > 0 &&
           this.auth.fetchedRoutes.has(this.store.listUrl({{}}))) {{
         return;
       }}
       this.store.list(this.filters);
     }});{ws_effect}
+
+    // Set up observer
+    this.observer = new IntersectionObserver(
+      (entries) => {{
+        if (entries[0].isIntersecting && this.store.hasMore() && !this.store.isLoading()) {{
+          this.store.loadMore(this.filters);
+        }}
+      }},
+      {{ rootMargin: '0px 0px 400px 0px' }}
+    );
+
+    // Re-observe when items change (must be in constructor for injection context)
+    effect(() => {{
+      this.store.items().length;  // Track changes
+      untracked(() => {{
+        setTimeout(() => this.updateObservedElement(), 0);
+      }});
+    }});
+
+    // Initial observation after render
+    afterNextRender(() => {{
+      this.updateObservedElement();
+    }});
+
+    this.destroyRef.onDestroy(() => {{
+      this.observer?.disconnect();
+    }});
+  }}
+
+  private updateObservedElement() {{
+    if (this.currentLastElement) this.observer?.unobserve(this.currentLastElement);
+    const rows = this.dataRows.toArray();
+    if (rows.length > 0) {{
+      const lastElement = rows[rows.length - 1].nativeElement;
+      this.currentLastElement = lastElement;
+      this.observer?.observe(lastElement);
+    }}
   }}
 
   sortBy(f: string): void {{

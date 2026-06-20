@@ -124,7 +124,7 @@ class SvelteGenerator(StoreGenerator):
                 lines.append(f'class {iname}State {{')
                 lines.append(f'    items = $state<{iname}Out[]>([]);')
                 lines.append(f'    setItems(data: {iname}Out[]) {{ this.items = data; }}')
-                lines.append(f'    mergeItems(data: {iname}Out[]) {{ this.items = data; }}')
+                lines.append(f'    mergeItems(data: {iname}Out[]) {{ this.items = [...this.items, ...data]; }}')
 
             if fk_deps:
                 lines.append('')
@@ -179,15 +179,20 @@ class SvelteGenerator(StoreGenerator):
                     f"             }},"
                 )
                 api_entries.append(
-                    f"    list:    (params: Partial<{iname}Out> = {{}}) => {{\n"
+                    f"    list:    async (params: Partial<{iname}Out> = {{}}, offset: number = 0): Promise<{{has_more: boolean, offset: number}}> => {{\n"
                     f"                 const filtered = Object.fromEntries(\n"
                     f"                   Object.entries(params)\n"
                     f"                     .filter(([_, v]) => v != null && (typeof v !== 'string' || v !== ''))\n"
                     f"                     .map(([k, v]) => [`ho_col_${{k}}`, v])\n"
                     f"                 );\n"
-                    f"                 const qs = new URLSearchParams(filtered as any).toString();\n"
+                    f"                 const qs = new URLSearchParams({{...filtered, offset: offset.toString(), limit: '100'}} as any).toString();\n"
                     f"                 const url = qs ? _BASE + '?' + qs : _BASE;\n"
-                    f"                 return _fetch(url, {{ headers: _hdrs() }});\n"
+                    f"                 const res = await _fetch(url, {{ headers: _hdrs() }});\n"
+                    f"                 if (!res.ok) return {{ has_more: false, offset }};\n"
+                    f"                 const {{ data, meta }} = await res.json();\n"
+                    f"                 if (offset === 0) {rname}State.setItems(data);\n"
+                    f"                 else {rname}State.mergeItems(data);\n"
+                    f"                 return {{ has_more: meta.has_more, offset: offset + data.length }};\n"
                     f"             }},"
                 )
                 if pk_info:
