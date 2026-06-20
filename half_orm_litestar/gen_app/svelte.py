@@ -856,21 +856,23 @@ def _detail_page(
 
     ro_fields = '\n    '.join(_ro_row(f) for f in read_only) if read_only else ''
 
+    visible_put = [f for f in put_in_names if not _is_server_generated(f, all_fields)]
+
     # Edit form fields
     form_fields = '\n    '.join(
         _svelte_form_field(f, all_fields)
-        for f in put_in_names
-    ) if put_in_names else ''
+        for f in visible_put
+    ) if visible_put else ''
 
     # Form state + edit toggle — populated reactively from item once loaded
     extra_script = ''
     edit_btn     = ''
     edit_section = ''
 
-    if has_put and put_in_names:
+    if has_put and visible_put:
         empty_init  = ', '.join(
             f'{f}: false' if _is_bool_field(f, all_fields) else f'{f}: ""'
-            for f in put_in_names
+            for f in visible_put
         )
         def _effect_assign(f: str) -> str:
             if _is_bool_field(f, all_fields):
@@ -878,8 +880,8 @@ def _detail_page(
             if _input_type(f, all_fields) == 'datetime-local':
                 return f'form.{f} = item.{f} ? String(item.{f}).slice(0, 16) : "";'
             return f'form.{f} = (item.{f} as string) ?? "";'
-        effect_body = '\n        '.join(_effect_assign(f) for f in put_in_names)
-        put_text_fields_js = _text_fields_js(put_in_names, all_fields)
+        effect_body = '\n        '.join(_effect_assign(f) for f in visible_put)
+        put_text_fields_js = _text_fields_js(visible_put, all_fields)
         extra_script = (
             f'\n  let editing = $state(false);\n'
             f'  let form = $state({{ {empty_init} }});\n'
@@ -936,7 +938,7 @@ def _detail_page(
     can_edit      = f"\n  const canEdit = $derived(!!auth.access['{map_key}']?.PUT);" if has_put else ''
     edit_btn_wrap = (
         f'\n      {{#if canEdit}}{edit_btn}\n      {{/if}}'
-        if has_put and put_in_names else ''
+        if has_put and visible_put else ''
     )
 
     # Forward FK reference imports, states, effects, sections

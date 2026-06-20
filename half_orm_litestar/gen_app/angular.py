@@ -1251,14 +1251,16 @@ def _detail_component(
     can_edit_field = ''
     form_effect = ''
 
-    if has_put and put_in_names:
+    visible_put = [f for f in put_in_names if not _is_server_generated(f, all_fields)]
+
+    if has_put and visible_put:
         form_fields_tmpl = '\n        '.join(
             _ng_form_field(f, all_fields).replace('\n        ', '\n          ')
-            for f in put_in_names
+            for f in visible_put
         )
         form_init = ', '.join(
             f'{f}: false as any' if _is_bool_field(f, all_fields) else f'{f}: \'\' as any'
-            for f in put_in_names
+            for f in visible_put
         )
         form_class = f'  form: any = {{ {form_init} }};'
         can_edit_field = f"\n  readonly canEdit = computed(() => !!this.auth.access()['{map_key}']?.PUT);"
@@ -1276,7 +1278,7 @@ def _detail_component(
             if _input_type(f, all_fields) == 'datetime-local':
                 return f'this.form.{f} = (i as any).{f} ? String((i as any).{f}).slice(0, 16) : \'\';'
             return f'this.form.{f} = (i as any).{f} ?? \'\';'
-        effect_body = ' '.join(_effect_assign(f) for f in put_in_names)
+        effect_body = ' '.join(_effect_assign(f) for f in visible_put)
         form_effect = (
             f'\n    effect(() => {{ const i = this.item(); if (i) {{ {effect_body} }} }}, {{ allowSignalWrites: true }});'
         )
