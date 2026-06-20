@@ -33,4 +33,4 @@ build: check-main-branch check-repo-clean clean_build
 .PHONY: publish
 publish: build
 	@echo "Publishing to PyPI..."
-	twine upload -r half-orm-litestar dist/*
+	twine upload -r half-orm-gen dist/*
