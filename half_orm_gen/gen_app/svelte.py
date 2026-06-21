@@ -586,14 +586,35 @@ def _list_component(
         // Must match YYYY-MM-DD format
         return /^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(operand);
       case 'datetime':
-        // Must match YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS format
-        return /^\\d{{4}}-\\d{{2}}-\\d{{2}} \\d{{2}}:\\d{{2}}(:\\d{{2}})?$/.test(operand);
+        // Must match YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM or with seconds, or just YYYY-MM-DD
+        return /^\\d{{4}}-\\d{{2}}-\\d{{2}}([ T]\\d{{2}}:\\d{{2}}(:\\d{{2}})?)?$/.test(operand);
       case 'number':
         // Must be a valid number
         return !isNaN(Number(operand)) && operand.trim() !== '';
       default:
         return true;
     }}
+  }}
+
+  function normalizeFilterValue(field: string, value: string): string {{
+    const fieldType = fieldTypes[field];
+    if (!fieldType) return value;
+
+    const match = value.match(/^(>=|>|<=|<)(.*)$/);
+    const operator = match ? match[1] : '';
+    const operand = match ? match[2].trim() : value;
+
+    if (fieldType === 'datetime') {{
+      // Replace 'T' with space for backend compatibility
+      let normalized = operand.replace('T', ' ');
+      // If only date is provided (YYYY-MM-DD), append 00:00
+      if (/^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(normalized)) {{
+        normalized = normalized + ' 00:00';
+      }}
+      return operator + normalized;
+    }}
+
+    return value;
   }}"""
 
     return f"""\
@@ -697,7 +718,8 @@ def _list_component(
       const filterPairs: string[] = [];
       Object.entries(localFilters).forEach(([key, val]) => {{
         if (val && isValidFilterValue(key, val)) {{
-          filterPairs.push(`${{key}}:${{val}}`);
+          const normalizedVal = normalizeFilterValue(key, val);
+          filterPairs.push(`${{key}}:${{normalizedVal}}`);
         }}
       }});
       const hasFiltersNow = filterPairs.length > 0;
@@ -772,11 +794,13 @@ def _list_component(
       }}
 
       // Otherwise lexicographic comparison (for dates/strings)
-      const strItem = String(itemValue ?? '');
-      if (op === '>=') return strItem >= trimmedVal;
-      if (op === '>') return strItem > trimmedVal;
-      if (op === '<=') return strItem <= trimmedVal;
-      if (op === '<') return strItem < trimmedVal;
+      // Normalize datetime: replace 'T' with space for consistent comparison
+      const strItem = String(itemValue ?? '').replace('T', ' ');
+      const normalizedVal = trimmedVal.replace('T', ' ');
+      if (op === '>=') return strItem >= normalizedVal;
+      if (op === '>') return strItem > normalizedVal;
+      if (op === '<=') return strItem <= normalizedVal;
+      if (op === '<') return strItem < normalizedVal;
     }}
 
     // Normal text filter (startsWith + unaccent)
