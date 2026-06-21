@@ -415,7 +415,7 @@ export class AppComponent implements OnInit {{
   navFilter = signal('');
   readonly navItems = [
       {nav_items_js}
-  ];
+  ].sort((a, b) => a.label.localeCompare(b.label));
   readonly filteredNav = computed(() =>
     this.navFilter()
       ? this.navItems.filter(i => i.label.toLowerCase().includes(this.navFilter().toLowerCase()))

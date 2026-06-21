@@ -396,7 +396,7 @@ def _layout(resources: list) -> str:
   let navFilter = $state('');
   const navItems = [
     {nav_items_js}
-  ];
+  ].sort((a, b) => a.label.localeCompare(b.label));
   const filteredNav = $derived(
     navFilter
       ? navItems.filter(i => i.label.toLowerCase().includes(navFilter.toLowerCase()))
