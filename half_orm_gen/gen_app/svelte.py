@@ -152,6 +152,7 @@ _APP_CSS = """\
 
 def _auth_store(version_prefix: str) -> str:
     return f"""\
+import {{ goto }} from '$app/navigation';
 import {{ clearAllStates }} from '$lib/stateRegistry';
 
 export type WsEvent = {{ event: 'create' | 'update' | 'delete'; resource: string; id: unknown }};
@@ -177,6 +178,13 @@ class AuthState {{
         this.token = null;
         this.fetchedRoutes = new Set();
         clearAllStates();
+
+        // Clear filter query params on logout
+        if (typeof window !== 'undefined' && window.location.search.includes('f_')) {{
+            const currentPath = window.location.pathname;
+            goto(currentPath, {{ replaceState: true }});
+        }}
+
         this._fetchAccess();
     }}
 
@@ -469,10 +477,10 @@ def _list_component(
 
     def _sort_th(f: str) -> str:
         toggle = (
-            f"() => {{ if (sortField === '{f}') sortAsc = !sortAsc;"
-            f" else {{ sortField = '{f}'; sortAsc = true; }} }}"
+            f"() => {{ if ({rname}State.sortField === '{f}') {rname}State.sortAsc = !{rname}State.sortAsc;"
+            f" else {{ {rname}State.sortField = '{f}'; {rname}State.sortAsc = true; }} }}"
         )
-        indicator = f"{{#if sortField === '{f}'}}{{sortAsc ? '↑' : '↓'}}{{/if}}"
+        indicator = f"{{#if {rname}State.sortField === '{f}'}}{{{rname}State.sortAsc ? '↑' : '↓'}}{{/if}}"
         return (
             f'<th onclick={{{toggle}}}'
             f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600'
@@ -490,7 +498,14 @@ def _list_component(
         f'placeholder="…" class="w-full text-xs border rounded px-2 py-1 font-normal" /></th>'
         for f in out_names
     )
-    action_filter_th = '<th></th>' if has_del and pk_field else ''
+    action_filter_th = (
+        '<th class="px-2 py-1">'
+        '<button onclick={() => clearAllFilters()} '
+        'disabled={Object.keys(localFilters).length === 0} '
+        'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
+        'title="Clear all filters">✕</button>'
+        '</th>'
+    ) if has_del and pk_field else ''
     filter_row = (
         f'\n      {{#if !embedded}}\n'
         f'      <tr class="bg-white border-b">\n'
@@ -526,7 +541,14 @@ def _list_component(
     td_cols = '\n          '.join(_td(f) for f in out_names)
 
     if pk_field:
-        tr_attrs = f'class="border-t hover:bg-gray-50 cursor-pointer" onclick={{() => goto(`/ho_bo/{schema_name}/{table_name}/{pk_item_url}`)}}'
+        tr_attrs = (
+            f'class="border-t hover:bg-gray-50 cursor-pointer" '
+            f'class:bg-blue-50={{{rname}State.selectedId === String({pk_item_expr})}} '
+            f'class:border-l-4={{{rname}State.selectedId === String({pk_item_expr})}} '
+            f'class:border-l-blue-500={{{rname}State.selectedId === String({pk_item_expr})}} '
+            f'data-item-id={{String({pk_item_expr})}} '
+            f'onclick={{() => selectAndNavigate(String({pk_item_expr}))}}'
+        )
     else:
         tr_attrs = 'class="border-t hover:bg-gray-50"'
 
@@ -615,6 +637,42 @@ def _list_component(
     }}
 
     return value;
+  }}
+
+  function initFiltersFromUrl(searchParams: URLSearchParams): Record<string, string> {{
+    const urlFilters: Record<string, string> = {{}};
+
+    searchParams.forEach((value, key) => {{
+      if (key.startsWith('f_')) {{
+        const fieldName = key.substring(2);
+        const decodedValue = decodeURIComponent(value);
+
+        // Validate before accepting
+        if (isValidFilterValue(fieldName, decodedValue)) {{
+          urlFilters[fieldName] = decodedValue;
+        }}
+      }}
+    }});
+
+    return urlFilters;
+  }}
+
+  function buildUrlWithFilters(currentPath: string, filters: Record<string, string>): string {{
+    const url = new URL(currentPath, window.location.origin);
+
+    // Clear existing filter params
+    Array.from(url.searchParams.keys())
+      .filter(k => k.startsWith('f_'))
+      .forEach(k => url.searchParams.delete(k));
+
+    // Add current filters
+    Object.entries(filters).forEach(([field, value]) => {{
+      if (value && isValidFilterValue(field, value)) {{
+        url.searchParams.set(`f_${{field}}`, encodeURIComponent(value));
+      }}
+    }});
+
+    return url.pathname + url.search;
   }}"""
 
     return f"""\
@@ -623,14 +681,46 @@ def _list_component(
   import type {{ {iname}Out }} from '$lib/generated/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ untrack }} from 'svelte';
-{goto_import}
+  import {{ goto }} from '$app/navigation';
+
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
   const hasFilters = $derived(Object.keys(filters).length > 0);
+{field_types_code}
 {"" if not pk_field else f"""
   let localFilters = $state<Record<string, string>>({{}});
-  let sortField    = $state<string | null>(null);
-  let sortAsc      = $state(true);
+
+  // Initialize localFilters from URL or store on mount (using a closure to run once)
+  (() => {{
+    if (!embedded) {{
+      const urlFilters = initFiltersFromUrl(new URLSearchParams(window.location.search));
+      if (Object.keys(urlFilters).length > 0) {{
+        // URL has priority
+        localFilters = urlFilters;
+        {rname}State.filters = urlFilters;
+      }} else {{
+        // Try to restore from store
+        const storeFilters = {rname}State.filters;
+        if (Object.keys(storeFilters).length > 0) {{
+          localFilters = storeFilters;
+          // Update URL to reflect store filters
+          const newUrl = buildUrlWithFilters(window.location.pathname, storeFilters);
+          if (newUrl !== window.location.pathname + window.location.search) {{
+            goto(newUrl, {{ replaceState: true, keepFocus: true }});
+          }}
+        }}
+      }}
+    }}
+  }})();
+
+  function clearAllFilters() {{
+    localFilters = {{}};
+  }}
+
+  function selectAndNavigate(id: string) {{
+    {rname}State.selectedId = id;
+    goto(`/ho_bo/{schema_name}/{table_name}/${{id}}`);
+  }}
 
   const displayItems = $derived.by(() => {{
     let items: {iname}Out[] = hasFilters
@@ -641,9 +731,9 @@ def _list_component(
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
-    const sf = sortField;
+    const sf = {rname}State.sortField;
     if (sf) {{
-      const asc = sortAsc;
+      const asc = {rname}State.sortAsc;
       items = [...items].sort((a, b) => {{
         const av = String((a as any)[sf] ?? '');
         const bv = String((b as any)[sf] ?? '');
@@ -654,8 +744,6 @@ def _list_component(
   }});
 """.rstrip()}{"" if pk_field else f"""
   let localFilters = $state<Record<string, string>>({{}});
-  let sortField    = $state<string | null>(null);
-  let sortAsc      = $state(true);
 
   const displayItems = $derived.by(() => {{
     let items: {iname}Out[] = {rname}State.items;
@@ -663,9 +751,9 @@ def _list_component(
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
-    const sf = sortField;
+    const sf = {rname}State.sortField;
     if (sf) {{
-      const asc = sortAsc;
+      const asc = {rname}State.sortAsc;
       items = [...items].sort((a, b) => {{
         const av = String((a as any)[sf] ?? '');
         const bv = String((b as any)[sf] ?? '');
@@ -675,7 +763,6 @@ def _list_component(
     return items;
   }});
 """.rstrip()}
-{field_types_code}
 
   let hasMore = $state(true);
   let currentOffset = $state(0);
@@ -740,6 +827,28 @@ def _list_component(
     }}, 600);
   }});
 
+  // Sync filters to URL and store (with debounce handling)
+  let urlSyncTimer: number | undefined;
+  $effect(() => {{
+    if (embedded) return; // Don't sync URL for embedded components
+
+    // Track localFilters changes
+    const lf = localFilters;
+
+    if (urlSyncTimer) clearTimeout(urlSyncTimer);
+    urlSyncTimer = window.setTimeout(() => {{
+      // Update store with current filters
+      {rname}State.filters = lf;
+
+      const newUrl = buildUrlWithFilters(window.location.pathname, lf);
+
+      // Only update if URL actually changed
+      if (newUrl !== window.location.pathname + window.location.search) {{
+        goto(newUrl, {{ replaceState: true, keepFocus: true }});
+      }}
+    }}, 650); // Slightly longer than filter debounce to ensure they sync
+  }});
+
   function onIntersect(node: HTMLElement, isLast: boolean) {{
     if (!isLast) return {{ destroy() {{}} }};  // Only observe last element
     const observer = new IntersectionObserver(
@@ -765,6 +874,22 @@ def _list_component(
       untrack(() => {rname}Api.get(ev.id)
         .then(r => r.ok ? r.json() : null)
         .then(d => {{ if (d) {rname}State.setItem(d); }}));
+    }}
+  }});
+
+  // Scroll to selected item when component mounts or items change
+  $effect(() => {{
+    const selectedId = {rname}State.selectedId;
+    const items = displayItems; // Track displayItems changes
+
+    if (selectedId && items.length > 0) {{
+      // Use setTimeout to ensure DOM is updated
+      setTimeout(() => {{
+        const element = document.querySelector(`[data-item-id="${{selectedId}}"]`);
+        if (element) {{
+          element.scrollIntoView({{ block: 'center', behavior: 'smooth' }});
+        }}
+      }}, 100);
     }}
   }});
 """.rstrip()}
@@ -1284,22 +1409,31 @@ def _detail_page(
   import {{ untrack }} from 'svelte';{fk_imports}{rev_imports}
 
   let {{ id }}: {{ id: string }} = $props();
-  let item      = $state<{iname}Out | null>({rname}State.byId.get(id) ?? null);
+  let item      = $state<{iname}Out | null>(null);
   let _lastToken = auth.token;
 {fk_states}
   $effect(() => {{
     const t = auth.token;
+    const currentId = id; // Capture id reactively
     if (t !== _lastToken) {{ _lastToken = t; item = null; }}
-    if (!item)
-      {rname}Api.get(id).then(r => r.ok ? r.json() : null)
+
+    // Try to get from cache first
+    const cached = {rname}State.byId.get(currentId);
+    if (cached) {{
+      item = cached;
+    }} else if (!item || String((item as any).{pk_field}) !== currentId) {{
+      // Load from API if not in cache or if id changed
+      {rname}Api.get(currentId).then(r => r.ok ? r.json() : null)
                 .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }});
+    }}
   }});
 
   $effect(() => {{
     const ev = auth.lastEvent;
-    if (ev?.resource === '{map_key}' && String(ev.id) === id) {{
+    const currentId = id; // Capture id reactively
+    if (ev?.resource === '{map_key}' && String(ev.id) === currentId) {{
       if (ev.event === 'delete') goto('/ho_bo/{schema_name}/{table_name}');
-      else untrack(() => {rname}Api.get(id).then(r => r.ok ? r.json() : null)
+      else untrack(() => {rname}Api.get(currentId).then(r => r.ok ? r.json() : null)
                 .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }}));
     }}
   }});

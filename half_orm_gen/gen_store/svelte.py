@@ -123,6 +123,10 @@ class SvelteGenerator(StoreGenerator):
             else:
                 lines.append(f'class {iname}State {{')
                 lines.append(f'    items = $state<{iname}Out[]>([]);')
+                lines.append(f'    // Persisted UI state')
+                lines.append(f'    filters = $state<Record<string, string>>({{}});')
+                lines.append(f'    sortField = $state<string | null>(null);')
+                lines.append(f'    sortAsc = $state(true);')
                 lines.append(f'    setItems(data: {iname}Out[]) {{ this.items = data; }}')
                 lines.append(f'    mergeItems(data: {iname}Out[]) {{ this.items = [...this.items, ...data]; }}')
 
@@ -251,6 +255,12 @@ class SvelteGenerator(StoreGenerator):
 export class BaseState<V> {
     byId  = $state(new Map<string, V>());
     items = $derived([...this.byId.values()]);
+
+    // Persisted UI state
+    filters = $state<Record<string, string>>({});  // Active filters
+    selectedId = $state<string | null>(null);  // Selected item ID
+    sortField = $state<string | null>(null);  // Sort field
+    sortAsc = $state(true);  // Sort direction
 
     constructor(private readonly pk: (item: V) => string) {}
 

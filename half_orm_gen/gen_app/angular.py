@@ -285,7 +285,8 @@ def _proxy_conf(version_prefix: str) -> str:
 
 def _auth_service(version_prefix: str) -> str:
     return f"""\
-import {{ Injectable, signal }} from '@angular/core';
+import {{ Injectable, signal, inject }} from '@angular/core';
+import {{ Router }} from '@angular/router';
 import {{ Subject }} from 'rxjs';
 import {{ clearAllStates }} from './state-registry';
 
@@ -297,6 +298,7 @@ export interface WsEvent {{
 
 @Injectable({{ providedIn: 'root' }})
 export class AuthService {{
+  private router = inject(Router);
   readonly token      = signal<string | null>(
     typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
   );
@@ -317,6 +319,13 @@ export class AuthService {{
     this.token.set(null);
     this.fetchedRoutes.clear();
     clearAllStates();
+
+    // Clear filter query params on logout
+    if (this.router.url.includes('f_')) {{
+      const currentUrl = this.router.url.split('?')[0];
+      void this.router.navigate([currentUrl], {{ queryParams: {{}} }});
+    }}
+
     void this._fetchAccess();
   }}
 
@@ -722,6 +731,12 @@ def _store(
     lines.append('  readonly currentOffset = signal(0);  // Current pagination offset')
     lines.append('  readonly isLoading = signal(false);  // Loading state')
     lines.append('')
+    lines.append('  // Persisted UI state')
+    lines.append('  readonly filters = signal<Record<string, string>>({});  // Active filters')
+    lines.append('  readonly selectedId = signal<string | null>(null);  // Selected item ID')
+    lines.append('  readonly sortField = signal<string | null>(null);  // Sort field')
+    lines.append('  readonly sortAsc = signal(true);  // Sort direction')
+    lines.append('')
     lines.append('  constructor() { registerClear(() => this.clear()); }')
     lines.append('')
     lines.append('  private get headers(): HttpHeaders {')
@@ -906,7 +921,7 @@ def _list_component(
         f'<th (click)="sortBy(\'{f}\')"'
         f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600'
         f' cursor-pointer select-none hover:bg-gray-200">'
-        f'{f} {{{{ sortField() === \'{f}\' ? (sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
+        f'{f} {{{{ store.sortField() === \'{f}\' ? (store.sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
         for f in out_names
     )
     action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
@@ -920,7 +935,14 @@ def _list_component(
         f' class="w-full text-xs border rounded px-2 py-1" /></th>'
         for f in out_names
     )
-    action_filter_th = '<th></th>' if has_del and pk_field else ''
+    action_filter_th = (
+        '<th class="px-2 py-1">'
+        '<button (click)="clearAllFilters()" '
+        '[disabled]="Object.keys(localFilters()).length === 0" '
+        'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
+        'title="Clear all filters">✕</button>'
+        '</th>'
+    ) if has_del and pk_field else ''
     filter_row = (
         f'\n          @if (!embedded) {{\n'
         f'          <tr class="bg-white border-b">\n'
@@ -952,7 +974,7 @@ def _list_component(
     td_cols = '\n              '.join(_td(f) for f in out_names)
 
     row_click = (
-        f' (click)="router.navigate([\'/ho_bo/{schema_name}/{table_name}\', getPkId(item)])"'
+        f' (click)="selectAndNavigate(getPkId(item))"'
         if pk_field else ''
     )
     cursor = ' cursor-pointer' if pk_field else ''
@@ -989,6 +1011,15 @@ def _list_component(
             f'      this.store.remove(id).subscribe(() => this.store.removeItem(String(id)));\n'
             f'    }}\n'
             f'  }}'
+        )
+
+    select_fn = ''
+    if pk_field:
+        select_fn = (
+            f'\n  selectAndNavigate(id: string): void {{\n'
+            f'    this.store.selectedId.set(id);\n'
+            f"    this.router.navigate(['/ho_bo/{schema_name}/{table_name}', id]);\n"
+            f'  }}\n'
         )
 
     ws_effect = (
@@ -1079,9 +1110,9 @@ def _list_component(
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) => this.matchFilter((item as any)[k], v)));
-    const sf = this.sortField();
+    const sf = this.store.sortField();
     if (sf) {{
-      const asc = this.sortAsc();
+      const asc = this.store.sortAsc();
       items = [...items].sort((a, b) => {{
         const av = String((a as any)[sf] ?? '');
         const bv = String((b as any)[sf] ?? '');
@@ -1097,14 +1128,21 @@ def _list_component(
         # Add type annotation to lambda parameter
         typed_extractor = pk_extractor.replace('i =>', f'(i: {iname}Out) =>')
         pk_id_line = f'\n  protected getPkId = {typed_extractor};'
+        highlight_attrs = (
+            '\n                [class.bg-blue-50]="store.selectedId() === getPkId(item)"\n'
+            '                [class.border-l-4]="store.selectedId() === getPkId(item)"\n'
+            '                [class.border-l-blue-500]="store.selectedId() === getPkId(item)"'
+        )
     else:
         pk_id_line = ''
+        highlight_attrs = ''
 
     return f"""\
 import {{ Component, computed, effect, inject, Input, signal, untracked, DestroyRef, afterNextRender, ViewChildren, QueryList, ElementRef }} from '@angular/core';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
-{router_link_es}import {{ Router }} from '@angular/router';
+{router_link_es}import {{ Router, ActivatedRoute }} from '@angular/router';
+import {{ Location }} from '@angular/common';
 import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
 import type {{ {iname}Out }} from '../../../generated/stores/{schema_name}_{table_name}.store';
 import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
@@ -1129,7 +1167,7 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
         </thead>
         <tbody>
           @for (item of displayItems(); track $index) {{
-            <tr #dataRow class="border-t hover:bg-gray-50{cursor}"{row_click}>
+            <tr #dataRow class="border-t hover:bg-gray-50{cursor}"{row_click}{highlight_attrs}>
               {action_td}
               {td_cols}
             </tr>
@@ -1159,8 +1197,11 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
 export class {iname}ListComponent {{
   protected store  = inject({iname}Store);
   protected auth   = inject(AuthService);
-  protected router = inject(Router);{fk_injects}
-  protected String = String;  // For template use{pk_id_line}
+  protected router = inject(Router);
+  private route = inject(ActivatedRoute);
+  private location = inject(Location);{fk_injects}
+  protected String = String;  // For template use
+  protected Object = Object;  // For template use{pk_id_line}
   private destroyRef = inject(DestroyRef);
 
   @ViewChildren('dataRow') dataRows!: QueryList<ElementRef<HTMLTableRowElement>>;
@@ -1173,13 +1214,14 @@ export class {iname}ListComponent {{
   @Input() embedded = false;
 
   localFilters = signal<Record<string, string>>({{}});
-  sortField    = signal<string | null>(null);
-  sortAsc      = signal(true);
 {can_create}{can_delete}
 {field_types_map}
 {displayItems_block}
 
   constructor() {{
+    // Initialize filters from URL or store before loading data
+    this.initFiltersFromUrl();
+
     effect(() => {{
       const _token = this.auth.token();
       // Don't reload if we already have data (for infinite scroll)
@@ -1232,8 +1274,8 @@ export class {iname}ListComponent {{
   }}
 
   sortBy(f: string): void {{
-    if (this.sortField() === f) this.sortAsc.set(!this.sortAsc());
-    else {{ this.sortField.set(f); this.sortAsc.set(true); }}
+    if (this.store.sortField() === f) this.store.sortAsc.set(!this.store.sortAsc());
+    else {{ this.store.sortField.set(f); this.store.sortAsc.set(true); }}
   }}
   setFilter(f: string, v: string): void {{
     const updated = {{ ...this.localFilters(), [f]: v }};
@@ -1252,6 +1294,10 @@ export class {iname}ListComponent {{
         }}
       }});
       const hasFiltersNow = filterPairs.length > 0;
+
+      // Update URL with current filters
+      this.syncFiltersToUrl(updated);
+
       // Only trigger if we have filters now, or we had filters before (to clear them)
       if (hasFiltersNow || this.hadFilters) {{
         this.hadFilters = hasFiltersNow;
@@ -1314,7 +1360,78 @@ export class {iname}ListComponent {{
   cellTitle(v: unknown): string {{
     if (v == null || typeof v === 'object') return '';
     return String(v);
-  }}{delete_fn}
+  }}
+
+  private initFiltersFromUrl(): void {{
+    if (this.embedded) return; // Don't sync URL for embedded components
+
+    const params = this.route.snapshot.queryParams;
+    const urlFilters: Record<string, string> = {{}};
+
+    // Try to get filters from URL first
+    Object.entries(params).forEach(([key, value]) => {{
+      if (key.startsWith('f_') && typeof value === 'string') {{
+        const fieldName = key.substring(2);
+        const decodedValue = decodeURIComponent(value);
+
+        // Validate before accepting
+        if (this.isValidFilterValue(fieldName, decodedValue)) {{
+          urlFilters[fieldName] = decodedValue;
+        }}
+      }}
+    }});
+
+    // If URL has filters, use them (priority)
+    if (Object.keys(urlFilters).length > 0) {{
+      this.localFilters.set(urlFilters);
+      this.store.filters.set(urlFilters);
+    }} else {{
+      // Otherwise, try to restore from store
+      const storeFilters = this.store.filters();
+      if (Object.keys(storeFilters).length > 0) {{
+        this.localFilters.set(storeFilters);
+        // Update URL to reflect store filters
+        this.syncFiltersToUrl(storeFilters);
+      }}
+    }}
+  }}
+
+  private syncFiltersToUrl(filters: Record<string, string>): void {{
+    if (this.embedded) return; // Don't sync URL for embedded components
+
+    // Update store with current filters
+    this.store.filters.set(filters);
+
+    const queryParams: Record<string, string> = {{}};
+
+    // Preserve non-filter params
+    Object.entries(this.route.snapshot.queryParams).forEach(([key, value]) => {{
+      if (!key.startsWith('f_') && typeof value === 'string') {{
+        queryParams[key] = value;
+      }}
+    }});
+
+    // Add filter params
+    Object.entries(filters).forEach(([field, value]) => {{
+      if (value && this.isValidFilterValue(field, value)) {{
+        queryParams[`f_${{field}}`] = encodeURIComponent(value);
+      }}
+    }});
+
+    // Use replaceState to avoid polluting browser history
+    const urlTree = this.router.createUrlTree([], {{
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: '' // Replace all params
+    }});
+
+    this.location.replaceState(urlTree.toString());
+  }}
+
+  clearAllFilters(): void {{
+    this.localFilters.set({{}});
+    this.syncFiltersToUrl({{}});
+  }}{select_fn}{delete_fn}
 }}
 """
 
