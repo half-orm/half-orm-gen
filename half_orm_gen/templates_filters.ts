@@ -9,6 +9,7 @@ export type FieldType = 'date' | 'datetime' | 'number' | 'string';
  * Validates a filter value based on field type
  * @param field - Field name
  * @param value - Filter value (may contain operators like >=, >, <=, <)
+ *                Supports range syntax: >=2025<2026 for date/datetime
  * @param fieldTypes - Map of field names to their types
  * @returns true if valid, false otherwise
  */
@@ -20,23 +21,55 @@ export function isValidFilterValue(
   const fieldType = fieldTypes[field];
   if (!fieldType) return true;
 
-  // Extract operator and operand
+  // Check for range syntax: >=val1<val2 or >val1<=val2, etc.
+  const rangeMatch = value.match(/^(>=|>)(.+?)(<=|<)(.+)$/);
+  if (rangeMatch) {
+    const [, , operand1, , operand2] = rangeMatch;
+    const trimmed1 = operand1.trim();
+    const trimmed2 = operand2.trim();
+
+    // Validate both operands
+    switch (fieldType) {
+      case 'date':
+        return isValidDateOperand(trimmed1) && isValidDateOperand(trimmed2);
+      case 'datetime':
+        return isValidDatetimeOperand(trimmed1) && isValidDatetimeOperand(trimmed2);
+      case 'number':
+        return !isNaN(Number(trimmed1)) && trimmed1 !== '' &&
+               !isNaN(Number(trimmed2)) && trimmed2 !== '';
+      default:
+        return false;
+    }
+  }
+
+  // Single operator or no operator
   const match = value.match(/^(>=|>|<=|<)(.*)$/);
   const operand = match ? match[2].trim() : value;
 
   switch (fieldType) {
     case 'date':
-      // Must match YYYY-MM-DD format
-      return /^\d{4}-\d{2}-\d{2}$/.test(operand);
+      return isValidDateOperand(operand);
     case 'datetime':
-      // Must match YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM or with seconds, or just YYYY-MM-DD
-      return /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$/.test(operand);
+      return isValidDatetimeOperand(operand);
     case 'number':
-      // Must be a valid number
       return !isNaN(Number(operand)) && operand.trim() !== '';
     default:
       return true;
   }
+}
+
+/**
+ * Validates a date operand (supports YYYY, YYYY-MM, or YYYY-MM-DD)
+ */
+function isValidDateOperand(operand: string): boolean {
+  return /^\d{4}(-\d{2}(-\d{2})?)?$/.test(operand);
+}
+
+/**
+ * Validates a datetime operand (supports YYYY, YYYY-MM, YYYY-MM-DD, or full datetime)
+ */
+function isValidDatetimeOperand(operand: string): boolean {
+  return /^\d{4}(-\d{2}(-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?)?)?$/.test(operand);
 }
 
 /**
@@ -54,17 +87,41 @@ export function normalizeFilterValue(
   const fieldType = fieldTypes[field];
   if (!fieldType) return value;
 
+  // Check for range syntax: >=val1<val2
+  const rangeMatch = value.match(/^(>=|>)(.+?)(<=|<)(.+)$/);
+  if (rangeMatch) {
+    const [, op1, operand1, op2, operand2] = rangeMatch;
+    const trimmed1 = operand1.trim();
+    const trimmed2 = operand2.trim();
+
+    if (fieldType === 'date') {
+      const normalized1 = normalizeDateOperand(trimmed1);
+      const normalized2 = normalizeDateOperand(trimmed2);
+      return `${op1}${normalized1}${op2}${normalized2}`;
+    }
+
+    if (fieldType === 'datetime') {
+      const normalized1 = normalizeDatetimeOperand(trimmed1);
+      const normalized2 = normalizeDatetimeOperand(trimmed2);
+      return `${op1}${normalized1}${op2}${normalized2}`;
+    }
+
+    // For numbers, no normalization needed
+    return value;
+  }
+
+  // Single operator or no operator
   const match = value.match(/^(>=|>|<=|<)(.*)$/);
   const operator = match ? match[1] : '';
   const operand = match ? match[2].trim() : value;
 
   if (fieldType === 'datetime') {
-    // Replace 'T' with space for backend compatibility
-    let normalized = operand.replace('T', ' ');
-    // If only date is provided (YYYY-MM-DD), append 00:00
-    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-      normalized = normalized + ' 00:00';
-    }
+    const normalized = normalizeDatetimeOperand(operand);
+    return operator + normalized;
+  }
+
+  if (fieldType === 'date') {
+    const normalized = normalizeDateOperand(operand);
     return operator + normalized;
   }
 
@@ -72,15 +129,81 @@ export function normalizeFilterValue(
 }
 
 /**
+ * Normalizes a date operand to YYYY-MM-DD format
+ * - YYYY -> YYYY-01-01
+ * - YYYY-MM -> YYYY-MM-01
+ * - YYYY-MM-DD -> YYYY-MM-DD (unchanged)
+ */
+function normalizeDateOperand(operand: string): string {
+  if (/^\d{4}$/.test(operand)) {
+    return `${operand}-01-01`;
+  }
+  if (/^\d{4}-\d{2}$/.test(operand)) {
+    return `${operand}-01`;
+  }
+  return operand;
+}
+
+/**
+ * Normalizes a datetime operand to YYYY-MM-DD HH:MM format
+ * - YYYY -> YYYY-01-01 00:00
+ * - YYYY-MM -> YYYY-MM-01 00:00
+ * - YYYY-MM-DD -> YYYY-MM-DD 00:00
+ * - YYYY-MM-DDTHH:MM -> YYYY-MM-DD HH:MM (replace T with space)
+ */
+function normalizeDatetimeOperand(operand: string): string {
+  // Replace 'T' with space for backend compatibility
+  let normalized = operand.replace('T', ' ');
+
+  if (/^\d{4}$/.test(normalized)) {
+    return `${normalized}-01-01 00:00`;
+  }
+  if (/^\d{4}-\d{2}$/.test(normalized)) {
+    return `${normalized}-01 00:00`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return `${normalized} 00:00`;
+  }
+
+  return normalized;
+}
+
+/**
  * Matches an item value against a filter value with operator support
  * @param itemValue - Value from the item to match
- * @param filterValue - Filter value (may contain operators)
+ * @param filterValue - Filter value (may contain operators or range syntax)
  * @returns true if matches, false otherwise
  */
 export function matchFilter(itemValue: unknown, filterValue: string): boolean {
   if (!filterValue) return true;
 
-  // Detect comparison operator
+  // Detect range syntax: >=val1<val2
+  const rangeMatch = filterValue.match(/^(>=|>)(.+?)(<=|<)(.+)$/);
+  if (rangeMatch) {
+    const [, op1, val1, op2, val2] = rangeMatch;
+    const trimmedVal1 = val1.trim();
+    const trimmedVal2 = val2.trim();
+
+    // Try numeric comparison first
+    const numVal1 = Number(trimmedVal1);
+    const numVal2 = Number(trimmedVal2);
+    const numItem = Number(itemValue);
+    if (!isNaN(numVal1) && !isNaN(numVal2) && !isNaN(numItem)) {
+      const check1 = op1 === '>=' ? numItem >= numVal1 : numItem > numVal1;
+      const check2 = op2 === '<=' ? numItem <= numVal2 : numItem < numVal2;
+      return check1 && check2;
+    }
+
+    // Lexicographic comparison (for dates/strings)
+    const strItem = String(itemValue ?? '').replace('T', ' ');
+    const normalizedVal1 = trimmedVal1.replace('T', ' ');
+    const normalizedVal2 = trimmedVal2.replace('T', ' ');
+    const check1 = op1 === '>=' ? strItem >= normalizedVal1 : strItem > normalizedVal1;
+    const check2 = op2 === '<=' ? strItem <= normalizedVal2 : strItem < normalizedVal2;
+    return check1 && check2;
+  }
+
+  // Detect single comparison operator
   const match = filterValue.match(/^(>=|>|<=|<)(.*)$/);
   if (match) {
     const [, op, val] = match;

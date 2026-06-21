@@ -155,7 +155,9 @@ async def {handler_name}(
 
     # Parse 'q' parameter for search (format: col1:val1,col2:val2)
     # Values can start with comparison operators: >=, >, <=, <
+    # Supports range syntax: >=val1<val2 or >val1<=val2
     search_cols = []
+    range_filters = []  # Store range filters to apply after instance creation
     if q:
         import re
         for pair in q.split(','):
@@ -164,17 +166,27 @@ async def {handler_name}(
                 col = col.strip()
                 val = val.strip()
                 if col and val and col not in api_excluded:
-                    # Check for comparison operator at start
-                    match = re.match(r'^(>=|>|<=|<)(.*)$', val)
-                    if match:
-                        op, operand = match.groups()
-                        operand = operand.strip()
-                        if operand:  # Only add filter if operand is not empty
-                            filter_kwargs[col] = (op, operand)
+                    # Check for range syntax: >=val1<val2
+                    range_match = re.match(r'^(>=|>)(.+?)(<=|<)(.+)$', val)
+                    if range_match:
+                        op1, operand1, op2, operand2 = range_match.groups()
+                        operand1 = operand1.strip()
+                        operand2 = operand2.strip()
+                        if operand1 and operand2:
+                            # Store both conditions to apply after instance creation
+                            range_filters.append((col, op1, operand1, op2, operand2))
                     else:
-                        # Default: ilike with prefix matching
-                        filter_kwargs[col] = ('ilike', val + '%')
-                        search_cols.append(col)
+                        # Check for single comparison operator at start
+                        match = re.match(r'^(>=|>|<=|<)(.*)$', val)
+                        if match:
+                            op, operand = match.groups()
+                            operand = operand.strip()
+                            if operand:  # Only add filter if operand is not empty
+                                filter_kwargs[col] = (op, operand)
+                        else:
+                            # Default: ilike with prefix matching
+                            filter_kwargs[col] = ('ilike', val + '%')
+                            search_cols.append(col)
 
     role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
     authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
@@ -184,6 +196,19 @@ async def {handler_name}(
         projection = authorized
 
     inst = {module_alias}.{class_name}(**{{**filter_kwargs, **role_filter}})
+
+    # Apply range filters (must be done after instance creation)
+    for col, op1, operand1, op2, operand2 in range_filters:
+        field = getattr(inst, col)
+        if op1 == '>=':
+            field >= operand1
+        else:  # op1 == '>'
+            field > operand1
+        if op2 == '<=':
+            field <= operand2
+        else:  # op2 == '<'
+            field < operand2
+
     # Enable unaccent for search columns
     for col in search_cols:
         getattr(inst, col).unaccent = True
