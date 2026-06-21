@@ -736,9 +736,13 @@ def _store(
     lines.append('    if (offset === 0 && this.loadedFilters.get(filterKey)) return;')
     lines.append('    if (this.isLoading()) return;')
     lines.append('')
-    lines.append('    const baseUrl = this.listUrl(params);')
+    lines.append('    // Handle special \'q\' param for search (not prefixed with ho_col_)')
+    lines.append('    const searchQ = (params as any)[\'q\'];')
+    lines.append('    const otherParams = searchQ ? {} : params;')
+    lines.append('    const baseUrl = this.listUrl(otherParams);')
     lines.append('    const separator = baseUrl.includes(\'?\') ? \'&\' : \'?\';')
     lines.append('    const urlParams = new URLSearchParams();')
+    lines.append('    if (searchQ) urlParams.set(\'q\', searchQ);')
     lines.append('    if (offset > 0) urlParams.set(\'offset\', offset.toString());')
     lines.append('    urlParams.set(\'limit\', \'100\');')
     lines.append('    const queryString = urlParams.toString();')
@@ -750,7 +754,8 @@ def _store(
     lines.append(f'    this.http.get<{{data: {iname}Out[], meta: {{offset: number, limit: number, has_more: boolean}}}}>(url, {{ headers: this.headers }})')
     lines.append('      .pipe(catchError(() => of({ data: [], meta: { offset, limit: 100, has_more: false } })))')
     lines.append('      .subscribe(response => {')
-    lines.append('        if (offset === 0) this.setItems(response.data);')
+    lines.append('        // For backend search (q param), merge results; otherwise replace on offset 0')
+    lines.append('        if (offset === 0 && !searchQ) this.setItems(response.data);')
     lines.append('        else this.mergeItems(response.data);')
     lines.append('        this.hasMore.set(response.meta.has_more);')
     lines.append('        this.currentOffset.set(offset + response.data.length);')
@@ -762,6 +767,12 @@ def _store(
     lines.append(f'  loadMore(params: Partial<{iname}Out> = {{}}): void {{')
     lines.append('    if (!this.hasMore() || this.isLoading()) return;')
     lines.append('    this.list(params, this.currentOffset());')
+    lines.append('  }')
+    lines.append('')
+    lines.append('  resetFilterState(): void {')
+    lines.append('    this.loadedFilters.clear();')
+    lines.append('    this.hasMore.set(true);')
+    lines.append('    this.currentOffset.set(0);')
     lines.append('  }')
     lines.append('')
 
@@ -1001,7 +1012,8 @@ def _list_component(
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) =>
-          !v || String((item as any)[k] ?? '').toLowerCase().includes(v.toLowerCase())));
+          !v || this.removeAccents(String((item as any)[k] ?? '').toLowerCase())
+                  .startsWith(this.removeAccents(v.toLowerCase()))));
     const sf = this.sortField();
     if (sf) {{
       const asc = this.sortAsc();
@@ -1089,6 +1101,8 @@ export class {iname}ListComponent {{
   @ViewChildren('dataRow') dataRows!: QueryList<ElementRef<HTMLTableRowElement>>;
   private observer?: IntersectionObserver;
   private currentLastElement?: Element;
+  private filterDebounceTimer?: number;
+  private hadFilters = false;
 
   @Input() filters: Partial<{iname}Out> = {{}};
   @Input() embedded = false;
@@ -1156,12 +1170,35 @@ export class {iname}ListComponent {{
     else {{ this.sortField.set(f); this.sortAsc.set(true); }}
   }}
   setFilter(f: string, v: string): void {{
-    this.localFilters.set({{ ...this.localFilters(), [f]: v }});
+    const updated = {{ ...this.localFilters(), [f]: v }};
+    this.localFilters.set(updated);
+
+    // Apply filters on backend with debounce
+    if (this.filterDebounceTimer) clearTimeout(this.filterDebounceTimer);
+    this.filterDebounceTimer = window.setTimeout(() => {{
+      // Convert local filters to backend search query (q=col1:val1,col2:val2)
+      const filterPairs: string[] = [];
+      Object.entries(updated).forEach(([key, val]) => {{
+        if (val) filterPairs.push(`${{key}}:${{val}}`);
+      }});
+      const hasFiltersNow = filterPairs.length > 0;
+      // Only trigger if we have filters now, or we had filters before (to clear them)
+      if (hasFiltersNow || this.hadFilters) {{
+        this.hadFilters = hasFiltersNow;
+        // Reset pagination state and clear loaded filters cache
+        this.store.resetFilterState();
+        const searchParams = hasFiltersNow ? {{ q: filterPairs.join(',') }} as any : {{}};
+        this.store.list(searchParams, 0);
+      }}
+    }}, 600);
   }}
   jsonDialogContent = signal<string | null>(null);
   showJson(v: unknown): void {{ this.jsonDialogContent.set(JSON.stringify(v, null, 2)); }}
   cellClick(e: Event, v: unknown): void {{
     if (v != null && typeof v === 'object') {{ e.stopPropagation(); this.showJson(v); }}
+  }}
+  removeAccents(s: string): string {{
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }}
   fmtCell(v: unknown): string {{
     if (v == null) return '';

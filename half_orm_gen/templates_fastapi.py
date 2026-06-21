@@ -147,19 +147,37 @@ async def {handler_name}(
 {filter_params}    fields: Optional[List[str]] = None,
     limit: Optional[int] = 100,
     offset: Optional[int] = 0,
+    q: Optional[str] = None,
 ) -> dict:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     roles = _get_roles(request)
     filter_kwargs = {{{filter_dict}}}
+
+    # Parse 'q' parameter for search (format: col1:val1,col2:val2)
+    search_cols = []
+    if q:
+        for pair in q.split(','):
+            if ':' in pair:
+                col, val = pair.split(':', 1)
+                col = col.strip()
+                val = val.strip()
+                if col and val and col not in api_excluded:
+                    filter_kwargs[col] = ('ilike', val + '%')
+                    search_cols.append(col)
+
     role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
     authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
     if fields:
         projection = [f for f in fields if not authorized or f in authorized]
     else:
         projection = authorized
-    data = await {module_alias}.{class_name}(**{{**filter_kwargs, **role_filter}}).ho_aselect(
-        *projection, limit=limit, offset=offset
-    )
+
+    inst = {module_alias}.{class_name}(**{{**filter_kwargs, **role_filter}})
+    # Enable unaccent for search columns
+    for col in search_cols:
+        getattr(inst, col).unaccent = True
+
+    data = await inst.ho_aselect(*projection, limit=limit, offset=offset)
     return {{
         "data": data,
         "meta": {{

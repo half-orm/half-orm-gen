@@ -468,8 +468,9 @@ def _list_component(
 
     filter_inputs = '\n        '.join(
         f'<th class="px-2 py-1">'
-        f'<input bind:value={{localFilters[\'{f}\']}} placeholder="…"'
-        f' class="w-full text-xs border rounded px-2 py-1 font-normal" /></th>'
+        f'<input value={{localFilters[\'{f}\'] ?? \'\'}} '
+        f'oninput={{(e) => localFilters = {{...localFilters, \'{f}\': e.currentTarget.value}}}} '
+        f'placeholder="…" class="w-full text-xs border rounded px-2 py-1 font-normal" /></th>'
         for f in out_names
     )
     action_filter_th = '<th></th>' if has_del and pk_field else ''
@@ -569,7 +570,8 @@ def _list_component(
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) =>
-          !v || String((item as any)[k] ?? '').toLowerCase().includes(v.toLowerCase())));
+          !v || removeAccents(String((item as any)[k] ?? '').toLowerCase())
+                  .startsWith(removeAccents(v.toLowerCase()))));
     const sf = sortField;
     if (sf) {{
       const asc = sortAsc;
@@ -592,7 +594,8 @@ def _list_component(
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) =>
-          !v || String((item as any)[k] ?? '').toLowerCase().includes(v.toLowerCase())));
+          !v || removeAccents(String((item as any)[k] ?? '').toLowerCase())
+                  .startsWith(removeAccents(v.toLowerCase()))));
     const sf = sortField;
     if (sf) {{
       const asc = sortAsc;
@@ -633,6 +636,38 @@ def _list_component(
     isLoading = false;
   }}
 
+  // Backend filtering with debounce
+  let filterDebounceTimer: number | undefined;
+  let hadFilters = false;
+  $effect(() => {{
+    // Track localFilters changes
+    const lf = localFilters;
+
+    if (filterDebounceTimer) clearTimeout(filterDebounceTimer);
+    filterDebounceTimer = window.setTimeout(() => {{
+      // Convert local filters to backend search query (q=col1:val1,col2:val2)
+      const filterPairs: string[] = [];
+      Object.entries(localFilters).forEach(([key, val]) => {{
+        if (val) filterPairs.push(`${{key}}:${{val}}`);
+      }});
+      const hasFiltersNow = filterPairs.length > 0;
+      // Only trigger if we have filters now, or we had filters before (to clear them)
+      if (hasFiltersNow || hadFilters) {{
+        hadFilters = hasFiltersNow;
+        // Reset state for new filter search
+        hasMore = true;
+        currentOffset = 0;
+        isLoading = true;
+        const searchParams = hasFiltersNow ? {{ q: filterPairs.join(',') }} as any : {{}};
+        {rname}Api.list(searchParams, 0).then(result => {{
+          hasMore = result.has_more;
+          currentOffset = result.offset;
+          isLoading = false;
+        }});
+      }}
+    }}, 600);
+  }});
+
   function onIntersect(node: HTMLElement, isLast: boolean) {{
     if (!isLast) return {{ destroy() {{}} }};  // Only observe last element
     const observer = new IntersectionObserver(
@@ -664,6 +699,9 @@ def _list_component(
 {can_create}{can_delete}{delete_fn}
   let jsonDialog = $state<string | null>(null);
   function showJson(v: unknown): void {{ jsonDialog = JSON.stringify(v, null, 2); }}
+  function removeAccents(s: string): string {{
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }}
   function fmtCell(v: unknown): string {{
     if (v == null) return '';
     if (Array.isArray(v)) return `JSON [${{v.length}}]`;
