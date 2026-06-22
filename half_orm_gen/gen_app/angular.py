@@ -372,38 +372,46 @@ import {{ AuthService }} from './core/auth.service';
   standalone: true,
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
   template: `
-    <div class="h-screen flex bg-gray-50 overflow-hidden">
+    <div class="h-screen flex flex-col bg-gray-50 overflow-hidden">
       @if (!isHome()) {{
-        <aside class="w-56 shrink-0 bg-white border-r flex flex-col">
-          <div class="px-4 py-4 border-b">
-            <span class="font-bold text-gray-800">API Browser</span>
-          </div>
-          <div class="px-2 pt-2 pb-1">
-            <input [value]="navFilter()" (input)="navFilter.set($any($event).target.value)"
-                   placeholder="Filter…"
-                   class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
-          </div>
-          <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-            @for (item of filteredNav(); track item.href) {{
-              <a [routerLink]="item.href" routerLinkActive="bg-gray-100 font-semibold"
-                 class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
-                {{{{ item.label }}}}
+        <header class="shrink-0 bg-white border-b h-11 flex items-center justify-between px-4">
+          <span class="font-bold text-gray-800">halfORM Backoffice</span>
+          <a routerLink="/ho_bo"
+             class="text-xs px-3 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
+            {{{{ auth.token() ?? 'public' }}}}
+          </a>
+        </header>
+        <div class="flex flex-1 overflow-hidden">
+          <aside class="w-56 shrink-0 bg-white border-r flex flex-col">
+            <div class="px-2 pt-2 pb-1">
+              <input [value]="navFilter()" (input)="navFilter.set($any($event).target.value)"
+                     placeholder="Filter…"
+                     class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
+            </div>
+            <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+              @for (item of filteredNav(); track item.href) {{
+                <a [routerLink]="item.href" routerLinkActive="bg-gray-100 font-semibold"
+                   class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
+                  {{{{ item.label }}}}
+                </a>
+              }}
+            </nav>
+            <div class="px-4 py-3 border-t">
+              <a routerLink="/ho_bo">
+                <img src="logo.png" alt="halfORM" class="h-8 w-auto opacity-80 hover:opacity-100 transition-opacity" />
               </a>
-            }}
-          </nav>
-          <div class="px-2 py-3 border-t">
-            <a routerLink="/access" class="block px-3 py-2 rounded hover:bg-gray-100">
-              <div class="text-xs text-gray-400 mb-0.5">Role</div>
-              <div class="text-sm font-medium" [class]="auth.token() ? 'text-blue-700' : 'text-gray-400'">
-                {{{{ auth.token() ?? 'public' }}}}
-              </div>
-            </a>
-          </div>
-        </aside>
+            </div>
+          </aside>
+          <main class="flex-1 overflow-y-auto p-6">
+            <router-outlet />
+          </main>
+        </div>
       }}
-      <main class="flex-1 overflow-y-auto p-6">
-        <router-outlet />
-      </main>
+      @else {{
+        <main class="flex-1 overflow-y-auto">
+          <router-outlet />
+        </main>
+      }}
     </div>
   `
 }})
@@ -465,12 +473,12 @@ import {{ RouterLink }} from '@angular/router';
   template: `
     <div class="flex flex-col items-center justify-center h-full bg-gray-50 py-16">
       <div class="flex items-center gap-6 mb-6">
-        <img src="logo.png" alt="halfORM" class="h-20 w-auto" />
+        <img src="logo.png" alt="halfORM" class="h-30 w-auto" />
         <img src="angular_200x200.png" alt="Angular" class="h-20 w-auto" />
       </div>
       <h1 class="text-3xl font-bold text-gray-800 mb-2">halfORM Backoffice</h1>
       <p class="text-gray-500 mb-8">Powered by Angular</p>
-      <a [routerLink]="['{first_route}']"
+      <a [routerLink]="['/ho_bo']"
          class="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 font-medium transition-colors">
         Open Backoffice →
       </a>
@@ -488,6 +496,7 @@ def _app_routes(resources: list, first_route: str) -> str:
         '',
         'export const routes: Routes = [',
         "  { path: '', loadComponent: () => import('./pages/home/home.component').then(m => m.HomeComponent) },",
+        "  { path: 'ho_bo',  loadComponent: () => import('./pages/login/login.component').then(m => m.LoginComponent) },",
         "  { path: 'login',  loadComponent: () => import('./pages/login/login.component').then(m => m.LoginComponent) },",
         "  { path: 'access', loadComponent: () => import('./pages/access/access.component').then(m => m.AccessComponent) },",
     ]
@@ -560,7 +569,7 @@ export class LoginComponent implements OnInit {{
 
   selectRole(role: string): void {{
     this.auth.login(role);
-    void this.router.navigate(['/']);
+    void this.router.navigate(['/ho_bo']);
   }}
 }}
 """
