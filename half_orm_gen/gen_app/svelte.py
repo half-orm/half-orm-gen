@@ -1166,7 +1166,7 @@ def _detail_page(
     # Form state + edit toggle — populated reactively from item once loaded
     extra_script = ''
     edit_btn     = ''
-    edit_section = ''
+    edit_section = f'\n  <div class="space-y-2">\n    {ro_fields}\n  </div>'
 
     if has_put and visible_put:
         empty_init  = ', '.join(
@@ -1216,21 +1216,23 @@ def _detail_page(
         )
         edit_section = f"""
 
-  {{#if editing}}
-  <div class="mt-6 pt-6 border-t">
-    {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
-    <form onsubmit={{handleUpdate}} class="space-y-4">
-      {form_fields}
-      <div class="flex gap-3 pt-2">
-        <button type="submit"
-                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
-          Update
-        </button>
-        <button type="button" onclick={{() => {{ editing = false; }}}}
-                class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</button>
-      </div>
-    </form>
+  {{#if !editing}}
+  <div class="space-y-2">
+    {ro_fields}
   </div>
+  {{:else}}
+  {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
+  <form onsubmit={{handleUpdate}} class="space-y-4">
+    {form_fields}
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+              class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+        Update
+      </button>
+      <button type="button" onclick={{() => {{ editing = false; }}}}
+              class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</button>
+    </div>
+  </form>
   {{/if}}"""
 
     map_key       = f'{schema_name}/{table_name}'
@@ -1397,13 +1399,11 @@ def _detail_page(
         </div>
       </div>
 
-      <div class="space-y-2 mb-4">
-        <div class="flex gap-2 items-baseline">
-          <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
-          <span class="font-mono text-xs text-gray-500 break-all">{{item.{pk_field}}}</span>
-        </div>
-        {ro_fields}
-      </div>{edit_section}
+      <div class="flex gap-2 items-baseline mb-4">
+        <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
+        <span class="font-mono text-xs text-gray-500 break-all">{{item.{pk_field}}}</span>
+      </div>
+      {edit_section}
     </div>
     {{/if}}
   </div>

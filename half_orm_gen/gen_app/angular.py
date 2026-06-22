@@ -1633,7 +1633,7 @@ def _detail_component(
 
     # Edit form
     form_fields_tmpl = ''
-    edit_section_tmpl = ''
+    edit_section_tmpl = f'<div class="space-y-2">\n              {ro_rows}\n            </div>'
     form_init = ''
     form_class = ''
     edit_btn_tmpl = ''
@@ -1672,21 +1672,23 @@ def _detail_component(
             f'\n    effect(() => {{ const i = this.item(); if (i) {{ {effect_body} }} }});'
         )
         edit_section_tmpl = f"""
-    @if (editing()) {{
-      <div class="mt-6 pt-6 border-t">
-        @if (error()) {{ <p class="text-red-600 mb-4">{{{{ error() }}}}</p> }}
-        <form #editForm="ngForm" (ngSubmit)="handleUpdate()" class="space-y-4">
-          {form_fields_tmpl}
-          <div class="flex gap-3 pt-2">
-            <button type="submit" [disabled]="editForm.invalid"
-                    class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-              Update
-            </button>
-            <button type="button" (click)="editing.set(false)"
-                    class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</button>
-          </div>
-        </form>
+    @if (!editing()) {{
+      <div class="space-y-2">
+        {ro_rows}
       </div>
+    }} @else {{
+      @if (error()) {{ <p class="text-red-600 mb-4">{{{{ error() }}}}</p> }}
+      <form #editForm="ngForm" (ngSubmit)="handleUpdate()" class="space-y-4">
+        {form_fields_tmpl}
+        <div class="flex gap-3 pt-2">
+          <button type="submit" [disabled]="editForm.invalid"
+                  class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            Update
+          </button>
+          <button type="button" (click)="editing.set(false)"
+                  class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</button>
+        </div>
+      </form>
     }}"""
 
     # FK reference sections — all deps; self-refs reuse this.store (already injected)
@@ -1811,13 +1813,11 @@ import {{ AuthService }} from '../../../core/auth.service';{latex_import}{fk_sto
                 <a routerLink="/ho_bo/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
               </div>
             </div>
-            <div class="space-y-2 mb-4">
-              <div class="flex gap-2 items-baseline">
-                <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
-                <span class="font-mono text-xs text-gray-500 break-all">{{{{ item()!.{pk_field} }}}}</span>
-              </div>
-              {ro_rows}
-            </div>{edit_section_tmpl}
+            <div class="flex gap-2 items-baseline mb-4">
+              <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
+              <span class="font-mono text-xs text-gray-500 break-all">{{{{ item()!.{pk_field} }}}}</span>
+            </div>
+            {edit_section_tmpl}
           </div>
         }}
       </div>
