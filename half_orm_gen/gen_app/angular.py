@@ -815,6 +815,10 @@ def _store(
         lines.append(f'  get(id: string) {{')
         lines.append('    const cached = this.byId().get(id);')
         lines.append('    if (cached) return of(cached);')
+        lines.append('    return this.refresh(id);')
+        lines.append('  }')
+        lines.append('')
+        lines.append(f'  refresh(id: string) {{')
         lines.append('    const url = this.getUrl(id);')
         lines.append('    this.auth.fetchedRoutes.add(url);')
         lines.append(f'    return this.http.get<{iname}Out>(url, {{ headers: this.headers }}).pipe(')
@@ -1036,7 +1040,7 @@ def _list_component(
         f'      takeUntilDestroyed(),\n'
         f'    ).subscribe(ev => {{\n'
         f'      if (ev.event === \'delete\') untracked(() => this.store.removeItem(String(ev.id)));\n'
-        f'      else untracked(() => this.store.get(String(ev.id) as any).subscribe());\n'
+        f'      else untracked(() => this.store.refresh(String(ev.id) as any).subscribe());\n'
         f'    }});'
         if pk_field else ''
     )
@@ -1598,7 +1602,7 @@ def _detail_component(
             return f'this.form.{f} = (i as any).{f} ?? \'\';'
         effect_body = ' '.join(_effect_assign(f) for f in visible_put)
         form_effect = (
-            f'\n    effect(() => {{ const i = this.item(); if (i) {{ {effect_body} }} }}, {{ allowSignalWrites: true }});'
+            f'\n    effect(() => {{ const i = this.item(); if (i) {{ {effect_body} }} }});'
         )
         edit_section_tmpl = f"""
     @if (editing()) {{
@@ -1681,7 +1685,7 @@ def _detail_component(
             f'    ) as unknown as {iname}PutIn;\n'
             f'    this.store.update(this.id as any, putPayload).subscribe({{\n'
             f'      next: (updated) => {{\n'
-            f'        this.store.setItem(updated); this.item.set(updated); this.editing.set(false);\n'
+            f'        this.store.setItem(updated); this.editing.set(false);\n'
             f'      }},\n'
             f'      error: (err: Error) => this.error.set(err.message),\n'
             f'    }});\n'
@@ -1693,21 +1697,33 @@ def _detail_component(
         f"      filter(ev => ev.resource === '{map_key}' && String(ev.id) === this.id),\n"
         f'      takeUntilDestroyed(),\n'
         f'    ).subscribe(ev => {{\n'
-        f'      if (ev.event === \'delete\') void this.router.navigate([\'/{schema_name}/{table_name}\']);\n'
-        f'      else untracked(() => this.store.get(this.id as any).subscribe(d => {{ if (d) this.item.set(d); }}));\n'
+        f'      if (ev.event === \'delete\') void this.router.navigate([\'/ho_bo/{schema_name}/{table_name}\']);\n'
+        f'      else untracked(() => this.store.refresh(this.id as any).subscribe());\n'
         f'    }});'
     )
 
     fk_fetch_effects = ''
+    fk_ws_effects = ''
     for lf, rs, rt, remote_pk in fk_deps:
         is_self  = (rs == schema_name and rt == table_name)
         rn_store = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
+        fk_map_key = f'{rs}/{rt}'
         fk_fetch_effects += (
             f'\n    effect(() => {{\n'
             f'      const v = this.item()?.{lf};\n'
             f'      if (!v) return;\n'
             f'      const url = this.{rn_store}.getUrl(String(v));\n'
             f'      if (!this.auth.fetchedRoutes.has(url)) this.{rn_store}.get(String(v)).subscribe();\n'
+            f'    }});'
+        )
+        fk_ws_effects += (
+            f'\n    this.auth.wsEvent$.pipe(\n'
+            f"      filter(ev => ev.resource === '{fk_map_key}'),\n"
+            f'      takeUntilDestroyed(),\n'
+            f'    ).subscribe(ev => {{\n'
+            f'      const v = this.item()?.{lf};\n'
+            f'      if (v && String(ev.id) === String(v) && ev.event !== \'delete\')\n'
+            f'        untracked(() => this.{rn_store}.refresh(String(v) as any).subscribe());\n'
             f'    }});'
         )
 
@@ -1763,8 +1779,7 @@ export class {iname}DetailComponent {{
   protected String = String;  // For template use{pk_id_line}
 
   readonly id   = this.route.snapshot.params['id'] as string;
-  readonly item = signal<{iname}Out | null>(this.store.byId().get(this.id) ?? null);
-  private lastToken = this.auth.token();
+  readonly item = computed<{iname}Out | null>(() => this.store.byId().get(this.id) ?? null);
 {can_edit_field}
   readonly editing = signal(false);
   readonly error   = signal('');
@@ -1772,10 +1787,9 @@ export class {iname}DetailComponent {{
 
   constructor() {{
     effect(() => {{
-      const token = this.auth.token();
-      if (token !== this.lastToken) {{ this.lastToken = token; this.item.set(null); }}
-      if (!this.item()) this.store.get(this.id as any).subscribe(d => {{ if (d) this.item.set(d); }});
-    }}, {{ allowSignalWrites: true }});{form_effect}{ws_effect}{fk_fetch_effects}
+      void this.auth.token();
+      if (!this.item()) untracked(() => this.store.get(this.id as any).subscribe());
+    }});{form_effect}{ws_effect}{fk_fetch_effects}{fk_ws_effects}
   }}
 
   str(v: unknown): string {{ return String(v); }}
