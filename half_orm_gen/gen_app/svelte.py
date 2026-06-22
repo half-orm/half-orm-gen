@@ -814,17 +814,7 @@ def _list_component(
     }};
   }}
 {"" if not pk_field else f"""
-  $effect(() => {{
-    const ev = auth.lastEvent;
-    if (!ev || ev.resource !== '{map_key}') return;
-    if (ev.event === 'delete') {{
-      untrack(() => {rname}State.removeItem(String(ev.id)));
-    }} else {{
-      untrack(() => {rname}Api.get(ev.id)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {{ if (d) {rname}State.setItem(d); }}));
-    }}
-  }});
+  // Store handles WS updates; list reacts via $state signals automatically
 
   // Scroll to selected item when component mounts or items change
   $effect(() => {{
@@ -1216,27 +1206,41 @@ def _detail_page(
         return parts[0] + ''.join(p.capitalize() for p in parts[1:]) + 'Ref'
 
     def _fk_ref_states(deps: list) -> str:
-        lines = [
-            f"  let {_lf_ref_name(lf)} = $state<{_cname(rs, rt)}Out | null>(null);"
-            for lf, rs, rt, _ in deps
-        ]
+        lines = []
+        for lf, rs, rt, _ in deps:
+            rn = _rname(rs, rt)
+            lines.append(
+                f"  let {_lf_ref_name(lf)} = $derived(item?.{lf} ? {rn}State.byId.get(String(item.{lf})) ?? null : null);"
+            )
         return ('\n' + '\n'.join(lines)) if lines else ''
 
     def _fk_ref_effects(deps: list) -> str:
         blocks = []
         for lf, rs, rt, _ in deps:
-            rn     = _rname(rs, rt)
-            lf_ref = _lf_ref_name(lf)
+            rn = _rname(rs, rt)
             blocks.append(
                 f'  $effect(() => {{\n'
                 f'    if (!item?.{lf}) return;\n'
                 f'    const _url = {rn}Api.getUrl(item.{lf});\n'
-                f'    if (auth.fetchedRoutes.has(_url)) {{\n'
-                f'      {lf_ref} = {rn}State.byId.get(String(item.{lf})) ?? null;\n'
-                f'    }} else {{\n'
+                f'    if (!auth.fetchedRoutes.has(_url))\n'
                 f'      {rn}Api.get(item.{lf}).then(r => r.ok ? r.json() : null)\n'
-                f'                .then(d => {{ if (d) {{ {rn}State.setItem(d); {lf_ref} = d; }} }});\n'
-                f'    }}\n'
+                f'               .then(d => {{ if (d) {rn}State.setItem(d); }});\n'
+                f'  }});'
+            )
+        return ('\n' + '\n'.join(blocks)) if blocks else ''
+
+    def _fk_ws_effects(deps: list) -> str:
+        blocks = []
+        for lf, rs, rt, _ in deps:
+            rn = _rname(rs, rt)
+            fk_map_key = f'{rs}/{rt}'
+            blocks.append(
+                f'  $effect(() => {{\n'
+                f'    const ev = auth.lastEvent;\n'
+                f'    const v = item?.{lf};\n'
+                f"    if (ev?.resource === '{fk_map_key}' && v && String(ev.id) === String(v) && ev.event !== 'delete')\n"
+                f'      untrack(() => {rn}Api.refresh(v).then(r => r.ok ? r.json() : null)\n'
+                f'               .then(d => {{ if (d) {rn}State.setItem(d); }}));\n'
                 f'  }});'
             )
         return ('\n' + '\n'.join(blocks)) if blocks else ''
@@ -1264,10 +1268,10 @@ def _detail_page(
             f'{{/if}}'
         )
 
-    fk_imports   = _fk_ref_imports(fk_deps)
-    fk_states    = _fk_ref_states(fk_deps)
-    fk_effects   = _fk_ref_effects(fk_deps)
-    fk_sections  = '\n'.join(_fk_ref_section(*d) for d in fk_deps)
+    fk_imports  = _fk_ref_imports(fk_deps)
+    fk_states   = _fk_ref_states(fk_deps)
+    fk_effects  = _fk_ref_effects(fk_deps)
+    fk_sections = '\n'.join(_fk_ref_section(*d) for d in fk_deps)
 
     # Reverse FK imports and sections
     rev_imports = '\n'.join(
@@ -1311,33 +1315,18 @@ def _detail_page(
   import {{ untrack }} from 'svelte';{fk_imports}{rev_imports}
 
   let {{ id }}: {{ id: string }} = $props();
-  let item      = $state<{iname}Out | null>(null);
-  let _lastToken = auth.token;
+  let item = $derived({rname}State.byId.get(id) ?? null);
 {fk_states}
   $effect(() => {{
-    const t = auth.token;
-    const currentId = id; // Capture id reactively
-    if (t !== _lastToken) {{ _lastToken = t; item = null; }}
-
-    // Try to get from cache first
-    const cached = {rname}State.byId.get(currentId);
-    if (cached) {{
-      item = cached;
-    }} else if (!item || String((item as any).{pk_field}) !== currentId) {{
-      // Load from API if not in cache or if id changed
-      {rname}Api.get(currentId).then(r => r.ok ? r.json() : null)
-                .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }});
-    }}
+    void auth.token;
+    if (!item) untrack(() => {rname}Api.get(id).then(r => r.ok ? r.json() : null)
+                .then(d => {{ if (d) {rname}State.setItem(d); }}));
   }});
 
   $effect(() => {{
     const ev = auth.lastEvent;
-    const currentId = id; // Capture id reactively
-    if (ev?.resource === '{map_key}' && String(ev.id) === currentId) {{
-      if (ev.event === 'delete') goto('/ho_bo/{schema_name}/{table_name}');
-      else untrack(() => {rname}Api.get(currentId).then(r => r.ok ? r.json() : null)
-                .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }}));
-    }}
+    if (ev?.resource === '{map_key}' && String(ev.id) === id && ev.event === 'delete')
+      goto('/ho_bo/{schema_name}/{table_name}');
   }});
 {fk_effects}{can_edit}{extra_script}
 </script>

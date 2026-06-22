@@ -224,6 +224,10 @@ class SvelteGenerator(StoreGenerator):
                         f"                 return _fetch(`${{_BASE}}/${{id}}`, {{ headers: _hdrs() }});\n"
                         f"             }},"
                     )
+                    api_entries.append(
+                        f"    refresh: (id: {pk_ts_type}) =>\n"
+                        f"                 _fetch(`${{_BASE}}/${{id}}`, {{ headers: _hdrs() }}),"
+                    )
             if has_post:
                 api_entries.append(
                     f"    create:  (data: {iname}PostIn) =>\n"
@@ -248,6 +252,19 @@ class SvelteGenerator(StoreGenerator):
             lines.extend(api_entries)
             lines.append('};')
             lines.append('')
+
+            if pk_field:
+                map_key_store = f'{schema_name}/{table_name}'
+                lines.append('$effect.root(() => {')
+                lines.append('    $effect(() => {')
+                lines.append(f"        const ev = auth.lastEvent;")
+                lines.append(f"        if (!ev || ev.resource !== '{map_key_store}') return;")
+                lines.append(f"        if (ev.event === 'delete') {rname}State.removeItem(String(ev.id));")
+                lines.append(f"        else {rname}Api.refresh(ev.id as any).then(r => r.ok ? r.json() : null)")
+                lines.append(f"                       .then(d => {{ if (d) {rname}State.setItem(d); }});")
+                lines.append('    });')
+                lines.append('});')
+                lines.append('')
 
             out_file = output_dir / f'{stem}.svelte.ts'
             out_file.write_text('\n'.join(lines), encoding='utf-8')

@@ -696,7 +696,7 @@ def _store(
     lines.append("import { Injectable, signal } from '@angular/core';")
     lines.append("import { HttpClient, HttpHeaders } from '@angular/common/http';")
     lines.append("import { inject } from '@angular/core';")
-    lines.append("import { catchError, of, tap } from 'rxjs';")
+    lines.append("import { catchError, filter, of, tap } from 'rxjs';")
     lines.append("import { AuthService } from '../../core/auth.service';")
     lines.append("import { registerClear } from '../../core/state-registry';")
     lines.append('')
@@ -745,7 +745,17 @@ def _store(
     lines.append('  readonly sortField = signal<string | null>(null);  // Sort field')
     lines.append('  readonly sortAsc = signal(true);  // Sort direction')
     lines.append('')
-    lines.append('  constructor() { registerClear(() => this.clear()); }')
+    if pk_field:
+        map_key_store = f'{schema_name}/{table_name}'
+        lines.append(f'  constructor() {{')
+        lines.append(f'    registerClear(() => this.clear());')
+        lines.append(f"    this.auth.wsEvent$.pipe(filter(ev => ev.resource === '{map_key_store}')).subscribe(ev => {{")
+        lines.append(f"      if (ev.event === 'delete') this.removeItem(String(ev.id));")
+        lines.append(f"      else this.refresh(String(ev.id)).subscribe();")
+        lines.append(f'    }});')
+        lines.append(f'  }}')
+    else:
+        lines.append('  constructor() { registerClear(() => this.clear()); }')
     lines.append('')
     lines.append('  private get headers(): HttpHeaders {')
     lines.append('    const t = this.auth.token();')
@@ -1034,16 +1044,7 @@ def _list_component(
             f'  }}\n'
         )
 
-    ws_effect = (
-        f'\n    this.auth.wsEvent$.pipe(\n'
-        f"      filter(ev => ev.resource === '{map_key}'),\n"
-        f'      takeUntilDestroyed(),\n'
-        f'    ).subscribe(ev => {{\n'
-        f'      if (ev.event === \'delete\') untracked(() => this.store.removeItem(String(ev.id)));\n'
-        f'      else untracked(() => this.store.refresh(String(ev.id) as any).subscribe());\n'
-        f'    }});'
-        if pk_field else ''
-    )
+    ws_effect = ''  # Store handles WS updates; list just reads reactively from store signals
 
     needs_router_link = has_post or bool(fk_deps)
 
@@ -1694,16 +1695,12 @@ def _detail_component(
 
     ws_effect = (
         f'\n    this.auth.wsEvent$.pipe(\n'
-        f"      filter(ev => ev.resource === '{map_key}' && String(ev.id) === this.id),\n"
+        f"      filter(ev => ev.resource === '{map_key}' && String(ev.id) === this.id && ev.event === 'delete'),\n"
         f'      takeUntilDestroyed(),\n'
-        f'    ).subscribe(ev => {{\n'
-        f'      if (ev.event === \'delete\') void this.router.navigate([\'/ho_bo/{schema_name}/{table_name}\']);\n'
-        f'      else untracked(() => this.store.refresh(this.id as any).subscribe());\n'
-        f'    }});'
+        f'    ).subscribe(() => void this.router.navigate([\'/ho_bo/{schema_name}/{table_name}\']));'
     )
 
     fk_fetch_effects = ''
-    fk_ws_effects = ''
     for lf, rs, rt, remote_pk in fk_deps:
         is_self  = (rs == schema_name and rt == table_name)
         rn_store = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
@@ -1716,17 +1713,6 @@ def _detail_component(
             f'      if (!this.auth.fetchedRoutes.has(url)) this.{rn_store}.get(String(v)).subscribe();\n'
             f'    }});'
         )
-        fk_ws_effects += (
-            f'\n    this.auth.wsEvent$.pipe(\n'
-            f"      filter(ev => ev.resource === '{fk_map_key}'),\n"
-            f'      takeUntilDestroyed(),\n'
-            f'    ).subscribe(ev => {{\n'
-            f'      const v = this.item()?.{lf};\n'
-            f'      if (v && String(ev.id) === String(v) && ev.event !== \'delete\')\n'
-            f'        untracked(() => this.{rn_store}.refresh(String(v) as any).subscribe());\n'
-            f'    }});'
-        )
-
     # Add type annotation to lambda parameter
     typed_extractor = pk_extractor.replace('i =>', f'(i: {iname}Out) =>')
     pk_id_line = f'\n  protected getPkId = {typed_extractor};'
@@ -1789,7 +1775,7 @@ export class {iname}DetailComponent {{
     effect(() => {{
       void this.auth.token();
       if (!this.item()) untracked(() => this.store.get(this.id as any).subscribe());
-    }});{form_effect}{ws_effect}{fk_fetch_effects}{fk_ws_effects}
+    }});{form_effect}{ws_effect}{fk_fetch_effects}
   }}
 
   str(v: unknown): string {{ return String(v); }}
