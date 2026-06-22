@@ -1237,14 +1237,6 @@ export class {iname}ListComponent {{
 
     effect(() => {{
       const _token = this.auth.token();
-      // Don't reload if we already have data (for infinite scroll)
-      if (this.store.items().length > 0) {{
-        return;
-      }}
-      if (Object.keys(this.filters).length > 0 &&
-          this.auth.fetchedRoutes.has(this.store.listUrl({{}}))) {{
-        return;
-      }}
       this.store.list(this.filters);
     }});{ws_effect}
 
@@ -1558,6 +1550,73 @@ export class {iname}CreateComponent {{
 """
 
 
+def _fields_component(
+    schema_name: str, table_name: str,
+    iname: str, pk_field: str,
+    out_names: list, fk_deps: list, all_fields: dict,
+) -> str:
+    fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
+
+    has_latex = any(
+        f not in fk_map and f != pk_field and f in all_fields
+        and _field_type_category(all_fields[f]) == 'string'
+        for f in out_names
+    )
+
+    def _ro_row(f: str) -> str:
+        label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
+        if f == pk_field:
+            return (
+                f'<div class="flex gap-2 items-baseline">{label}'
+                f'<span class="font-mono text-xs text-gray-500 break-all">{{{{ item()[\'{f}\'] }}}}</span></div>'
+            )
+        if f in fk_map:
+            rs, rt = fk_map[f]
+            return (
+                f'<div class="flex gap-2 items-baseline">{label}'
+                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item()[\'{f}\'])]"'
+                f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item()[\'{f}\'] }}}}</a></div>'
+            )
+        if f in all_fields and _field_type_category(all_fields[f]) == 'string':
+            return (
+                f'<div class="flex gap-2 items-baseline">{label}'
+                f'<span class="text-sm break-all" [innerHTML]="item()[\'{f}\'] | latex"></span></div>'
+            )
+        return (
+            f'<div class="flex gap-2 items-baseline">{label}'
+            f'<span class="text-sm break-all">{{{{ item()[\'{f}\'] }}}}</span></div>'
+        )
+
+    rows = '\n      '.join(_ro_row(f) for f in out_names)
+    has_fk = bool(fk_map)
+    router_import = "\nimport { RouterLink } from '@angular/router';" if has_fk else ''
+    latex_import = "\nimport { LatexPipe } from '../../../core/latex.pipe';" if has_latex else ''
+    all_imports = ', '.join(filter(None, [
+        'RouterLink' if has_fk else '',
+        'LatexPipe' if has_latex else '',
+    ]))
+
+    return f"""\
+import {{ Component, input }} from '@angular/core';{router_import}{latex_import}
+import type {{ {iname}Out }} from '../../stores/{schema_name}_{table_name}.store';
+
+@Component({{
+  selector: '{_selector(schema_name, table_name, 'fields')}',
+  standalone: true,
+  imports: [{all_imports}],
+  template: `
+    <div class="space-y-2">
+      {rows}
+    </div>
+  `
+}})
+export class {iname}FieldsComponent {{
+  readonly item = input.required<{iname}Out>();
+  protected String = String;
+}}
+"""
+
+
 def _detail_component(
     schema_name: str, table_name: str,
     iname: str, pk_field: str, pk_ts_type: str, pk_extractor: str,
@@ -1602,38 +1661,29 @@ def _detail_component(
         rev_list_imports = '\n' + rev_list_imports
 
     rev_list_in_imports = ', '.join(f'{_cname(rs, rt)}ListComponent' for rs, rt, _ in rev_fk_deps)
-    has_latex = any(
-        f != pk_field and f not in fk_map and f in all_fields and _field_type_category(all_fields[f]) == 'string'
-        for f in out_names
+
+    fk_fields_imports = '\n'.join(
+        f"import {{ {_cname(rs, rt)}FieldsComponent }} from '../{rs}_{rt}/fields.component';"
+        for _, rs, rt, _ in _unique_fk_deps
     )
-    all_imports = ', '.join(filter(None, ['RouterLink', 'LatexPipe' if has_latex else '', 'FormsModule' if has_put and put_in_names else '', rev_list_in_imports]))
+    if fk_fields_imports:
+        fk_fields_imports = '\n' + fk_fields_imports
 
-    # Read-only field rows
-    def _ro_row(f: str) -> str:
-        label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
-        if f in fk_map:
-            rs, rt = fk_map[f]
-            return (
-                f'<div class="flex gap-2 items-baseline">{label}'
-                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item()![\'{f}\'])]"'
-                f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item()![\'{f}\'] }}}}</a>'
-                f'</div>'
-            )
-        if f in all_fields and _field_type_category(all_fields[f]) == 'string':
-            return (
-                f'<div class="flex gap-2 items-baseline">{label}'
-                f'<span class="text-sm break-all" [innerHTML]="item()![\'{f}\'] | latex"></span></div>'
-            )
-        return (
-            f'<div class="flex gap-2 items-baseline">{label}'
-            f'<span class="text-sm break-all">{{{{ item()![\'{f}\'] }}}}</span></div>'
-        )
+    fk_fields_in_imports = ', '.join(f'{_cname(rs, rt)}FieldsComponent' for _, rs, rt, _ in _unique_fk_deps)
 
-    ro_rows = '\n    '.join(_ro_row(f) for f in out_names if f != pk_field)
+    all_imports = ', '.join(filter(None, [
+        'RouterLink',
+        f'{iname}FieldsComponent',
+        fk_fields_in_imports,
+        'FormsModule' if has_put and put_in_names else '',
+        rev_list_in_imports,
+    ]))
+
+    fields_selector = _selector(schema_name, table_name, 'fields')
 
     # Edit form
     form_fields_tmpl = ''
-    edit_section_tmpl = f'<div class="space-y-2">\n              {ro_rows}\n            </div>'
+    edit_section_tmpl = f'<{fields_selector} [item]="item()!" />'
     form_init = ''
     form_class = ''
     edit_btn_tmpl = ''
@@ -1673,9 +1723,7 @@ def _detail_component(
         )
         edit_section_tmpl = f"""
     @if (!editing()) {{
-      <div class="space-y-2">
-        {ro_rows}
-      </div>
+      <{fields_selector} [item]="item()!" />
     }} @else {{
       @if (error()) {{ <p class="text-red-600 mb-4">{{{{ error() }}}}</p> }}
       <form #editForm="ngForm" (ngSubmit)="handleUpdate()" class="space-y-4">
@@ -1694,9 +1742,10 @@ def _detail_component(
     # FK reference sections — all deps; self-refs reuse this.store (already injected)
     fk_sections = ''
     for lf, rs, rt, remote_pk in fk_deps:
-        is_self  = (rs == schema_name and rt == table_name)
-        rn_store = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
-        rt_title = _title(rs, rt)
+        is_self      = (rs == schema_name and rt == table_name)
+        rn_store     = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
+        rt_title     = _title(rs, rt)
+        fk_fields_sel = _selector(rs, rt, 'fields')
         fk_sections += f"""
     @if (item() && item()!['{lf}']) {{
       <div class="mt-4 p-6 bg-white rounded-lg shadow">
@@ -1704,15 +1753,8 @@ def _detail_component(
           <h2 class="text-lg font-semibold">{rt_title}</h2>
           <a [routerLink]="['/ho_bo/{rs}/{rt}', String(item()!['{lf}'])]" class="text-sm text-blue-600 hover:underline">→</a>
         </div>
-        @if ({rn_store}.byId().get(str(item()!['{lf}'])); as ref) {{
-          <div class="space-y-1">
-            @for (entry of objectEntries(ref); track entry[0]) {{
-              <div class="flex gap-2 items-baseline">
-                <span class="font-medium text-gray-600 w-36 shrink-0 text-sm">{{{{ entry[0] }}}}</span>
-                <span class="text-sm break-all">{{{{ entry[1] ?? '' }}}}</span>
-              </div>
-            }}
-          </div>
+        @if ({rn_store}.byId().get(String(item()!['{lf}'])); as ref) {{
+          <{fk_fields_sel} [item]="ref" />
         }}
       </div>
     }}"""
@@ -1782,7 +1824,7 @@ def _detail_component(
             f'      if (!this.auth.fetchedRoutes.has(url)) this.{rn_store}.get(String(v)).subscribe();\n'
             f'    }});'
         )
-    latex_import = "\nimport { LatexPipe } from '../../../core/latex.pipe';" if has_latex else ''
+    own_fields_import = f"\nimport {{ {iname}FieldsComponent }} from './fields.component';"
 
     # Add type annotation to lambda parameter
     typed_extractor = pk_extractor.replace('i =>', f'(i: {iname}Out) =>')
@@ -1796,7 +1838,7 @@ import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
 import type {{ {iname}Out{', ' + iname + 'PutIn' if has_put and put_in_names else ''} }} from '../../../generated/stores/{schema_name}_{table_name}.store';
-import {{ AuthService }} from '../../../core/auth.service';{latex_import}{fk_store_imports}{rev_list_imports}
+import {{ AuthService }} from '../../../core/auth.service';{own_fields_import}{fk_fields_imports}{fk_store_imports}{rev_list_imports}
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'detail')}',
@@ -1812,10 +1854,6 @@ import {{ AuthService }} from '../../../core/auth.service';{latex_import}{fk_sto
               <div class="flex gap-3 items-center">{edit_btn_tmpl}
                 <a routerLink="/ho_bo/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
               </div>
-            </div>
-            <div class="flex gap-2 items-baseline mb-4">
-              <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
-              <span class="font-mono text-xs text-gray-500 break-all">{{{{ item()!.{pk_field} }}}}</span>
             </div>
             {edit_section_tmpl}
           </div>
@@ -1847,8 +1885,7 @@ export class {iname}DetailComponent {{
     }});{form_effect}{ws_effect}{fk_fetch_effects}
   }}
 
-  str(v: unknown): string {{ return String(v); }}
-  objectEntries(obj: any): [string, any][] {{ return Object.entries(obj ?? {{}}); }}{handle_update}
+  str(v: unknown): string {{ return String(v); }}{handle_update}
 }}
 """
 
@@ -2057,6 +2094,9 @@ class AngularAppGenerator(StoreGenerator):
                                               post_in_names, all_fields, optional_post_fields))
 
             if has_detail:
+                self._write(comp_dir / 'fields.component.ts',
+                            _fields_component(schema_name, table_name, iname,
+                                              pk_field, out_names, fk_deps, all_fields))
                 self._write(comp_dir / 'detail.component.ts',
                             _detail_component(schema_name, table_name, iname,
                                               pk_field, pk_ts_type, pk_extractor,
