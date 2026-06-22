@@ -1393,6 +1393,16 @@ def _is_text_field(f: str, all_fields: dict) -> bool:
     return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
 
 
+def _is_textarea_field(f: str, all_fields: dict) -> bool:
+    fo = all_fields.get(f)
+    if not fo:
+        return False
+    try:
+        return fo._Field__sql_type.lower().strip() == 'text'
+    except AttributeError:
+        return False
+
+
 def _is_required(f: str, all_fields: dict) -> bool:
     fo = all_fields.get(f)
     return bool(fo and fo.is_not_null() and fo.has_default_value is None)
@@ -1442,6 +1452,14 @@ def _ng_form_field(f: str, all_fields: dict) -> str:
             f'        <input type="checkbox" [(ngModel)]="form[\'{f}\']" name="{f}"\n'
             f'               class="h-4 w-4 rounded border-gray-300" />\n'
             f'        <label class="text-sm font-medium text-gray-700">{f}</label>\n'
+            f'      </div>'
+        )
+    if _is_textarea_field(f, all_fields):
+        return (
+            f'<div>\n'
+            f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
+            f'        <textarea [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr}\n'
+            f'                  class="w-full border rounded px-3 py-2 text-sm font-mono resize-y min-h-[1rem] [field-sizing:content]"></textarea>\n'
             f'      </div>'
         )
     return (
@@ -1735,6 +1753,7 @@ def _detail_component(
             f'    this.store.update(this.id as any, putPayload).subscribe({{\n'
             f'      next: (updated) => {{\n'
             f'        this.store.setItem(updated); this.editing.set(false);\n'
+            f'        document.querySelector(\'main\')?.scrollTo({{ top: 0, behavior: \'smooth\' }});\n'
             f'      }},\n'
             f'      error: (err: Error) => this.error.set(err.message),\n'
             f'    }});\n'
