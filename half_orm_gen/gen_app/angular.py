@@ -88,6 +88,7 @@ _PACKAGE_JSON = """\
     "@angular/platform-browser": "^22.0.0",
     "@angular/platform-browser-dynamic": "^22.0.0",
     "@angular/router": "^22.0.0",
+    "katex": "^0.16.0",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.15.0"
@@ -96,6 +97,7 @@ _PACKAGE_JSON = """\
     "@angular/build": "^22.0.0",
     "@angular/cli": "^22.0.0",
     "@angular/compiler-cli": "^22.0.0",
+    "@types/katex": "^0.16.0",
     "autoprefixer": "^10.4.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
@@ -215,9 +217,43 @@ _INDEX_HTML = """\
 """
 
 _STYLES_CSS = """\
+@import 'katex/dist/katex.min.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+"""
+
+_LATEX_PIPE = """\
+import { Pipe, PipeTransform, inject } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import katex from 'katex';
+
+@Pipe({ name: 'latex', standalone: true })
+export class LatexPipe implements PipeTransform {
+    private sanitizer = inject(DomSanitizer);
+
+    transform(value: unknown): SafeHtml {
+        const text = String(value ?? '');
+        if (!text || (!text.includes('$') && !text.includes('\\\\(')))
+            return this.escHtml(text);
+        return this.sanitizer.bypassSecurityTrustHtml(this.renderMath(text));
+    }
+
+    private renderMath(text: string): string {
+        const parts = text.split(/(\\$\\$[\\s\\S]+?\\$\\$|\\$[^$\\n]+?\\$)/g);
+        return parts.map((part, i) => {
+            if (i % 2 === 0) return this.escHtml(part);
+            const display = part.startsWith('$$');
+            const math = display ? part.slice(2, -2) : part.slice(1, -1);
+            return katex.renderToString(math, { displayMode: display, throwOnError: false });
+        }).join('');
+    }
+
+    private escHtml(s: string): string {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/\\n/g, '<br>');
+    }
+}
 """
 
 _TAILWIND_CONFIG = """\
@@ -1548,7 +1584,11 @@ def _detail_component(
         rev_list_imports = '\n' + rev_list_imports
 
     rev_list_in_imports = ', '.join(f'{_cname(rs, rt)}ListComponent' for rs, rt, _ in rev_fk_deps)
-    all_imports = ', '.join(filter(None, ['RouterLink', 'FormsModule' if has_put and put_in_names else '', rev_list_in_imports]))
+    has_latex = any(
+        f != pk_field and f not in fk_map and f in all_fields and _field_type_category(all_fields[f]) == 'string'
+        for f in out_names
+    )
+    all_imports = ', '.join(filter(None, ['RouterLink', 'LatexPipe' if has_latex else '', 'FormsModule' if has_put and put_in_names else '', rev_list_in_imports]))
 
     # Read-only field rows
     def _ro_row(f: str) -> str:
@@ -1560,6 +1600,11 @@ def _detail_component(
                 f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item()![\'{f}\'])]"'
                 f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item()![\'{f}\'] }}}}</a>'
                 f'</div>'
+            )
+        if f in all_fields and _field_type_category(all_fields[f]) == 'string':
+            return (
+                f'<div class="flex gap-2 items-baseline">{label}'
+                f'<span class="text-sm break-all" [innerHTML]="item()![\'{f}\'] | latex"></span></div>'
             )
         return (
             f'<div class="flex gap-2 items-baseline">{label}'
@@ -1716,6 +1761,8 @@ def _detail_component(
             f'      if (!this.auth.fetchedRoutes.has(url)) this.{rn_store}.get(String(v)).subscribe();\n'
             f'    }});'
         )
+    latex_import = "\nimport { LatexPipe } from '../../../core/latex.pipe';" if has_latex else ''
+
     # Add type annotation to lambda parameter
     typed_extractor = pk_extractor.replace('i =>', f'(i: {iname}Out) =>')
     pk_id_line = f'\n  protected getPkId = {typed_extractor};'
@@ -1728,7 +1775,7 @@ import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
 import type {{ {iname}Out{', ' + iname + 'PutIn' if has_put and put_in_names else ''} }} from '../../../generated/stores/{schema_name}_{table_name}.store';
-import {{ AuthService }} from '../../../core/auth.service';{fk_store_imports}{rev_list_imports}
+import {{ AuthService }} from '../../../core/auth.service';{latex_import}{fk_store_imports}{rev_list_imports}
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'detail')}',
@@ -1823,6 +1870,7 @@ class AngularAppGenerator(StoreGenerator):
         self._write(app_dir / 'core' / 'state-registry.ts', _STATE_REGISTRY)
         self._write(app_dir / 'core' / 'auth.service.ts',
                     _auth_service(version_prefix))
+        self._write(app_dir / 'core' / 'latex.pipe.ts', _LATEX_PIPE)
 
         # Pass 1 — identify CRUD resources
         crud_resources: set[tuple[str, str]] = set()
