@@ -464,11 +464,10 @@ import {{ RouterLink }} from '@angular/router';
   imports: [RouterLink],
   template: `
     <div class="flex flex-col items-center justify-center h-full bg-gray-50 py-16">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 250" width="80" height="80" class="mb-6">
-        <path d="M125 30L31.9 63.2l14.2 123.1L125 230l78.9-43.7 14.2-123.1z" fill="#DD0031"/>
-        <path d="M125 30v22.2-.1V230l78.9-43.7 14.2-123.1L125 30z" fill="#C3002F"/>
-        <path d="M125 52.1L66.8 182.6h21.7l11.7-29.2h49.4l11.7 29.2H173L125 52.1zm17 83.3h-34l17-40.9 17 40.9z" fill="#fff"/>
-      </svg>
+      <div class="flex items-center gap-6 mb-6">
+        <img src="logo.png" alt="halfORM" class="h-20 w-auto" />
+        <img src="angular_200x200.png" alt="Angular" class="h-20 w-auto" />
+      </div>
       <h1 class="text-3xl font-bold text-gray-800 mb-2">halfORM Backoffice</h1>
       <p class="text-gray-500 mb-8">Powered by Angular</p>
       <a [routerLink]="['{first_route}']"
@@ -1932,6 +1931,13 @@ class AngularAppGenerator(StoreGenerator):
         if filters_src.exists():
             shutil.copy2(filters_src, stores_dir / 'filters.ts')
             print(f'  {stores_dir / "filters.ts"}')
+
+        # --- static assets (served from public/ per angular.json) ---
+        assets_src = package_dir / 'assets'
+        public_dir = output_dir / 'public'
+        public_dir.mkdir(parents=True, exist_ok=True)
+        for asset in ('logo.png', 'angular_200x200.png'):
+            shutil.copy2(assets_src / asset, public_dir / asset)
 
         # --- app routes + app component ---
         route_meta = [

@@ -49,6 +49,7 @@ include = ["half_orm_gen*"]
 half_orm_gen = [
     "version.txt",
     "scaffolding/*.py",
+    "assets/*",
 ]
 
 [tool.setuptools.dynamic]

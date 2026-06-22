@@ -155,10 +155,11 @@ class SvelteGenerator(StoreGenerator):
             lines.append('')
             lines.append(f'export const {rname}State = new {iname}State();')
             if pk_field:
-                lines.append(f'registerClear(() => {rname}State.clear());')
+                lines.append(f'registerClear(() => {{ {rname}State.clear(); _loadedFilters.clear(); }});')
             lines.append('')
 
             # API
+            lines.append("const _loadedFilters = new Map<string, boolean>();")
             lines.append(f"const _BASE = '{base_path}';")
             lines.append("const _hdrs = (extra?: Record<string, string>) => ({")
             lines.append("    ...(auth.token ? { Authorization: `Bearer ${auth.token}` } : {}),")
@@ -169,6 +170,7 @@ class SvelteGenerator(StoreGenerator):
             lines.append("    if (method === 'GET') auth.fetchedRoutes.add(url);")
             lines.append("    return fetch(url, opts);")
             lines.append("};")
+
             lines.append('')
             api_entries = []
             if 'GET' in crud_access:
@@ -179,7 +181,8 @@ class SvelteGenerator(StoreGenerator):
                     f"                     .filter(([_, v]) => v != null && (typeof v !== 'string' || v !== ''))\n"
                     f"                     .map(([k, v]) => [`ho_col_${{k}}`, v])\n"
                     f"                 );\n"
-                    f"                 const qs = new URLSearchParams(filtered as any).toString();\n"
+                    f"                 const allParams = {{...filtered, offset: '0', limit: '100'}};\n"
+                    f"                 const qs = new URLSearchParams(allParams as any).toString();\n"
                     f"                 return qs ? _BASE + '?' + qs : _BASE;\n"
                     f"             }},"
                 )
@@ -187,6 +190,8 @@ class SvelteGenerator(StoreGenerator):
                     f"    list:    async (params: Partial<{iname}Out> = {{}}, offset: number = 0): Promise<{{has_more: boolean, offset: number}}> => {{\n"
                     f"                 // Handle special 'q' param for search (not prefixed with ho_col_)\n"
                     f"                 const searchQ = (params as any)['q'];\n"
+                    f"                 const filterKey = JSON.stringify(params);\n"
+                    f"                 if (offset === 0 && !searchQ && _loadedFilters.get(filterKey)) return {{ has_more: false, offset }};\n"
                     f"                 const otherParams = searchQ ? {{}} : params;\n"
                     f"                 const filtered = Object.fromEntries(\n"
                     f"                   Object.entries(otherParams)\n"
@@ -203,6 +208,7 @@ class SvelteGenerator(StoreGenerator):
                     f"                 // For backend search (q param), merge results; otherwise replace on offset 0\n"
                     f"                 if (offset === 0 && !searchQ) {rname}State.setItems(data);\n"
                     f"                 else {rname}State.mergeItems(data);\n"
+                    f"                 if (!meta.has_more) _loadedFilters.set(filterKey, true);\n"
                     f"                 return {{ has_more: meta.has_more, offset: offset + data.length }};\n"
                     f"             }},"
                 )
