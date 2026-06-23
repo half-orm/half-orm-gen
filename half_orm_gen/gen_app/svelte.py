@@ -457,7 +457,7 @@ def _layout(resources: list) -> str:
         {{/each}}
       </nav>
       <div class="px-4 py-3 border-t">
-        <a href="/ho_bo">
+        <a href="/">
           <img src="/logo.png" alt="halfORM" class="h-10 w-auto opacity-80 hover:opacity-100 transition-opacity" />
         </a>
       </div>
@@ -1360,8 +1360,14 @@ def _detail_page(
         cn = _cname(rs, rt)
         return (
             f'\n<div class="mt-4 bg-white rounded-lg shadow overflow-hidden">\n'
-            f'  <div class="px-6 pt-5 pb-3">\n'
+            f'  <div class="px-6 pt-5 pb-3 flex items-center justify-between">\n'
             f'    <h2 class="text-lg font-semibold">{_title(rs, rt)}</h2>\n'
+            f'    <span class="flex items-center gap-1 text-xs text-gray-400">\n'
+            f'      <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">\n'
+            f'        <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>\n'
+            f'      </svg>\n'
+            f'      {fk_field} = {{item?.{pk_field} ?? \'\'}}\n'
+            f'    </span>\n'
             f'  </div>\n'
             f'  {{#if item}}\n'
             f'    <{cn}List filters={{{{ {fk_field}: item.{pk_field} }}}} embedded />\n'

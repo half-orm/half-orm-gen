@@ -433,7 +433,7 @@ import {{ AuthService }} from './core/auth.service';
               }}
             </nav>
             <div class="px-4 py-3 border-t">
-              <a routerLink="/ho_bo">
+              <a routerLink="/">
                 <img src="logo.png" alt="halfORM" class="h-10 w-auto opacity-80 hover:opacity-100 transition-opacity" />
               </a>
             </div>
@@ -838,8 +838,8 @@ def _store(
     lines.append(f'    this.http.get<{{data: {iname}Out[], meta: {{offset: number, limit: number, has_more: boolean}}}}>(url, {{ headers: this.headers }})')
     lines.append('      .pipe(catchError(() => of({ data: [], meta: { offset, limit: 100, has_more: false } })))')
     lines.append('      .subscribe(response => {')
-    lines.append('        // For backend search (q param), merge results; otherwise replace on offset 0')
-    lines.append('        if (offset === 0 && !searchQ) this.setItems(response.data);')
+    lines.append('        // Full unfiltered list replaces; filtered or paginated loads merge')
+    lines.append('        if (offset === 0 && !searchQ && Object.keys(params).length === 0) this.setItems(response.data);')
     lines.append('        else this.mergeItems(response.data);')
     lines.append('        this.hasMore.set(response.meta.has_more);')
     lines.append('        this.currentOffset.set(offset + response.data.length);')
@@ -1588,7 +1588,7 @@ def _fields_component(
         )
 
     rows = '\n      '.join(_ro_row(f) for f in out_names)
-    has_fk = bool(fk_map)
+    has_fk = any(f in fk_map for f in out_names)
     router_import = "\nimport { RouterLink } from '@angular/router';" if has_fk else ''
     latex_import = "\nimport { LatexPipe } from '../../../core/latex.pipe';" if has_latex else ''
     all_imports = ', '.join(filter(None, [
@@ -1766,8 +1766,14 @@ def _detail_component(
         rt_title = _title(rs, rt)
         rev_sections += f"""
     <div class="mt-4 bg-white rounded-lg shadow overflow-hidden">
-      <div class="px-6 pt-5 pb-3">
+      <div class="px-6 pt-5 pb-3 flex items-center justify-between">
         <h2 class="text-lg font-semibold">{rt_title}</h2>
+        <span class="flex items-center gap-1 text-xs text-gray-400">
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>
+          </svg>
+          {fk_field} = {{{{ item()?.{pk_field} }}}}
+        </span>
       </div>
       @if (item()) {{
         <{_selector(rs, rt, 'list')} [filters]="{{ {fk_field}: item()!['{pk_field}'] }}" [embedded]="true" />
