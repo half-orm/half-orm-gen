@@ -71,50 +71,38 @@ class GenApi:
         os.environ.setdefault('API_GEN_MODE', '1')
 
         if self._framework == 'fastapi':
+            # FastAPI still uses the old code-generation path
             from half_orm_gen import templates_fastapi as templates
             api_blocks, api_handlers, covered = [], [], set()
-        else:
-            templates = T
-            api_blocks, api_handlers, covered = generate_api_routes(
-                self._classes, self._api_version
+            crud_blocks, crud_handlers = generate_crud_routes(
+                self._classes, self._api_version, covered, templates=templates
             )
-
-        # --- auto-CRUD routes ---
-        crud_blocks, crud_handlers = generate_crud_routes(
-            self._classes, self._api_version, covered, templates=templates
-        )
-
-        # --- assemble app.py ---
-        openapi_config = (
-            templates.OPENAPI_CONFIG.format(
-                title=self._module_name,
-                version=f'v{self._api_version}',
+            openapi_config = (
+                templates.OPENAPI_CONFIG.format(
+                    title=self._module_name,
+                    version=f'v{self._api_version}',
+                )
+                if self._api_version is not None
+                else ''
             )
-            if self._api_version is not None
-            else ''
-        )
-
-        output = (
-            templates.HEADER.format(module=self._module_name)
-            + (templates.CRUD_HELPERS if crud_blocks else '')
-            + ''.join(api_blocks)
-            + ''.join(crud_blocks)
-        )
-
-        if self._framework == 'fastapi':
-            output += templates.FOOTER.format(openapi_config=openapi_config)
-        else:
-            route_handlers_str = ', '.join(api_handlers + crud_handlers)
-            output += templates.FOOTER.format(
-                route_handlers=route_handlers_str,
-                openapi_config=openapi_config,
+            output = (
+                templates.HEADER.format(module=self._module_name)
+                + (templates.CRUD_HELPERS if crud_blocks else '')
+                + ''.join(api_blocks)
+                + ''.join(crud_blocks)
+                + templates.FOOTER.format(openapi_config=openapi_config)
             )
-            # --- scaffold missing api/ files ---
-            print(f'\nScaffolding {self._api_dir} ...')
-            scaffold_api_dir(self._api_dir)
+            self._api_dir.mkdir(parents=True, exist_ok=True)
+            app_py = self._api_dir / 'app.py'
+            app_py.write_text(output, encoding='utf-8')
+            print(f'\nGenerated {app_py}')
+            return
 
-        # --- write app.py ---
-        self._api_dir.mkdir(parents=True, exist_ok=True)
-        app_py = self._api_dir / 'app.py'
-        app_py.write_text(output, encoding='utf-8')
-        print(f'\nGenerated {app_py}')
+        # --- Litestar: scaffold-only, dynamic runtime handles everything ---
+        print(f'\nScaffolding {self._api_dir} ...')
+        scaffold_api_dir(
+            self._api_dir,
+            module_name=self._module_name,
+            api_version=self._api_version,
+        )
+        print('\nDone. Routes are loaded dynamically at startup via half_orm_gen.runtime.')

@@ -10,7 +10,7 @@ from pathlib import Path
 _SCAFFOLDING_DIR = Path(__file__).parent / 'scaffolding'
 
 
-def scaffold_api_dir(api_dir: Path) -> None:
+def scaffold_api_dir(api_dir: Path, module_name: str = '', api_version: int | None = None) -> None:
     """Create missing api/ scaffolding files. Never overwrites existing files."""
     files = {
         api_dir / 'guards.py':
@@ -35,3 +35,14 @@ def scaffold_api_dir(api_dir: Path) -> None:
             print(f'  created  {dest}')
         else:
             print(f'  exists   {dest}')
+
+    # Scaffold app.py from template (substituting module_name and api_version)
+    app_py = api_dir / 'app.py'
+    if not app_py.exists():
+        template = (_SCAFFOLDING_DIR / 'app.py').read_text(encoding='utf-8')
+        version_str = str(api_version) if api_version is not None else 'None'
+        content = template.replace('{module_name}', module_name).replace('{api_version}', version_str)
+        app_py.write_text(content, encoding='utf-8')
+        print(f'  created  {app_py}')
+    else:
+        print(f'  exists   {app_py}')
