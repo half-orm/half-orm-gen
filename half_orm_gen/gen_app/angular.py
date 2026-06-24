@@ -1147,6 +1147,7 @@ def _list_component(
     has_post: bool, has_del: bool,
     fk_deps: list,
     all_fields: dict,
+    pk_info: list | None = None,
 ) -> str:
     title  = _title(schema_name, table_name)
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
@@ -1261,7 +1262,10 @@ def _list_component(
 
     needs_router_link = has_post or bool(fk_deps)
 
-    if pk_field:
+    # single-PK: byId accumulates all fetched rows including setItem() calls
+    # composite-PK or no PK: byId is never populated by the silo (pk=null), use items
+    _is_single_pk = pk_field and (not pk_info or len(pk_info) == 1)
+    if _is_single_pk:
         _fk_items_src = (
             'Array.from(this.silo.byId().values()).filter(item =>\n'
             '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
@@ -2267,7 +2271,7 @@ class AngularAppGenerator(StoreGenerator):
 
             self._write(comp_dir / 'list.component.ts',
                         _list_component(schema_name, table_name, iname, map_key,
-                                        out_names, pk_field, pk_ts_type, pk_extractor, has_post, has_del, fk_deps, all_fields))
+                                        out_names, pk_field, pk_ts_type, pk_extractor, has_post, has_del, fk_deps, all_fields, pk_info))
 
             if has_post:
                 self._write(comp_dir / 'create.component.ts',
