@@ -609,6 +609,7 @@ interface ResourceView {
   table: string;
   kind: string;
   fields: (FieldSchema & { fkTarget: string | null })[];
+  reverseFks: string[];
 }
 
 @Component({
@@ -675,6 +676,22 @@ interface ResourceView {
                       </td>
                     </tr>
                   }
+                  @if (res.reverseFks.length > 0) {
+                    <tr class="bg-gray-50 border-b">
+                      <td colspan="3" class="px-4 py-1 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                        Referenced by
+                      </td>
+                    </tr>
+                    @for (rfk of res.reverseFks; track rfk) {
+                      <tr class="border-b last:border-b-0 hover:bg-gray-50">
+                        <td colspan="2"></td>
+                        <td class="px-4 py-1.5 text-xs">
+                          <a (click)="scrollTo(rfk.replace('/', '_'))"
+                             class="text-indigo-500 hover:underline cursor-pointer">&leftarrow; {{ rfk }}</a>
+                        </td>
+                      </tr>
+                    }
+                  }
                 </table>
               </div>
             }
@@ -712,6 +729,8 @@ export class SchemaComponent {
           ...f,
           fkTarget: fkByField.get(f.name) ?? null,
         })),
+        reverseFks: (res.reverse_fks as (FkDep & { is_singleton: boolean })[])
+          .map(rfk => `${rfk.remote_schema}/${rfk.remote_table}`),
       });
     }
     return [...bySchema.entries()]
