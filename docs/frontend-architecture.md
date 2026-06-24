@@ -5,6 +5,9 @@ For framework-specific details see:
 - [svelte-silo-architecture.md](svelte-silo-architecture.md)
 - [angular-silo-architecture.md](angular-silo-architecture.md)
 
+For the generated file structure and reusable components see:
+- [frontend-code-organization.md](frontend-code-organization.md)
+
 For the backend that exposes the API consumed here see:
 - [backend-architecture.md](backend-architecture.md)
 
