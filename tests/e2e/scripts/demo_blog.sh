@@ -13,8 +13,9 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 source "$SCRIPT_DIR/common.sh"
 
 PROJECT="blog_demo"
+DEMOS_DIR="$SCRIPT_DIR/demos"
 GIT_BARE="/tmp/${PROJECT}.git"
-export HALFORM_CONF_DIR="$SCRIPT_DIR/.config"
+export HALFORM_CONF_DIR="$DEMOS_DIR/.config"
 
 # ---------------------------------------------------------------------------
 # Cleanup helper
@@ -22,7 +23,7 @@ export HALFORM_CONF_DIR="$SCRIPT_DIR/.config"
 cleanup() {
     echo -e "${YELLOW}=== CLEANUP ===${NC}"
     cd "$SCRIPT_DIR"
-    rm -rf "$PROJECT" .config "$GIT_BARE"
+    rm -rf "$DEMOS_DIR/$PROJECT" "$DEMOS_DIR/.config" "$GIT_BARE"
     set +e
     dropdb -h localhost -U "$TEST_DB_USER" "$PROJECT" 2>/dev/null
     set -e
@@ -46,6 +47,8 @@ git init --bare "$GIT_BARE"
 # ---------------------------------------------------------------------------
 # 2. half-orm-dev project init
 # ---------------------------------------------------------------------------
+mkdir -p "$DEMOS_DIR"
+cd "$DEMOS_DIR"
 echo -e "${GREEN}=== INIT PROJECT ===${NC}"
 half_orm dev init "$PROJECT" \
     --git-origin "$GIT_BARE" \
@@ -205,5 +208,4 @@ echo "  ${PROJECT}/api/guards.py"
 echo "  ${PROJECT}/api/custom/routes.py"
 echo ""
 echo "To start the server:"
-echo "  cd ${PROJECT}"
-echo "  half_orm gen run --reload"
+echo "  cd ${DEMOS_DIR}/${PROJECT} && half_orm gen run --reload"

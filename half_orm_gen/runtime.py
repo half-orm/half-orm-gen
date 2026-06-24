@@ -536,6 +536,7 @@ _HO_WARN = """
 ======================================================================
   halfORM DEV HELPERS ACTIVE — NOT FOR PRODUCTION
 ======================================================================
+  /ho_meta   : full schema (fields, PKs, FKs) for all resources
   /ho_roles  : exposes all declared roles (no authentication)
   /ho_access : exposes the full access map filtered by role
   _get_roles : bearer token used directly as a role name
@@ -571,12 +572,16 @@ def build_crud_app(
     relation_handlers: list = []
 
     for cls, _kind in model.classes():
-        mod = importlib.import_module(cls.__module__)
-        crud_access = getattr(mod, 'CRUD_ACCESS', None)
+        try:
+            mod = importlib.import_module(cls.__module__)
+        except ModuleNotFoundError:
+            mod = None
+        crud_access = getattr(mod, 'CRUD_ACCESS', None) if mod else None
+        no_crud = crud_access is None
         if not crud_access:
             crud_access = {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
 
-        api_excluded: list[str] = getattr(mod, 'API_EXCLUDED_FIELDS', [])
+        api_excluded: list[str] = getattr(mod, 'API_EXCLUDED_FIELDS', []) if mod else []
 
         inst = cls()
         schema = inst._t_fqrn[1]
@@ -618,11 +623,14 @@ def build_crud_app(
         if pk_info and len(pk_info) == 1:
             ws_rmap[resource] = (cls, pk_info[0][0])
 
-        # Build route handlers based on declared verbs
-        has_get    = bool(crud_access.get('GET'))
-        has_post   = bool(crud_access.get('POST'))
-        has_put    = bool(crud_access.get('PUT'))
-        has_delete = bool(crud_access.get('DELETE'))
+        # Build route handlers based on declared verbs.
+        # When no CRUD_ACCESS is defined, still register routes in dev mode so
+        # ho_dev (super-role) can inspect any relation without configuration.
+        dev_fallback = no_crud and not model._production_mode
+        has_get    = bool(crud_access.get('GET'))    or dev_fallback
+        has_post   = bool(crud_access.get('POST'))   or dev_fallback
+        has_put    = bool(crud_access.get('PUT'))    or dev_fallback
+        has_delete = bool(crud_access.get('DELETE')) or dev_fallback
 
         if has_get:
             relation_handlers.append(

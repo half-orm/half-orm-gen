@@ -48,8 +48,10 @@ include = ["half_orm_gen*"]
 [tool.setuptools.package-data]
 half_orm_gen = [
     "version.txt",
+    "templates_filters.ts",
     "scaffolding/*.py",
     "assets/*",
+    "gen_app/assets/**/*",
 ]
 
 [tool.setuptools.dynamic]

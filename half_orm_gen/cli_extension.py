@@ -11,6 +11,10 @@ import sys
 from pathlib import Path
 import click
 from half_orm.cli_utils import create_and_register_extension
+from half_orm_gen.gen_app import GenApp
+from half_orm_gen.generate import GenApi
+from half_orm_gen.gen_app.svelte import SvelteAppGenerator
+from half_orm_gen.gen_app.angular import AngularAppGenerator
 
 _VERSION_FILE = Path('api') / '.api_version'
 
@@ -101,7 +105,6 @@ def add_commands(main_group):
             )
             return
 
-        from half_orm_gen.generate import GenApi
         click.echo(f'Generating {framework} API for project: {repo.name} (v{api_version})')
         GenApi(repo, api_version=api_version, framework=framework)
         if framework == 'litestar':
@@ -152,16 +155,13 @@ def add_commands(main_group):
             click.echo('Error: specify --svelte or --angular.', err=True)
             sys.exit(1)
         if framework == 'svelte':
-            from half_orm_gen.gen_app.svelte import SvelteAppGenerator
             generator = SvelteAppGenerator()
         elif framework == 'angular':
-            from half_orm_gen.gen_app.angular import AngularAppGenerator
             generator = AngularAppGenerator()
         else:
             click.echo(f'Error: unknown framework "{framework}".', err=True)
             sys.exit(1)
 
-        from half_orm_gen.gen_app import GenApp
         click.echo(f'Generating {framework} application → {output_dir}')
         GenApp(repo, generator=generator, output_dir=output_dir, api_version=api_version)
         if framework == 'svelte':

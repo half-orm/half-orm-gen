@@ -65,6 +65,7 @@ _HO_WARN = """
 ======================================================================
   halfORM DEV HELPERS ACTIVE — NOT FOR PRODUCTION
 ======================================================================
+  /ho_meta   : full schema (fields, PKs, FKs) for all resources
   /ho_roles  : exposes all declared roles (no authentication)
   /ho_access : exposes the full access map filtered by role
   _get_roles : bearer token used directly as a role name
@@ -317,6 +318,12 @@ class {class_name}(TypedDict, total=False):
 """
 
 CRUD_MODULE_IMPORT = "\nfrom {schema} import {module_name} as {module_alias}\n"
+
+HO_META_ROUTE = (
+    '\n@get("{version_prefix}/ho_meta")\n'
+    'async def _crud_meta() -> dict:\n'
+    '    return MODEL.ho_meta()\n'
+)
 
 HO_ACCESS_ROUTE = (
     '\n_STATIC_ACCESS_MAP = {json_str}\n'

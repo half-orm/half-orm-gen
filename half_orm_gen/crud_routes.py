@@ -503,6 +503,10 @@ def generate_crud_routes(
 
     blocks.extend(handler_blocks)
 
+    # /ho_meta endpoint — always present
+    blocks.append(templates.HO_META_ROUTE.format(version_prefix=version_prefix))
+    route_handlers.append('_crud_meta')
+
     # /ho_roles endpoint — static list of all roles present in CRUD_ACCESS
     if roles:
         blocks.append(
