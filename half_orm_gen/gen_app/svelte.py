@@ -1112,10 +1112,12 @@ def _fields_component_svelte(
 ) -> str:
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
-    if len(pk_info) == 1:
+    if pk_field and len(pk_info) > 1:
+        _pk_url = '::'.join(f'{c}:${{item.{c}}}' for c, _, _ in pk_info)
+    elif pk_field:
         _pk_url = f'{{item.{pk_field}}}'
     else:
-        _pk_url = '::'.join(f'{c}:${{item.{c}}}' for c, _, _ in pk_info)
+        _pk_url = ''
 
     has_latex = any(
         f not in fk_map and f != pk_field and f in all_fields
@@ -1128,11 +1130,14 @@ def _fields_component_svelte(
         label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
         if f == pk_field:
             return (
-                f'{{#if !hidePk}}\n'
-                f'  <div class="flex gap-2 items-baseline">{label}'
+                f'<div class="flex gap-2 items-baseline">{label}\n'
+                f'  {{#if hidePk}}'
+                f'<span class="font-mono text-xs text-gray-500 break-all">{{item.{f}}}</span>'
+                f'{{:else}}'
                 f'<a href="/ho_bo/{schema_name}/{table_name}/{_pk_url}"'
-                f' class="font-mono text-xs text-blue-500 hover:underline break-all">{{item.{f}}}</a></div>\n'
-                f'{{/if}}'
+                f' class="font-mono text-xs text-blue-500 hover:underline break-all">{{item.{f}}}</a>'
+                f'{{/if}}\n'
+                f'</div>'
             )
         if f in fk_map:
             rs, rt = fk_map[f]
@@ -1189,7 +1194,7 @@ def _detail_page(
     # Form state + edit toggle — populated reactively from item once loaded
     extra_script = ''
     edit_btn     = ''
-    edit_section = '\n  <Fields {item} hidePk />'
+    edit_section = '\n  <Fields {item} />'
 
     if has_put and visible_put:
         empty_init  = ', '.join(
@@ -1240,7 +1245,7 @@ def _detail_page(
         edit_section = f"""
 
   {{#if !editing}}
-  <Fields {{item}} hidePk />
+  <Fields {{item}} />
   {{:else}}
   {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
   <form onsubmit={{handleUpdate}} class="space-y-4">
@@ -1318,7 +1323,7 @@ def _detail_page(
             f'    <a href="/ho_bo/{rs}/{rt}/{{{lf_ref}.{remote_pk}}}"'
             f' class="text-lg font-semibold hover:underline hover:text-blue-700">{_title(rs, rt)}</a>\n'
             f'  </div>\n'
-            f'  <{fk_fields} item={{{lf_ref}}} hidePk />\n'
+            f'  <{fk_fields} item={{{lf_ref}}} />\n'
             f'</div>\n'
             f'{{/if}}'
         )
@@ -1397,17 +1402,13 @@ def _detail_page(
     {{#if item}}
     <div class="p-6 bg-white rounded-lg shadow">
       <div class="flex justify-between items-start mb-6">
-        <h1 class="text-2xl font-bold">{title}</h1>
+        <h1 class="text-2xl font-bold"><a href="/ho_bo/{schema_name}/{table_name}" class="hover:underline hover:text-blue-700">{title}</a></h1>
         <div class="flex gap-3 items-center">
 {edit_btn_wrap}
           <button onclick={{() => history.back()}} class="text-sm text-gray-500 hover:underline">← Back</button>
         </div>
       </div>
 
-      <div class="flex gap-2 items-baseline mb-4">
-        <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
-        <span class="font-mono text-xs text-gray-500 break-all">{{item.{pk_field}}}</span>
-      </div>
       {edit_section}
     </div>
     {{/if}}

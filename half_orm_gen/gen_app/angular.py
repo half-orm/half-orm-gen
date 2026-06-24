@@ -1559,10 +1559,19 @@ export class {iname}CreateComponent {{
 
 def _fields_component(
     schema_name: str, table_name: str,
-    iname: str, pk_field: str,
+    iname: str, pk_field: str, pk_info: list,
     out_names: list, fk_deps: list, all_fields: dict,
 ) -> str:
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
+
+    if pk_field and len(pk_info) > 1:
+        _pk_id_expr = " + '::' + ".join(
+            f"'{c}:' + String(item()['{c}'])" for c, _, _ in pk_info
+        )
+    elif pk_field:
+        _pk_id_expr = f"String(item()['{pk_field}'])"
+    else:
+        _pk_id_expr = ""
 
     has_latex = any(
         f not in fk_map and f != pk_field and f in all_fields
@@ -1574,14 +1583,17 @@ def _fields_component(
         label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
         if f == pk_field:
             return (
-                f'<div class="flex gap-2 items-baseline">{label}'
-                f'<span class="font-mono text-xs text-gray-500 break-all">{{{{ item()[\'{f}\'] }}}}</span></div>'
+                f'@if (!hidePk()) {{\n'
+                f'      <div class="flex gap-2 items-baseline">{label}'
+                f'<a [routerLink]="[\'/ho_bo/{schema_name}/{table_name}/\' + {_pk_id_expr}]"'
+                f' class="font-mono text-xs text-blue-500 hover:underline break-all">{{{{ item()[\'{f}\'] }}}}</a></div>\n'
+                f'    }}'
             )
         if f in fk_map:
             rs, rt = fk_map[f]
             return (
                 f'<div class="flex gap-2 items-baseline">{label}'
-                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item()[\'{f}\'])]"'
+                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}/\' + String(item()[\'{f}\'])]"'
                 f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item()[\'{f}\'] }}}}</a></div>'
             )
         if f in all_fields and _field_type_category(all_fields[f]) == 'string':
@@ -1595,16 +1607,15 @@ def _fields_component(
         )
 
     rows = '\n      '.join(_ro_row(f) for f in out_names)
-    has_fk = any(f in fk_map for f in out_names)
-    router_import = "\nimport { RouterLink } from '@angular/router';" if has_fk else ''
     latex_import = "\nimport { LatexPipe } from '../../../core/latex.pipe';" if has_latex else ''
     all_imports = ', '.join(filter(None, [
-        'RouterLink' if has_fk else '',
+        'RouterLink',
         'LatexPipe' if has_latex else '',
     ]))
 
     return f"""\
-import {{ Component, input }} from '@angular/core';{router_import}{latex_import}
+import {{ Component, input }} from '@angular/core';
+import {{ RouterLink }} from '@angular/router';{latex_import}
 import type {{ Row }} from '../../resource.silo';
 
 @Component({{
@@ -1618,7 +1629,8 @@ import type {{ Row }} from '../../resource.silo';
   `
 }})
 export class {iname}FieldsComponent {{
-  readonly item = input.required<Row>();
+  readonly item    = input.required<Row>();
+  readonly hidePk  = input<boolean>(false);
   protected String = String;
 }}
 """
@@ -1742,7 +1754,7 @@ def _detail_component(
     @if (item() && item()!['{lf}']) {{
       <div class="mt-4 p-6 bg-white rounded-lg shadow">
         <div class="flex justify-between items-center mb-3">
-          <a [routerLink]="['/ho_bo/{rs}/{rt}', String(item()!['{lf}'])]" class="text-lg font-semibold hover:underline hover:text-blue-700">{rt_title}</a>
+          <a routerLink="/ho_bo/{rs}/{rt}" class="text-lg font-semibold hover:underline hover:text-blue-700">{rt_title}</a>
         </div>
         @if (registry.tryGet('{fk_key}')?.byId()?.get(String(item()!['{lf}'])); as ref) {{
           <{fk_fields_sel} [item]="ref!" />
@@ -1849,7 +1861,7 @@ import {{ AuthService }} from '../../../core/auth.service';{own_fields_import}{f
         @if (item()) {{
           <div class="p-6 bg-white rounded-lg shadow">
             <div class="flex justify-between items-start mb-6">
-              <h1 class="text-2xl font-bold">{title}</h1>
+              <h1 class="text-2xl font-bold"><a routerLink="/ho_bo/{schema_name}/{table_name}" class="hover:underline hover:text-blue-700">{title}</a></h1>
               <div class="flex gap-3 items-center">{edit_btn_tmpl}
                 <button (click)="location.back()" class="text-sm text-gray-500 hover:underline">← Back</button>
               </div>
@@ -2096,7 +2108,7 @@ class AngularAppGenerator(StoreGenerator):
             if has_detail:
                 self._write(comp_dir / 'fields.component.ts',
                             _fields_component(schema_name, table_name, iname,
-                                              pk_field, out_names, fk_deps, all_fields))
+                                              pk_field, pk_cols, out_names, fk_deps, all_fields))
                 self._write(comp_dir / 'detail.component.ts',
                             _detail_component(schema_name, table_name, iname,
                                               pk_field, pk_ts_type, pk_extractor,
