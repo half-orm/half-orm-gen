@@ -1150,7 +1150,7 @@ def _list_component(
     fk_deps: list,
     all_fields: dict,
     pk_info: list | None = None,
-) -> str:
+) -> tuple[str, str, str]:
     title  = _title(schema_name, table_name)
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
@@ -1325,7 +1325,50 @@ def _list_component(
         pk_id_line = ''
         highlight_attrs = ''
 
-    return f"""\
+    html = f"""\
+@if (!embedded) {{
+  <div class="flex justify-between items-center mb-4">
+    <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
+  </div>
+}}
+<div [class]="embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
+  <table class="w-full border-collapse">
+    <thead [class]="embedded ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
+      <tr>
+        {action_th}
+        {th_cols}
+      </tr>{filter_row}
+    </thead>
+    <tbody>
+      @for (item of displayItems(); track $index) {{
+        <tr #dataRow class="border-t hover:bg-gray-50{cursor}"{row_click}{highlight_attrs}>
+          {action_td}
+          {td_cols}
+        </tr>
+      }}
+      @if (silo.isLoading()) {{
+        <tr><td colspan="100" class="text-center py-4 text-gray-500">Loading...</td></tr>
+      }}
+    </tbody>
+  </table>
+</div>
+@if (jsonDialogContent() !== null) {{
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+       (click)="jsonDialogContent.set(null)">
+    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
+         (click)="$event.stopPropagation()">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-semibold text-gray-800">JSON</h3>
+        <button (click)="jsonDialogContent.set(null)"
+                class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+      </div>
+      <pre class="text-xs bg-gray-50 rounded p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap">{{{{ jsonDialogContent() }}}}</pre>
+    </div>
+  </div>
+}}
+"""
+
+    ts = f"""\
 import {{ Component, computed, effect, inject, Input, signal, untracked, DestroyRef, afterNextRender, ViewChildren, QueryList, ElementRef }} from '@angular/core';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
@@ -1341,48 +1384,8 @@ import type {{ FieldType }} from '../../../generated/stores/filters';
   selector: '{_selector(schema_name, table_name, 'list')}',
   standalone: true,
   imports: [{router_link_imp}],
-  template: `
-    @if (!embedded) {{
-      <div class="flex justify-between items-center mb-4">
-        <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
-      </div>
-    }}
-    <div [class]="embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
-      <table class="w-full border-collapse">
-        <thead [class]="embedded ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
-          <tr>
-            {action_th}
-            {th_cols}
-          </tr>{filter_row}
-        </thead>
-        <tbody>
-          @for (item of displayItems(); track $index) {{
-            <tr #dataRow class="border-t hover:bg-gray-50{cursor}"{row_click}{highlight_attrs}>
-              {action_td}
-              {td_cols}
-            </tr>
-          }}
-          @if (silo.isLoading()) {{
-            <tr><td colspan="100" class="text-center py-4 text-gray-500">Loading...</td></tr>
-          }}
-        </tbody>
-      </table>
-    </div>
-    @if (jsonDialogContent() !== null) {{
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-           (click)="jsonDialogContent.set(null)">
-        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
-             (click)="$event.stopPropagation()">
-          <div class="flex justify-between items-center mb-3">
-            <h3 class="font-semibold text-gray-800">JSON</h3>
-            <button (click)="jsonDialogContent.set(null)"
-                    class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
-          </div>
-          <pre class="text-xs bg-gray-50 rounded p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap">{{{{ jsonDialogContent() }}}}</pre>
-        </div>
-      </div>
-    }}
-  `
+  templateUrl: './list.component.html',
+  styleUrl: './list.component.css',
 }})
 export class {iname}ListComponent {{
   protected silo   = inject(SiloRegistry).get('{map_key}');
@@ -1555,6 +1558,7 @@ export class {iname}ListComponent {{
   }}{select_fn}{delete_fn}
 }}
 """
+    return ts, html, ''
 
 
 def _is_bool_field(f: str, all_fields: dict) -> bool:
@@ -1648,7 +1652,7 @@ def _create_component(
     iname: str,
     post_in_names: list, all_fields: dict,
     optional_post_fields: frozenset = frozenset(),
-) -> str:
+) -> tuple[str, str, str]:
     title = _title(schema_name, table_name)
     visible_post = [f for f in post_in_names if not _is_server_generated(f, all_fields)]
     fields_ts = ', '.join(
@@ -1681,7 +1685,25 @@ def _create_component(
         "    this.silo.create(payload).subscribe({"
     )
 
-    return f"""\
+    html = f"""\
+<div class="max-w-lg mx-auto p-6 bg-white rounded-lg shadow mt-6">
+  <h1 class="text-2xl font-bold mb-6">New {title}</h1>
+  @if (error()) {{ <p class="text-red-600 mb-4">{{{{ error() }}}}</p> }}
+  <form #ngForm="ngForm" (ngSubmit)="handleSubmit()" class="space-y-4">
+    {form_fields}
+    <div class="flex gap-3 pt-2">
+      <button type="submit" [disabled]="ngForm.invalid"
+              class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+        Create
+      </button>
+      <a routerLink="/ho_bo/{schema_name}/{table_name}"
+         class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</a>
+    </div>
+  </form>
+</div>
+"""
+
+    ts = f"""\
 import {{ Component, inject, signal }} from '@angular/core';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router }} from '@angular/router';
@@ -1692,23 +1714,8 @@ import type {{ Row }} from '../../../generated/resource.silo';
   selector: '{_selector(schema_name, table_name, 'create')}',
   standalone: true,
   imports: [FormsModule, RouterLink],
-  template: `
-    <div class="max-w-lg mx-auto p-6 bg-white rounded-lg shadow mt-6">
-      <h1 class="text-2xl font-bold mb-6">New {title}</h1>
-      @if (error()) {{ <p class="text-red-600 mb-4">{{{{ error() }}}}</p> }}
-      <form #ngForm="ngForm" (ngSubmit)="handleSubmit()" class="space-y-4">
-        {form_fields}
-        <div class="flex gap-3 pt-2">
-          <button type="submit" [disabled]="ngForm.invalid"
-                  class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-            Create
-          </button>
-          <a routerLink="/ho_bo/{schema_name}/{table_name}"
-             class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</a>
-        </div>
-      </form>
-    </div>
-  `
+  templateUrl: './create.component.html',
+  styleUrl: './create.component.css',
 }})
 export class {iname}CreateComponent {{
   private silo   = inject(SiloRegistry).get('{schema_name}/{table_name}');
@@ -1728,13 +1735,14 @@ export class {iname}CreateComponent {{
   }}
 }}
 """
+    return ts, html, ''
 
 
 def _fields_component(
     schema_name: str, table_name: str,
     iname: str, pk_field: str, pk_info: list,
     out_names: list, fk_deps: list, all_fields: dict,
-) -> str:
+) -> tuple[str, str, str]:
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
     if pk_field and len(pk_info) > 1:
@@ -1786,7 +1794,13 @@ def _fields_component(
         'LatexPipe' if has_latex else '',
     ]))
 
-    return f"""\
+    html = f"""\
+<div class="space-y-2">
+  {rows}
+</div>
+"""
+
+    ts = f"""\
 import {{ Component, input }} from '@angular/core';
 import {{ RouterLink }} from '@angular/router';{latex_import}
 import type {{ Row }} from '../../resource.silo';
@@ -1795,11 +1809,8 @@ import type {{ Row }} from '../../resource.silo';
   selector: '{_selector(schema_name, table_name, 'fields')}',
   standalone: true,
   imports: [{all_imports}],
-  template: `
-    <div class="space-y-2">
-      {rows}
-    </div>
-  `
+  templateUrl: './fields.component.html',
+  styleUrl: './fields.component.css',
 }})
 export class {iname}FieldsComponent {{
   readonly item    = input.required<Row>();
@@ -1807,6 +1818,7 @@ export class {iname}FieldsComponent {{
   protected String = String;
 }}
 """
+    return ts, html, ''
 
 
 def _detail_component(
@@ -1816,7 +1828,7 @@ def _detail_component(
     has_put: bool, map_key: str,
     fk_deps: list, rev_fk_deps: list,
     all_fields: dict,
-) -> str:
+) -> tuple[str, str, str]:
     title   = _title(schema_name, table_name)
     fk_map  = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
@@ -2013,7 +2025,27 @@ def _detail_component(
     typed_extractor = pk_extractor.replace('i =>', '(i: Row) =>')
     pk_id_line = f'\n  protected getPkId = {typed_extractor};'
 
-    return f"""\
+    html = f"""\
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
+  <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
+    @if (item()) {{
+      <div class="p-6 bg-white rounded-lg shadow">
+        <div class="flex justify-between items-start mb-6">
+          <h1 class="text-2xl font-bold"><a routerLink="/ho_bo/{schema_name}/{table_name}" class="hover:underline hover:text-blue-700">{title}</a></h1>
+          <div class="flex gap-3 items-center">{edit_btn_tmpl}
+            <button (click)="location.back()" class="text-sm text-gray-500 hover:underline">← Back</button>
+          </div>
+        </div>
+        {edit_section_tmpl}
+      </div>
+    }}
+  </div>
+  <div class="min-w-0 lg:overflow-y-auto lg:pr-1">{right_col}
+  </div>
+</div>
+"""
+
+    ts = f"""\
 import {{ Component, computed, effect, inject, signal, untracked }} from '@angular/core';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ Location }} from '@angular/common';
@@ -2028,25 +2060,8 @@ import {{ AuthService }} from '../../../core/auth.service';{own_fields_import}{f
   selector: '{_selector(schema_name, table_name, 'detail')}',
   standalone: true,
   imports: [{all_imports}],
-  template: `
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
-      <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
-        @if (item()) {{
-          <div class="p-6 bg-white rounded-lg shadow">
-            <div class="flex justify-between items-start mb-6">
-              <h1 class="text-2xl font-bold"><a routerLink="/ho_bo/{schema_name}/{table_name}" class="hover:underline hover:text-blue-700">{title}</a></h1>
-              <div class="flex gap-3 items-center">{edit_btn_tmpl}
-                <button (click)="location.back()" class="text-sm text-gray-500 hover:underline">← Back</button>
-              </div>
-            </div>
-            {edit_section_tmpl}
-          </div>
-        }}
-      </div>
-      <div class="min-w-0 lg:overflow-y-auto lg:pr-1">{right_col}
-      </div>
-    </div>
-  `
+  templateUrl: './detail.component.html',
+  styleUrl: './detail.component.css',
 }})
 export class {iname}DetailComponent {{
   protected registry = inject(SiloRegistry);
@@ -2074,6 +2089,7 @@ export class {iname}DetailComponent {{
   str(v: unknown): string {{ return String(v); }}{handle_update}
 }}
 """
+    return ts, html, ''
 
 
 # ---------------------------------------------------------------------------
@@ -2271,24 +2287,34 @@ class AngularAppGenerator(StoreGenerator):
 
             comp_dir = app_dir / 'generated' / 'components' / f'{schema_name}_{table_name}'
 
-            self._write(comp_dir / 'list.component.ts',
-                        _list_component(schema_name, table_name, iname, map_key,
-                                        out_names, pk_field, pk_ts_type, pk_extractor, has_post, has_del, fk_deps, all_fields, pk_info))
+            ts, html, css = _list_component(schema_name, table_name, iname, map_key,
+                                             out_names, pk_field, pk_ts_type, pk_extractor,
+                                             has_post, has_del, fk_deps, all_fields, pk_info)
+            self._write(comp_dir / 'list.component.ts', ts)
+            self._write(comp_dir / 'list.component.html', html)
+            self._write(comp_dir / 'list.component.css', css)
 
             if has_post:
-                self._write(comp_dir / 'create.component.ts',
-                            _create_component(schema_name, table_name, iname,
-                                              post_in_names, all_fields, optional_post_fields))
+                ts, html, css = _create_component(schema_name, table_name, iname,
+                                                   post_in_names, all_fields, optional_post_fields)
+                self._write(comp_dir / 'create.component.ts', ts)
+                self._write(comp_dir / 'create.component.html', html)
+                self._write(comp_dir / 'create.component.css', css)
 
             if has_detail:
-                self._write(comp_dir / 'fields.component.ts',
-                            _fields_component(schema_name, table_name, iname,
-                                              pk_field, pk_cols, out_names, fk_deps, all_fields))
-                self._write(comp_dir / 'detail.component.ts',
-                            _detail_component(schema_name, table_name, iname,
-                                              pk_field, pk_ts_type, pk_extractor,
-                                              out_names, put_in_names, has_put,
-                                              map_key, fk_deps, rev_fk_deps, all_fields))
+                ts, html, css = _fields_component(schema_name, table_name, iname,
+                                                   pk_field, pk_cols, out_names, fk_deps, all_fields)
+                self._write(comp_dir / 'fields.component.ts', ts)
+                self._write(comp_dir / 'fields.component.html', html)
+                self._write(comp_dir / 'fields.component.css', css)
+
+                ts, html, css = _detail_component(schema_name, table_name, iname,
+                                                   pk_field, pk_ts_type, pk_extractor,
+                                                   out_names, put_in_names, has_put,
+                                                   map_key, fk_deps, rev_fk_deps, all_fields)
+                self._write(comp_dir / 'detail.component.ts', ts)
+                self._write(comp_dir / 'detail.component.html', html)
+                self._write(comp_dir / 'detail.component.css', css)
 
         print(f'\nAngular app generated in {output_dir}')
         print('Next steps:')
