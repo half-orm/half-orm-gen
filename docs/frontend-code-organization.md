@@ -16,8 +16,8 @@ half_orm gen frontend --angular
 
 | | Regenerated on every `gen frontend` | Scaffolded once (never overwritten) |
 |---|---|---|
-| **Svelte** | `src/lib/generated/` · `src/routes/(nav)/ho_bo/` | `src/lib/auth.svelte.ts` · `src/lib/stateRegistry.ts` · `src/lib/latex.ts` · `src/routes/+layout.svelte` · `src/routes/(nav)/+layout.svelte` · `src/routes/(nav)/login/` · `src/routes/(nav)/access/` |
-| **Angular** | `src/app/generated/` · `src/app/app.routes.ts` | `src/app/core/` · `src/app/pages/` · `src/app/app.component.ts` · `src/app/app.config.ts` |
+| **Svelte** | `src/lib/generated/` · `src/routes/(nav)/ho_bo/` | `src/lib/auth.svelte.ts` · `src/lib/stateRegistry.ts` · `src/lib/latex.ts` · `src/routes/+layout.svelte` · `src/routes/(nav)/+layout.svelte` · `src/routes/(nav)/login/` · `src/routes/(nav)/access/` · `src/routes/(nav)/schema/` |
+| **Angular** | `src/app/generated/` · `src/app/app.routes.ts` | `src/app/core/` · `src/app/pages/` · `src/app/app.component.ts` · `src/app/app.config.ts` · `src/app/pages/schema/` |
 
 **Consequence**: never edit files under `generated/` or the `ho_bo/` routes — they are
 overwritten. Custom application code belongs outside these directories.
@@ -52,6 +52,7 @@ src/
         ├── +layout.ts              ← scaffolded: registry.init()
         ├── login/+page.svelte      ← scaffolded
         ├── access/+page.svelte     ← scaffolded
+        ├── schema/+page.svelte     ← scaffolded: navigable schema view (TOC + field details)
         └── ho_bo/
             └── {schema}/{table}/   ← REGENERATED: one SvelteKit route group per relation
                 ├── +page.svelte    ← list page
@@ -76,7 +77,8 @@ src/app/
 ├── pages/
 │   ├── login/              ← scaffolded
 │   ├── home/               ← scaffolded
-│   └── access/             ← scaffolded
+│   ├── access/             ← scaffolded
+│   └── schema/             ← scaffolded: navigable schema view (TOC + field details)
 └── generated/
     ├── silo-registry.service.ts  ← REGENERATED: SiloRegistry (@Injectable root)
     ├── resource.silo.ts          ← REGENERATED: ResourceSilo class (signals)

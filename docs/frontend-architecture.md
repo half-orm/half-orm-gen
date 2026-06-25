@@ -52,10 +52,14 @@ navigation.
 ┌─────────────────────────────────────────┐
 │             ResourceSilo                │
 │  items   — ordered list (unfiltered)    │
-│  byId    — Map<pk, row> (all fetched)   │
+│  byId    — Map<key, row> (all fetched)  │
 │  isLoading / hasMore / currentOffset    │
 └─────────────────────────────────────────┘
 ```
+
+The `byId` key is:
+- simple PK: `String(item[pk_field])`
+- composite PK: `col1:val1::col2:val2` (same format as the route `[id]` parameter)
 
 Two write paths exist:
 
