@@ -86,6 +86,12 @@ if _has_custom:
 
 OPENAPI_CONFIG = """, title="{title}", version="{version}" """
 
+HO_META_ROUTE = (
+    '\n@router.get("{version_prefix}/ho_meta")\n'
+    'async def _crud_meta() -> dict:\n'
+    '    return MODEL.ho_meta()\n'
+)
+
 HO_ACCESS_ROUTE = (
     '\n_STATIC_ACCESS_MAP = {json_str}\n'
     '\n_ACCESS_MAP = get_access_map()\n\n'
