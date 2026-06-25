@@ -6,7 +6,7 @@ export type Row = Record<string, unknown>;
 
 export class ResourceSilo {
   items         = $state<Row[]>([]);
-  byId          = $state(new Map<string, Row>());
+  byPk          = $state(new Map<string, Row>());
   isLoading     = $state(false);
   hasMore       = $state(true);
   currentOffset = $state(0);
@@ -111,7 +111,7 @@ export class ResourceSilo {
   }
 
   async get(id: string): Promise<Row | null> {
-    const cached = this.byId.get(id);
+    const cached = this.byPk.get(id);
     if (cached) return cached;
     // Composite PK: decode id back to field→value pairs and fetch via list
     if (this.pkFields.length > 1) {
@@ -162,7 +162,7 @@ export class ResourceSilo {
     this.items = items;
     if (this.pkExtractor) {
       const ex = this.pkExtractor;
-      this.byId = new Map(items.map(i => [ex(i), i]));
+      this.byPk = new Map(items.map(i => [ex(i), i]));
     }
   }
 
@@ -172,9 +172,9 @@ export class ResourceSilo {
       return;
     }
     const ex = this.pkExtractor;
-    const map = new Map(this.byId);
+    const map = new Map(this.byPk);
     for (const item of newItems) map.set(ex(item), item);
-    this.byId = map;
+    this.byPk = map;
     this.items = [...map.values()];
   }
 
@@ -182,9 +182,9 @@ export class ResourceSilo {
     if (!this.pkExtractor) return;
     const ex = this.pkExtractor;
     const id = ex(item);
-    const map = new Map(this.byId);
+    const map = new Map(this.byPk);
     map.set(id, item);
-    this.byId = map;
+    this.byPk = map;
     const idx = this.items.findIndex((i: Row) => ex(i) === id);
     if (idx >= 0) { const next = [...this.items]; next[idx] = item; this.items = next; }
     else this.items = [...this.items, item];
@@ -193,9 +193,9 @@ export class ResourceSilo {
   removeItem(id: string): void {
     if (!this.pkExtractor) return;
     const ex = this.pkExtractor;
-    const map = new Map(this.byId);
+    const map = new Map(this.byPk);
     map.delete(id);
-    this.byId = map;
+    this.byPk = map;
     this.items = this.items.filter((i: Row) => ex(i) !== id);
   }
 
@@ -210,7 +210,7 @@ export class ResourceSilo {
 
   clear(): void {
     this.items = [];
-    this.byId = new Map();
+    this.byPk = new Map();
     this.loadedFilters.clear();
     this.hasMore = true;
     this.currentOffset = 0;

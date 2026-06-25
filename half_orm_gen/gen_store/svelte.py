@@ -218,7 +218,7 @@ class SvelteGenerator(StoreGenerator):
                     )
                     api_entries.append(
                         f"    get:     (id: {pk_ts_type}) => {{\n"
-                        f"                 const _c = {rname}State.byId.get(String(id));\n"
+                        f"                 const _c = {rname}State.byPk.get(String(id));\n"
                         f"                 if (_c) return Promise.resolve(new Response(JSON.stringify(_c),\n"
                         f"                     {{ status: 200, headers: {{ 'Content-Type': 'application/json' }} }}));\n"
                         f"                 return _fetch(`${{_BASE}}/${{id}}`, {{ headers: _hdrs() }});\n"
@@ -277,8 +277,8 @@ class SvelteGenerator(StoreGenerator):
     def _write_base(self, output_dir: Path) -> None:
         content = """\
 export class BaseState<V> {
-    byId  = $state(new Map<string, V>());
-    items = $derived([...this.byId.values()]);
+    byPk  = $state(new Map<string, V>());
+    items = $derived([...this.byPk.values()]);
 
     // Persisted UI state
     filters = $state<Record<string, string>>({});  // Active filters
@@ -289,25 +289,25 @@ export class BaseState<V> {
     constructor(private readonly pk: (item: V) => string) {}
 
     clear() {
-        this.byId = new Map();
+        this.byPk = new Map();
     }
     setItems(data: V[]) {
-        this.byId = new Map(data.map(i => [this.pk(i), i]));
+        this.byPk = new Map(data.map(i => [this.pk(i), i]));
     }
     mergeItems(data: V[]) {
-        const m = new Map(this.byId);
+        const m = new Map(this.byPk);
         data.forEach(i => m.set(this.pk(i), i));
-        this.byId = m;
+        this.byPk = m;
     }
     setItem(item: V) {
-        const m = new Map(this.byId);
+        const m = new Map(this.byPk);
         m.set(this.pk(item), item);
-        this.byId = m;
+        this.byPk = m;
     }
     removeItem(id: string) {
-        const m = new Map(this.byId);
+        const m = new Map(this.byPk);
         m.delete(id);
-        this.byId = m;
+        this.byPk = m;
     }
 }
 """

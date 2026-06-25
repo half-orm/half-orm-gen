@@ -1445,7 +1445,7 @@ def _detail_page(
             fk_key = f'{rs}/{rt}'
             lines.append(
                 f"  let {_lf_ref_name(lf)} = $derived(item && item['{lf}'] ? "
-                f"registry.tryGet('{fk_key}')?.byId.get(String(item['{lf}'])) ?? null : null);"
+                f"registry.tryGet('{fk_key}')?.byPk.get(String(item['{lf}'])) ?? null : null);"
             )
         return ('\n' + '\n'.join(lines)) if lines else ''
 
@@ -1535,7 +1535,7 @@ def _detail_page(
 
   const silo = registry.get('{map_key}');
   let {{ id }}: {{ id: string }} = $props();
-  let item = $derived(silo.byId.get(id) ?? null);
+  let item = $derived(silo.byPk.get(id) ?? null);
 {fk_states}
   $effect(() => {{
     void auth.token;

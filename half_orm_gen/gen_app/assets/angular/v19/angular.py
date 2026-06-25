@@ -968,7 +968,7 @@ def _store(
 
     if pk_field:
         lines.append(f'  readonly items = signal<{iname}Out[]>([]);')
-        lines.append(f'  readonly byId  = signal(new Map<string, {iname}Out>());')
+        lines.append(f'  readonly byPk  = signal(new Map<string, {iname}Out>());')
     else:
         lines.append(f'  readonly items = signal<{iname}Out[]>([]);')
 
@@ -1062,7 +1062,7 @@ def _store(
 
     if pk_field:
         lines.append(f'  get(id: string) {{')
-        lines.append('    const cached = this.byId().get(id);')
+        lines.append('    const cached = this.byPk().get(id);')
         lines.append('    if (cached) return of(cached);')
         lines.append('    return this.refresh(id);')
         lines.append('  }')
@@ -1102,20 +1102,20 @@ def _store(
     if pk_field:
         lines.append(f'  setItems(data: {iname}Out[]): void {{')
         lines.append('    this.items.set(data);')
-        lines.append(f'    this.byId.set(new Map(data.map(i => [({pk_extractor})(i), i])));')
+        lines.append(f'    this.byPk.set(new Map(data.map(i => [({pk_extractor})(i), i])));')
         lines.append('  }')
         lines.append('')
         lines.append(f'  mergeItems(data: {iname}Out[]): void {{')
-        lines.append('    const m = new Map(this.byId());')
+        lines.append('    const m = new Map(this.byPk());')
         lines.append(f'    data.forEach(i => m.set(({pk_extractor})(i), i));')
-        lines.append('    this.byId.set(m);')
+        lines.append('    this.byPk.set(m);')
         lines.append('    this.items.set([...m.values()]);')
         lines.append('  }')
         lines.append('')
         lines.append(f'  setItem(item: {iname}Out): void {{')
-        lines.append('    const m = new Map(this.byId());')
+        lines.append('    const m = new Map(this.byPk());')
         lines.append(f'    m.set(({pk_extractor})(item), item);')
-        lines.append('    this.byId.set(m);')
+        lines.append('    this.byPk.set(m);')
         lines.append('    const arr = [...this.items()];')
         lines.append(f'    const idx = arr.findIndex(i => ({pk_extractor})(i) === ({pk_extractor})(item));')
         lines.append('    if (idx >= 0) arr[idx] = item; else arr.push(item);')
@@ -1123,11 +1123,11 @@ def _store(
         lines.append('  }')
         lines.append('')
         lines.append('  removeItem(id: string): void {')
-        lines.append('    const m = new Map(this.byId()); m.delete(id); this.byId.set(m);')
+        lines.append('    const m = new Map(this.byPk()); m.delete(id); this.byPk.set(m);')
         lines.append(f'    this.items.set(this.items().filter(i => ({pk_extractor})(i) !== id));')
         lines.append('  }')
         lines.append('')
-        lines.append('  clear(): void { this.items.set([]); this.byId.set(new Map()); }')
+        lines.append('  clear(): void { this.items.set([]); this.byPk.set(new Map()); }')
     else:
         lines.append(f'  setItems(data: {iname}Out[]): void {{ this.items.set(data); }}')
         lines.append(f'  mergeItems(data: {iname}Out[]): void {{ this.items.set([...this.items(), ...data]); }}')
@@ -1264,12 +1264,12 @@ def _list_component(
 
     needs_router_link = has_post or bool(fk_deps)
 
-    # single-PK: byId accumulates all fetched rows including setItem() calls
-    # composite-PK or no PK: byId is never populated by the silo (pk=null), use items
+    # single-PK: byPk accumulates all fetched rows including setItem() calls
+    # composite-PK or no PK: byPk is never populated by the silo (pk=null), use items
     _is_single_pk = pk_field and (not pk_info or len(pk_info) == 1)
     if _is_single_pk:
         _fk_items_src = (
-            'Array.from(this.silo.byId().values()).filter(item =>\n'
+            'Array.from(this.silo.byPk().values()).filter(item =>\n'
             '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
         )
     else:
@@ -1941,7 +1941,7 @@ def _detail_component(
         <div class="flex justify-between items-center mb-3">
           <a routerLink="/ho_bo/{rs}/{rt}" class="text-lg font-semibold hover:underline hover:text-blue-700">{rt_title}</a>
         </div>
-        @if (registry.tryGet('{fk_key}')?.byId()?.get(String(item()!['{lf}'])); as ref) {{
+        @if (registry.tryGet('{fk_key}')?.byPk()?.get(String(item()!['{lf}'])); as ref) {{
           <{fk_fields_sel} [item]="ref!" />
         }}
       </div>
@@ -2073,7 +2073,7 @@ export class {iname}DetailComponent {{
   protected String = String;  // For template use{pk_id_line}
 
   readonly id   = this.route.snapshot.params['id'] as string;
-  readonly item = computed<Row | null>(() => this.silo.byId().get(this.id) ?? null);
+  readonly item = computed<Row | null>(() => this.silo.byPk().get(this.id) ?? null);
 {can_edit_field}
   readonly editing = signal(false);
   readonly error   = signal('');

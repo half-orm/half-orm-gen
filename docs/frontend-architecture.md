@@ -52,21 +52,21 @@ navigation.
 ┌─────────────────────────────────────────┐
 │             ResourceSilo                │
 │  items   — ordered list (unfiltered)    │
-│  byId    — Map<key, row> (all fetched)  │
+│  byPk    — Map<key, row> (all fetched)  │
 │  isLoading / hasMore / currentOffset    │
 └─────────────────────────────────────────┘
 ```
 
-The `byId` key is:
+The `byPk` key is:
 - simple PK: `String(item[pk_field])`
 - composite PK: `col1:val1::col2:val2` (same format as the route `[id]` parameter)
 
 Two write paths exist:
 
 - **`setItems(data)`** — called for unfiltered list fetches (no params, offset 0). Replaces
-  the full `items` and rebuilds `byId`.
+  the full `items` and rebuilds `byPk`.
 - **`mergeItems(data)`** — called for filtered fetches, load-more, or FK-filtered embedded
-  lists. Adds new rows to `byId` and rebuilds `items` from it. Filtered results therefore
+  lists. Adds new rows to `byPk` and rebuilds `items` from it. Filtered results therefore
   accumulate alongside the unfiltered ones in the same silo.
 
 The `SiloRegistry` is a singleton initialised once at app boot from `/ho_meta`. It holds all
@@ -103,7 +103,7 @@ The route cache (`fetchedRoutes`) is **not reactive** — it is a plain `Set`, n
 cleared on login and logout (along with silo data via `clearAllStates()`).
 
 `clearAllStates()` calls `silo.clear()` on every registered `ResourceSilo`, flushing
-`items`, `byId`, and `loadedFilters`. The `SiloRegistry` itself is **not** reset: its
+`items`, `byPk`, and `loadedFilters`. The `SiloRegistry` itself is **not** reset: its
 `_ready` flag, the silos Map, and the `meta` signal all survive login/logout. Only the
 data inside each silo is flushed.
 
@@ -122,11 +122,11 @@ The backend pushes mutation events over a WebSocket at `/v0/ws`:
 Each silo subscribes to these events at construction time (for the lifetime of the app).
 On receipt:
 
-- `delete` → remove the row from `items` and `byId` immediately. On a cascading DELETE the
+- `delete` → remove the row from `items` and `byPk` immediately. On a cascading DELETE the
   backend pre-broadcasts one `delete` event per affected child row (across all resources)
   before the SQL runs, so every silo cleans itself up without any extra HTTP request.
 - `create` / `update` → call `GET /{schema}/{table}/{id}` to refresh the single row, then
-  update `byId` and `items` in place.
+  update `byPk` and `items` in place.
 
 The WebSocket reconnects automatically with a 2-second backoff on close or error.
 
@@ -138,16 +138,16 @@ The WebSocket reconnects automatically with a 2-second backoff on close or error
 User visits Detail page for resource A (pk = X)
   │
   ├─ silo_A.get(X)
-  │    └─ byId has X?  →  yes: return cached
-  │                    →  no: GET /A/X  →  setItem  →  byId updated
+  │    └─ byPk has X?  →  yes: return cached
+  │                    →  no: GET /A/X  →  setItem  →  byPk updated
   │
   └─ Related card for resource B (fk_field = X) mounts
        └─ silo_B.list({ fk_field: X })
             ├─ loadedFilters has key?  →  skip
             ├─ fetchedRoutes has url?  →  skip
             └─ GET /B?ho_col_fk_field=X&limit=100
-                 └─ mergeItems  →  byId_B updated
-                      └─ displayItems (computed/derived) filters byId_B in memory  →  card fills in
+                 └─ mergeItems  →  byPk_B updated
+                      └─ displayItems (computed/derived) filters byPk_B in memory  →  card fills in
 
 Meanwhile, another user creates a row in B
   └─ WS event { event: "create", resource: "B", id: Y }
