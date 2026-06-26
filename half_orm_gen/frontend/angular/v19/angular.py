@@ -25,7 +25,7 @@ from half_orm_gen.frontend.base import StoreGenerator
 from ._static import (
     _PACKAGE_JSON, _ANGULAR_JSON, _TSCONFIG, _TSCONFIG_APP, _INDEX_HTML,
     _STYLES_CSS, _LATEX_PIPE, _TAILWIND_CONFIG, _POSTCSS_CONFIG, _MAIN_TS,
-    _APP_CONFIG_TS, _STATE_REGISTRY, _proxy_conf,
+    _APP_CONFIG_TS, _STATE_REGISTRY, _proxy_conf, _GITIGNORE,
 )
 from ._app_shell import (
     _auth_service, _app_component, _auth_guard_ts, _app_routes,
@@ -118,6 +118,7 @@ class AngularAppGenerator(StoreGenerator):
         project_title  = ' '.join(p.capitalize() for p in project_name.split('-'))
 
         # --- static files ---
+        self._write(output_dir / '.gitignore', _GITIGNORE)
         self._write(output_dir / 'package.json',
                     _PACKAGE_JSON.format(project_name=project_name))
         self._write(output_dir / 'angular.json',

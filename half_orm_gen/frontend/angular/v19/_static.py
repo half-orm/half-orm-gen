@@ -152,6 +152,12 @@ _STYLES_CSS = """\
 @tailwind utilities;
 """
 
+_GITIGNORE = """\
+node_modules/
+dist/
+.angular/
+"""
+
 _LATEX_PIPE = """\
 import { Pipe, PipeTransform, inject } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';

@@ -1607,6 +1607,8 @@ class SvelteAppGenerator(StoreGenerator):
         project_name = output_dir.name
 
         # --- static files ---
+        self._write(output_dir / '.gitignore',
+                    'node_modules/\nbuild/\n.svelte-kit/\n')
         self._write(output_dir / 'package.json',
                     _PACKAGE_JSON.format(project_name=project_name))
         self._write(output_dir / 'svelte.config.js',    _SVELTE_CONFIG)
