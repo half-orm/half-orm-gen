@@ -26,7 +26,7 @@ class GenApp:
         from half_orm_gen.backend.generate import _ensure_ho_api_schema
         _ensure_ho_api_schema(repo.model)
         classes = list(repo.model.classes())
-        generator.generate(classes, api_version, output_dir)
+        generator.generate(classes, api_version, output_dir, model=repo.model)
 
 
 class GenStore:
@@ -56,4 +56,4 @@ class GenStore:
         from half_orm_gen.backend.generate import _ensure_ho_api_schema
         _ensure_ho_api_schema(repo.model)
         classes = list(repo.model.classes())
-        generator.generate(classes, api_version, output_dir)
+        generator.generate(classes, api_version, output_dir, model=repo.model)

@@ -10,6 +10,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+FIXTURES_DIR="$SCRIPT_DIR/../../../fixtures"
 source "$SCRIPT_DIR/common.sh"
 
 PROJECT="blog_demo"
@@ -107,81 +108,10 @@ half_orm dev patch apply
 echo -e "${GREEN}✓ Model classes generated in ${PROJECT}/blog/${NC}"
 
 # ---------------------------------------------------------------------------
-# 6. Add CRUD_ACCESS to developer spaces in each module
-#    The developer space is between the first # >>> and # <<< markers.
-# ---------------------------------------------------------------------------
-echo -e "${GREEN}=== ADD CRUD_ACCESS TO MODULES ===${NC}"
-
-# Helper: insert Python code after the first "# >>>" line in a file
-insert_crud_access() {
-    local file="$1"
-    local code="$2"
-    python3 - "$file" "$code" << 'PYEOF'
-import sys
-
-filepath = sys.argv[1]
-code = sys.argv[2]
-
-with open(filepath) as f:
-    lines = f.readlines()
-
-occurrences = [i for i, line in enumerate(lines) if line.startswith('#>>>')]
-# The first occurrence is in the docstring (example); the second is the real marker.
-if len(occurrences) < 2:
-    print(f"WARNING: less than 2 '#>>>' markers found in {filepath}", file=sys.stderr)
-    sys.exit(0)
-insert_after = occurrences[1]
-
-if insert_after is None:
-    print(f"WARNING: no '# >>>' marker found in {filepath}", file=sys.stderr)
-    sys.exit(0)
-
-new_lines = lines[:insert_after + 1] + ['\n', code, '\n'] + lines[insert_after + 1:]
-with open(filepath, 'w') as f:
-    f.writelines(new_lines)
-
-print(f"  patched  {filepath}")
-PYEOF
-}
-
-insert_crud_access "${PROJECT}/blog/author.py" \
-'CRUD_ACCESS = {
-    "GET":    {"anonymous": ["id", "name"], "connected": ["id", "name", "email"]},
-    "POST":   {"connected": {"in": ["name", "email"]}},
-    "PUT":    {"connected": {"in": ["name", "email"]}},
-    "DELETE": {"admin": None},
-}'
-
-insert_crud_access "${PROJECT}/blog/post.py" \
-'CRUD_ACCESS = {
-    "GET":    {
-        "anonymous":    {"out": ["id", "title", "published", "author_id"], "filter": {"published": True}},
-        "connected": None,
-    },
-    "POST":   {"connected": {"in": ["title", "content", "author_id"]}},
-    "PUT":    {"connected": {"in": ["title", "content", "published"]}},
-    "DELETE": {"admin": None},
-}'
-
-insert_crud_access "${PROJECT}/blog/comment.py" \
-'CRUD_ACCESS = {
-    "GET":    {"anonymous": ["id", "content", "post_id", "author_id", "comment_type"]},
-    "POST":   {"connected": {"in": ["content", "post_id", "author_id", "comment_type"]}},
-    "DELETE": {"admin": None},
-}'
-
-insert_crud_access "${PROJECT}/blog/comment_type.py" \
-'CRUD_ACCESS = {
-    "GET": {"anonymous": None},
-}'
-
-echo -e "${GREEN}✓ CRUD_ACCESS added${NC}"
-
-# ---------------------------------------------------------------------------
-# 7. Commit patch
+# 6. Commit patch
 # ---------------------------------------------------------------------------
 git add .
-git commit -m "Add blog schema and CRUD_ACCESS" --no-verify
+git commit -m "Add blog schema" --no-verify
 
 # ---------------------------------------------------------------------------
 # 8. Merge patch + promote
@@ -197,6 +127,15 @@ echo -e "${GREEN}=== GENERATE gen API ===${NC}"
 half_orm gen api --litestar
 half_orm gen frontend --angular
 half_orm gen frontend --svelte
+
+# ---------------------------------------------------------------------------
+# 10. Load fixtures (access rules + demo data)
+# ---------------------------------------------------------------------------
+echo -e "${GREEN}=== LOAD FIXTURES ===${NC}"
+psql "$PROJECT" \
+    -f "$FIXTURES_DIR/blog_demo_access.sql" \
+    -f "$FIXTURES_DIR/blog_demo_data.sql"
+echo -e "${GREEN}✓ Fixtures loaded${NC}"
 
 echo ""
 echo -e "${GREEN}=== DONE ===${NC}"

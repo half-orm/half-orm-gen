@@ -108,7 +108,7 @@ def _permissions_data_ts(resources: list) -> str:
 
 class AngularAppGenerator(StoreGenerator):
 
-    def generate(self, classes, api_version, output_dir: Path) -> None:
+    def generate(self, classes, api_version, output_dir: Path, *, model=None) -> None:
         if output_dir.exists():
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True)
@@ -116,6 +116,24 @@ class AngularAppGenerator(StoreGenerator):
         version_prefix = f'/v{api_version}' if api_version is not None else ''
         project_name   = output_dir.name
         project_title  = ' '.join(p.capitalize() for p in project_name.split('-'))
+
+        # Load all crud_access from DB in one async pass
+        if model is not None:
+            import asyncio
+            from half_orm_gen.backend.ho_api.loader import load_crud_access
+
+            async def _load_all():
+                await model.aconnect()
+                result = {}
+                for relation, _kind in classes:
+                    s, t = relation._t_fqrn[1], relation._t_fqrn[2]
+                    ca = await load_crud_access(model, s, t)
+                    result[(s, t)] = ca if ca is not None else {}
+                return result
+
+            crud_access_map = asyncio.run(_load_all())
+        else:
+            crud_access_map = {}
 
         # --- static files ---
         self._write(output_dir / '.gitignore', _GITIGNORE)
@@ -143,7 +161,6 @@ class AngularAppGenerator(StoreGenerator):
 
         # Pass 1 — identify CRUD resources
         crud_resources: set[tuple[str, str]] = set()
-        crud_resources_map: dict[tuple[str, str], dict] = {}
         raw = []
         for relation, _relation_type in classes:
             module_str = relation.__module__
@@ -154,26 +171,22 @@ class AngularAppGenerator(StoreGenerator):
             schema_name = relation._t_fqrn[1]
             table_name  = relation._t_fqrn[2]
             crud_resources.add((schema_name, table_name))
-            crud_resources_map[(schema_name, table_name)] = getattr(mod, 'CRUD_ACCESS', {})
             raw.append((relation, mod))
 
         # Pre-pass: compute detail_resources before Pass 2 (needed for FK link filtering)
         detail_resources: set[tuple[str, str]] = set()
-        for relation, mod in raw:
-            ca = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
-            if _simple_pk(relation) and 'GET' in ca:
-                detail_resources.add((
-                    relation._t_fqrn[1],
-                    relation._t_fqrn[2],
-                ))
+        for relation, _mod in raw:
+            s, t = relation._t_fqrn[1], relation._t_fqrn[2]
+            if _simple_pk(relation) and 'GET' in crud_access_map.get((s, t), {}):
+                detail_resources.add((s, t))
 
         # Pass 2 — per-resource metadata
         resources = []
         for relation, mod in raw:
-            crud_access  = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
-            api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
             schema_name  = relation._t_fqrn[1]
             table_name   = relation._t_fqrn[2]
+            crud_access  = crud_access_map.get((schema_name, table_name), {})
+            api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
             inst         = _instance(relation)
             all_fields   = getattr(inst, '_ho_fields', {})
             all_names    = list(all_fields.keys())
@@ -198,10 +211,10 @@ class AngularAppGenerator(StoreGenerator):
             if not out_names:
                 out_names = [f for f in all_names if f not in api_excluded]
 
-            has_post   = 'POST'   in crud_access and bool(pk_info)
-            has_put    = 'PUT'    in crud_access and bool(pk_info)
-            has_del    = 'DELETE' in crud_access and bool(pk_info)
-            has_detail = 'GET'    in crud_access and bool(pk_info)
+            has_post   = bool(pk_info)
+            has_put    = bool(pk_info)
+            has_del    = bool(pk_info)
+            has_detail = bool(pk_info)
 
             pk_has_default = bool(
                 pk_field and all_fields.get(pk_field) and
