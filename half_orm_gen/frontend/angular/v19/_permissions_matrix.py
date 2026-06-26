@@ -102,6 +102,7 @@ def _permissions_matrix_component_ts() -> str:
     return """\
 import { Component, ChangeDetectorRef, ElementRef, Input, OnInit, ViewChild, inject } from '@angular/core';
 import { PermissionsFieldsComponent } from './permissions-fields.component';
+import { AuthService } from '../core/auth.service';
 import type { Verb, VerbAccess, PermMatrix } from './schema.types';
 
 @Component({
@@ -128,8 +129,9 @@ import type { Verb, VerbAccess, PermMatrix } from './schema.types';
             </thead>
             <tbody>
               @for (role of roles; track role) {
-                <tr class="border-t">
-                  <td class="px-4 py-2 font-mono text-gray-700 border-r">{{ role }}</td>
+                <tr class="border-t" [class.bg-gray-100]="auth.activeRoles().includes(role)">
+                  <td class="px-4 py-2 font-mono border-r"
+                      [class]="auth.activeRoles().includes(role) ? 'font-bold text-gray-900' : 'text-gray-700'">{{ role }}</td>
                   @for (verb of verbs; track verb) {
                     <td class="px-4 py-2 text-center">
                       @if (permissions[role]?.[verb]) {
@@ -177,6 +179,7 @@ export class PermissionsMatrixComponent implements OnInit {
   readonly verbs: Verb[] = ['GET', 'POST', 'PUT', 'DELETE'];
   hovered: { role: string; verb: Verb } | null = null;
 
+  readonly auth = inject(AuthService);
   private cdr = inject(ChangeDetectorRef);
 
   onEnter(event: MouseEvent, role: string, verb: Verb): void {

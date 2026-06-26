@@ -3,7 +3,7 @@ from ._helpers import _cname
 
 def _auth_service(version_prefix: str) -> str:
     return f"""\
-import {{ Injectable, signal, inject }} from '@angular/core';
+import {{ Injectable, computed, signal, inject }} from '@angular/core';
 import {{ Router }} from '@angular/router';
 import {{ Subject }} from 'rxjs';
 import {{ clearAllStates }} from './state-registry';
@@ -17,10 +17,14 @@ export interface WsEvent {{
 @Injectable({{ providedIn: 'root' }})
 export class AuthService {{
   private router = inject(Router);
-  readonly token      = signal<string | null>(
+  readonly token        = signal<string | null>(
     typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
   );
-  readonly access     = signal<Record<string, any>>({{}});
+  readonly access       = signal<Record<string, any>>({{}});
+  readonly roles        = signal<string[]>([]);
+  readonly activeRoles  = computed<string[]>(() =>
+    this.token() ? [this.token()!] : ['anonymous']
+  );
   readonly wsEvent$   = new Subject<WsEvent>();
   readonly fetchedRoutes = new Set<string>();
 
@@ -30,6 +34,7 @@ export class AuthService {{
     this.fetchedRoutes.clear();
     clearAllStates();
     void this._fetchAccess();
+    void this._fetchRoles();
   }}
 
   logout(): void {{
@@ -45,6 +50,7 @@ export class AuthService {{
     }}
 
     void this._fetchAccess();
+    void this._fetchRoles();
   }}
 
   async _fetchAccess(): Promise<void> {{
@@ -56,6 +62,15 @@ export class AuthService {{
       this.access.set(res.ok ? await res.json() : {{}});
     }} catch {{
       this.access.set({{}});
+    }}
+  }}
+
+  async _fetchRoles(): Promise<void> {{
+    try {{
+      const res = await fetch('{version_prefix}/ho_roles');
+      this.roles.set(res.ok ? await res.json() : []);
+    }} catch {{
+      this.roles.set([]);
     }}
   }}
 
@@ -179,7 +194,7 @@ export class AppComponent implements OnInit {{
   readonly isHome   = signal(this.router.url === '/');
   navFilter = signal('');
   menuOpen  = false;
-  readonly roles = signal<string[]>([]);
+  readonly roles = this.auth.roles;
 
   readonly navItems = computed(() =>
     Object.keys(this.registry.meta())
@@ -205,10 +220,8 @@ export class AppComponent implements OnInit {{
     this.menuOpen = !this.auth.token();
     void this.registry.init(API_BASE);
     void this.auth._fetchAccess();
+    void this.auth._fetchRoles();
     this.auth.connectWs();
-    fetch(`${{API_BASE}}/ho_roles`)
-      .then(r => r.ok ? r.json() : [])
-      .then((d: string[]) => this.roles.set(d));
   }}
 
   selectRole(role: string): void {{
@@ -304,7 +317,7 @@ export class LoginComponent {
 
 def _access_component(version_prefix: str) -> str:
     return f"""\
-import {{ Component, computed, inject, OnInit, signal }} from '@angular/core';
+import {{ Component, computed, inject }} from '@angular/core';
 import {{ AuthService }} from '../../core/auth.service';
 
 const VERB_COLOR: Record<string, string> = {{
@@ -380,19 +393,13 @@ const VERB_COLOR: Record<string, string> = {{
     </div>
   `
 }})
-export class AccessComponent implements OnInit {{
+export class AccessComponent {{
   protected auth = inject(AuthService);
 
-  readonly roles        = signal<string[]>([]);
-  readonly rolesLoading = signal(true);
-  readonly activeRole   = computed(() => this.auth.token() ?? 'anonymous');
+  readonly roles         = this.auth.roles;
+  readonly rolesLoading  = computed(() => this.auth.roles().length === 0);
+  readonly activeRole    = computed(() => this.auth.token() ?? 'anonymous');
   readonly accessEntries = computed(() => Object.entries(this.auth.access()));
-
-  ngOnInit(): void {{
-    fetch('{version_prefix}/ho_roles')
-      .then(r => r.json())
-      .then((d: string[]) => {{ this.roles.set(d); this.rolesLoading.set(false); }});
-  }}
 
   selectRole(role: string): void {{
     if (role === 'anonymous') this.auth.logout();
