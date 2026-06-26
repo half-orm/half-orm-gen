@@ -1,9 +1,10 @@
-import { signal } from '@angular/core';
+import { computed, signal, Signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { catchError, filter, map, of, tap } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { registerClear } from '../core/state-registry';
 import { ResourceSchema } from './schema.types';
+import type { PermMatrix } from './schema.types';
 
 export type Row = Record<string, unknown>;
 
@@ -19,6 +20,16 @@ export class ResourceSilo {
   readonly sortField  = signal<string | null>(null);
   readonly sortAsc    = signal(true);
 
+  // Per-resource access signals — derived from AuthService at runtime
+  readonly canCreate:          Signal<boolean>;
+  readonly canDelete:          Signal<boolean>;
+  readonly canEdit:            Signal<boolean>;
+  readonly inaccessibleFields: Signal<Set<string>>;
+
+  // Static permissions from CRUD_ACCESS (all roles)
+  readonly permRoles: string[];
+  readonly permMatrix: PermMatrix;
+
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
   private pkFields: string[];
@@ -29,7 +40,12 @@ export class ResourceSilo {
     private baseUrl: string,
     private http: HttpClient,
     private auth: AuthService,
+    permRoles: string[] = [],
+    permMatrix: PermMatrix = {},
   ) {
+    this.permRoles  = permRoles;
+    this.permMatrix = permMatrix;
+
     this.pkFields = schema.pk_fields;
     if (schema.pk_fields.length === 1) {
       const pk = schema.pk_fields[0];
@@ -40,8 +56,19 @@ export class ResourceSilo {
     } else {
       this.pkExtractor = null;
     }
+
+    this.canCreate = computed(() => !!(auth.access() as any)[key]?.POST);
+    this.canDelete = computed(() => !!(auth.access() as any)[key]?.DELETE);
+    this.canEdit   = computed(() => !!(auth.access() as any)[key]?.PUT);
+    this.inaccessibleFields = computed(() => {
+      const out: string[] | undefined = (auth.access() as any)[key]?.GET?.out;
+      if (!out || out.length === 0) return new Set<string>();
+      const allFields = schema.fields.map(f => f.name);
+      return new Set(allFields.filter(f => !out.includes(f)));
+    });
+
     registerClear(() => this.clear());
-    this.auth.wsEvent$
+    auth.wsEvent$
       .pipe(filter(ev => ev.resource === key))
       .subscribe(ev => {
         if (ev.event === 'delete') this.removeItem(String(ev.id));

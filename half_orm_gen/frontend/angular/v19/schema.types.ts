@@ -29,3 +29,10 @@ export interface ResourceSchema {
 }
 
 export type HoMeta = Record<string, ResourceSchema>;
+
+export type Verb = 'GET' | 'POST' | 'PUT' | 'DELETE';
+export type VerbAccess = {
+  in?: string[] | null;
+  out?: string[] | null;
+};
+export type PermMatrix = Record<string, Partial<Record<Verb, VerbAccess>>>;

@@ -2,7 +2,6 @@ from ._helpers import _cname, _selector, _title
 from ._form_components import (
     _is_bool_field, _is_server_generated, _input_type, _text_fields_ts, _ng_form_field,
 )
-from ._permissions_matrix import _build_perm_data
 
 
 def _detail_component(
@@ -12,8 +11,6 @@ def _detail_component(
     has_put: bool, map_key: str,
     fk_deps: list, rev_fk_deps: list,
     all_fields: dict,
-    crud_access: dict | None = None,
-    api_excluded: list | None = None,
 ) -> tuple[str, str, str]:
     title   = _title(schema_name, table_name)
     fk_map  = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
@@ -64,7 +61,6 @@ def _detail_component(
     form_init = ''
     form_class = ''
     edit_btn_tmpl = ''
-    can_edit_field = ''
     form_effect = ''
 
     visible_put = [f for f in put_in_names if not _is_server_generated(f, all_fields)]
@@ -79,9 +75,8 @@ def _detail_component(
             for f in visible_put
         )
         form_class = f'  form: any = {{ {form_init} }};'
-        can_edit_field = f"\n  readonly canEdit = computed(() => !!this.auth.access()['{map_key}']?.PUT);"
         edit_btn_tmpl = (
-            '\n        @if (canEdit()) {\n'
+            '\n        @if (silo.canEdit()) {\n'
             '          <button (click)="editing.set(!editing()); error.set(\'\')"'
             '\n                  class="text-sm px-3 py-1 border rounded hover:bg-gray-50">\n'
             '            {{ editing() ? \'Cancel\' : \'Edit\' }}\n'
@@ -212,15 +207,9 @@ def _detail_component(
     typed_extractor = pk_extractor.replace('i =>', '(i: Row) =>')
     pk_id_line = f'\n  protected getPkId = {typed_extractor};'
 
-    perm_roles_ts, perm_matrix_ts = _build_perm_data(
-        crud_access or {}, list(all_fields.keys()), api_excluded or [])
-    perm_data = f"""
-  readonly permRoles = {perm_roles_ts};
-  readonly permMatrix: PermMatrix = {perm_matrix_ts};"""
-
     html = f"""\
 <div class="px-4 mt-4">
-  <app-permissions-matrix [permissions]="permMatrix" [roles]="permRoles" />
+  <app-permissions-matrix [permissions]="silo.permMatrix" [roles]="silo.permRoles" />
 </div>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
   <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
@@ -251,8 +240,7 @@ import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
 import type {{ Row }} from '../../../generated/resource.silo';
 import {{ AuthService }} from '../../../core/auth.service';
-import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
-import type {{ PermMatrix }} from '../../../generated/permissions-matrix.component';{own_fields_import}{fk_fields_imports}{rev_list_imports}
+import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';{own_fields_import}{fk_fields_imports}{rev_list_imports}
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'detail')}',
@@ -272,7 +260,7 @@ export class {iname}DetailComponent {{
 
   readonly id   = this.route.snapshot.params['id'] as string;
   readonly item = computed<Row | null>(() => this.silo.byPk().get(this.id) ?? null);
-{can_edit_field}{perm_data}
+
   readonly editing = signal(false);
   readonly error   = signal('');
 {form_class}

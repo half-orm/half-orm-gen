@@ -17,8 +17,8 @@ def _build_perm_data(
         all_roles.update(crud_access.get(verb, {}).keys())
     roles_sorted = sorted(all_roles)
 
-    def _fields_ts(field_list: list | None) -> str:
-        if field_list is None:
+    def _fields_ts(field_list) -> str:
+        if field_list is None or not isinstance(field_list, (list, tuple, set)):
             return 'null'
         filtered = [f for f in field_list if f not in api_excluded and f in all_field_names]
         return '[' + ', '.join(f"'{f}'" for f in filtered) + ']'
@@ -49,12 +49,7 @@ def _build_perm_data(
 def _permissions_fields_component_ts() -> str:
     return """\
 import { Component, Input } from '@angular/core';
-
-export type Verb = 'GET' | 'POST' | 'PUT' | 'DELETE';
-export type VerbAccess = {
-  in?: string[] | null;
-  out?: string[] | null;
-};
+import type { Verb, VerbAccess } from './schema.types';
 
 @Component({
   selector: 'app-permissions-fields',
@@ -105,11 +100,9 @@ export class PermissionsFieldsComponent {
 
 def _permissions_matrix_component_ts() -> str:
     return """\
-import { Component, ChangeDetectorRef, ElementRef, Input, ViewChild, inject } from '@angular/core';
+import { Component, ChangeDetectorRef, ElementRef, Input, OnInit, ViewChild, inject } from '@angular/core';
 import { PermissionsFieldsComponent } from './permissions-fields.component';
-import type { Verb, VerbAccess } from './permissions-fields.component';
-
-export type PermMatrix = Record<string, Partial<Record<Verb, VerbAccess>>>;
+import type { Verb, VerbAccess, PermMatrix } from './schema.types';
 
 @Component({
   selector: 'app-permissions-matrix',
@@ -172,12 +165,15 @@ export type PermMatrix = Record<string, Partial<Record<Verb, VerbAccess>>>;
     </div>
   `,
 })
-export class PermissionsMatrixComponent {
+export class PermissionsMatrixComponent implements OnInit {
   @Input() permissions: PermMatrix = {};
   @Input() roles: string[] = [];
+  @Input() defaultOpen = false;
   @ViewChild('tooltip') private tooltipEl!: ElementRef<HTMLElement>;
 
   open = false;
+
+  ngOnInit(): void { this.open = this.defaultOpen; }
   readonly verbs: Verb[] = ['GET', 'POST', 'PUT', 'DELETE'];
   hovered: { role: string; verb: Verb } | null = null;
 

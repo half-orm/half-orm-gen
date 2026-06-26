@@ -1,5 +1,4 @@
 from ._helpers import _selector, _title, _field_type_category
-from ._permissions_matrix import _build_perm_data
 
 
 def _list_component(
@@ -10,8 +9,6 @@ def _list_component(
     fk_deps: list,
     all_fields: dict,
     pk_info: list | None = None,
-    crud_access: dict | None = None,
-    api_excluded: list | None = None,
 ) -> tuple[str, str, str]:
     title  = _title(schema_name, table_name)
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
@@ -20,9 +17,9 @@ def _list_component(
     th_cols = '\n            '.join(
         f'<th (click)="sortBy(\'{f}\')"'
         f' class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200"'
-        f' [class.text-gray-600]="!inaccessibleFields().has(\'{f}\')"'
-        f' [class.text-gray-300]="inaccessibleFields().has(\'{f}\')"'
-        f' [class.line-through]="inaccessibleFields().has(\'{f}\')">'
+        f' [class.text-gray-600]="!silo.inaccessibleFields().has(\'{f}\')"'
+        f' [class.text-gray-300]="silo.inaccessibleFields().has(\'{f}\')"'
+        f' [class.line-through]="silo.inaccessibleFields().has(\'{f}\')">'
         f'{f} {{{{ silo.sortField() === \'{f}\' ? (silo.sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
         for f in out_names
     )
@@ -55,7 +52,7 @@ def _list_component(
     )
 
     def _td(f: str) -> str:
-        inaccessible_guard = f'@if (inaccessibleFields().has(\'{f}\')) {{\n                <span class="line-through text-gray-300 text-xs select-none">—</span>\n              }} @else {{'
+        inaccessible_guard = f'@if (silo.inaccessibleFields().has(\'{f}\')) {{\n                <span class="line-through text-gray-300 text-xs select-none">—</span>\n              }} @else {{'
         inaccessible_end = '\n              }'
         if f in fk_map:
             rs, rt = fk_map[f]
@@ -91,7 +88,7 @@ def _list_component(
     if has_del and pk_field:
         action_td = (
             '\n              <td class="px-2 py-2">\n'
-            '                @if (canDelete()) {\n'
+            '                @if (silo.canDelete()) {\n'
             f'                  <button (click)="handleDelete(getPkId(item), $event)"\n'
             '                          class="text-red-600 hover:underline text-sm">Delete</button>\n'
             '                }\n'
@@ -101,29 +98,12 @@ def _list_component(
     new_btn = ''
     if has_post:
         new_btn = (
-            f'\n        @if (canCreate()) {{\n'
+            f'\n        @if (silo.canCreate()) {{\n'
             f'          <a [routerLink]="[\'/ho_bo/{schema_name}/{table_name}/new\']"\n'
             f'             class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
             f'            New\n          </a>\n        }}'
         )
 
-    can_create = f"\n  readonly canCreate = computed(() => !!this.auth.access()['{map_key}']?.POST);" if has_post else ''
-    can_delete = f"\n  readonly canDelete = computed(() => !!this.auth.access()['{map_key}']?.DELETE);" if has_del else ''
-
-    perm_roles_ts, perm_matrix_ts = _build_perm_data(
-        crud_access or {}, list(all_fields.keys()), api_excluded or [])
-    perm_data = f"""
-  readonly permRoles = {perm_roles_ts};
-  readonly permMatrix: PermMatrix = {perm_matrix_ts};"""
-
-    all_columns_literal = ', '.join(f"'{f}'" for f in out_names)
-    inaccessible_fields = f"""
-  private readonly allColumns = [{all_columns_literal}];
-  readonly inaccessibleFields = computed(() => {{
-    const out: string[] | undefined = this.auth.access()['{map_key}']?.GET?.out;
-    if (!out || out.length === 0) return new Set<string>();
-    return new Set(this.allColumns.filter(f => !out.includes(f)));
-  }});"""
 
     delete_fn = ''
     if has_del and pk_field:
@@ -218,7 +198,7 @@ def _list_component(
   <div class="flex justify-between items-center mb-4">
     <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
   </div>
-  <app-permissions-matrix [permissions]="permMatrix" [roles]="permRoles" />
+  <app-permissions-matrix [permissions]="silo.permMatrix" [roles]="silo.permRoles" />
 }}
 <div [class]="embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
   <table class="w-full border-collapse">
@@ -269,7 +249,6 @@ import {{ AuthService }} from '../../../core/auth.service';
 import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
 import type {{ FieldType }} from '../../../generated/stores/filters';
 import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
-import type {{ PermMatrix }} from '../../../generated/permissions-matrix.component';
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
@@ -301,7 +280,6 @@ export class {iname}ListComponent {{
   @Input() embedded = false;
 
   localFilters = signal<Record<string, string>>({{}});
-{can_create}{can_delete}{inaccessible_fields}{perm_data}
 {field_types_map}
 {displayItems_block}
 
