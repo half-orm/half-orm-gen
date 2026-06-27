@@ -147,8 +147,8 @@ const VERB_COLOR: Record<string, string> = {{
                                        (change)="toggleField(f, 'in', !panelAccess()!.in.includes(f))"
                                        class="rounded border-gray-300 text-blue-600 w-3 h-3">
                                 <span class="font-mono"
-                                      [class]="(panelInfo()!.fields_with_defaults ?? []).includes(f) ? 'text-gray-400' : 'text-gray-700'">{{{{ f }}}}</span>
-                                @if ((panelInfo()!.fields_with_defaults ?? []).includes(f)) {{
+                                      [class]="panelInfo()!.fields_with_defaults.includes(f) ? 'text-gray-400' : 'text-gray-700'">{{{{ f }}}}</span>
+                                @if (panelInfo()!.fields_with_defaults.includes(f)) {{
                                   <span class="text-[9px] bg-gray-100 text-gray-400 px-1 rounded" title="Has DB default — won't appear in forms">auto</span>
                                 }}
                               </label>
@@ -177,7 +177,7 @@ const VERB_COLOR: Record<string, string> = {{
                                      (change)="toggleField(f, 'out', !panelAccess()!.out.includes(f))"
                                      class="rounded border-gray-300 text-emerald-600 w-3 h-3">
                               <span class="font-mono text-gray-700">{{{{ f }}}}</span>
-                              @if ((panelInfo()!.fields_with_defaults ?? []).includes(f)) {{
+                              @if (panelInfo()!.fields_with_defaults.includes(f)) {{
                                 <span class="text-[9px] bg-gray-100 text-gray-400 px-1 rounded" title="Has DB default">auto</span>
                               }}
                             </label>

@@ -31,6 +31,20 @@ export class ResourceSilo {
     const allFields = this.schema.fields.map((f: any) => f.name as string);
     return new Set(allFields.filter(f => !(out as string[]).includes(f)));
   });
+  inaccessiblePostFields = $derived.by(() => {
+    const inFields = (auth.access as any)[this.key]?.POST?.in as string[] | undefined;
+    const allFields = this.schema.fields.map((f: any) => f.name as string);
+    if (inFields === undefined) return new Set<string>();
+    if (inFields.length === 0) return new Set(allFields);
+    return new Set(allFields.filter(f => !inFields.includes(f)));
+  });
+  inaccessiblePutFields = $derived.by(() => {
+    const inFields = (auth.access as any)[this.key]?.PUT?.in as string[] | undefined;
+    const allFields = this.schema.fields.map((f: any) => f.name as string);
+    if (inFields === undefined) return new Set<string>();
+    if (inFields.length === 0) return new Set(allFields);
+    return new Set(allFields.filter(f => !inFields.includes(f)));
+  });
 
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;

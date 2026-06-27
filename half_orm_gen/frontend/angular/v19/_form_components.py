@@ -51,7 +51,9 @@ def _create_component(
     )
 
     form_fields = '\n      '.join(
-        _ng_form_field(f, all_fields)
+        f"@if (!silo.inaccessiblePostFields().has('{f}')) {{\n      "
+        + _ng_form_field(f, all_fields)
+        + '\n      }'
         for f in visible_post
     )
 
@@ -66,6 +68,7 @@ def _create_component(
         f"    const textFields = new Set<string>([{text_fields_ts}]);\n"
         "    const payload = Object.fromEntries(\n"
         "      Object.entries(this.form as unknown as Record<string, unknown>)\n"
+        "        .filter(([k]) => !this.silo.inaccessiblePostFields().has(k))\n"
         + (
             "        .filter(([k, v]) => !this.optionalFields.has(k) || v !== '')\n"
             if optional_post_fields else ""
@@ -108,7 +111,7 @@ import type {{ Row }} from '../../../generated/resource.silo';
   styleUrl: './create.component.css',
 }})
 export class {iname}CreateComponent {{
-  private silo   = inject(SiloRegistry).get('{schema_name}/{table_name}');
+  protected silo = inject(SiloRegistry).get('{schema_name}/{table_name}');
   private router = inject(Router);
 {optional_set_ts}
   form: Partial<Row> = {{ {fields_ts} }};

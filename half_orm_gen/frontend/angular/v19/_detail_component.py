@@ -67,7 +67,9 @@ def _detail_component(
 
     if has_put and visible_put:
         form_fields_tmpl = '\n        '.join(
-            _ng_form_field(f, all_fields).replace('\n        ', '\n          ')
+            f"@if (!silo.inaccessiblePutFields().has('{f}')) {{\n        "
+            + _ng_form_field(f, all_fields).replace('\n        ', '\n          ')
+            + '\n        }'
             for f in visible_put
         )
         form_init = ', '.join(
@@ -168,6 +170,7 @@ def _detail_component(
             f"    const textFields = new Set<string>([{put_text_fields_ts}]);\n"
             f'    const putPayload = Object.fromEntries(\n'
             f'      Object.entries(this.form as unknown as Record<string, unknown>)\n'
+            f'        .filter(([k]) => !this.silo.inaccessiblePutFields().has(k))\n'
             f'        .map(([k, v]): [string, unknown] => [k, !textFields.has(k) && v === \'\' ? null : v])\n'
             f'    );\n'
             f'    this.silo.update(this.id, putPayload).subscribe({{\n'

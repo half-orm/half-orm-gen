@@ -21,10 +21,12 @@ export class ResourceSilo {
   readonly sortAsc    = signal(true);
 
   // Per-resource access signals — derived from AuthService at runtime
-  readonly canCreate:          Signal<boolean>;
-  readonly canDelete:          Signal<boolean>;
-  readonly canEdit:            Signal<boolean>;
-  readonly inaccessibleFields: Signal<Set<string>>;
+  readonly canCreate:             Signal<boolean>;
+  readonly canDelete:             Signal<boolean>;
+  readonly canEdit:               Signal<boolean>;
+  readonly inaccessibleFields:    Signal<Set<string>>;
+  readonly inaccessiblePostFields: Signal<Set<string>>;
+  readonly inaccessiblePutFields:  Signal<Set<string>>;
 
   // Static permissions from CRUD_ACCESS (all roles)
   readonly permRoles: string[];
@@ -65,6 +67,20 @@ export class ResourceSilo {
       if (!out || out.length === 0) return new Set<string>();
       const allFields = schema.fields.map(f => f.name);
       return new Set(allFields.filter(f => !out.includes(f)));
+    });
+    this.inaccessiblePostFields = computed(() => {
+      const inFields: string[] | undefined = (auth.access() as any)[key]?.POST?.in;
+      const allFields = schema.fields.map(f => f.name);
+      if (inFields === undefined) return new Set<string>();
+      if (inFields.length === 0) return new Set(allFields);
+      return new Set(allFields.filter(f => !inFields.includes(f)));
+    });
+    this.inaccessiblePutFields = computed(() => {
+      const inFields: string[] | undefined = (auth.access() as any)[key]?.PUT?.in;
+      const allFields = schema.fields.map(f => f.name);
+      if (inFields === undefined) return new Set<string>();
+      if (inFields.length === 0) return new Set(allFields);
+      return new Set(allFields.filter(f => !inFields.includes(f)));
     });
 
     registerClear(() => this.clear());

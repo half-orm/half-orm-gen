@@ -1144,7 +1144,9 @@ def _new_page(
     optional_set_js = ', '.join(f"'{f}'" for f in optional_post_fields)
     text_fields_js  = _text_fields(visible_post, all_fields)
     form_fields = '\n    '.join(
-        _svelte_form_field(f, all_fields)
+        f"{{#if !silo.inaccessiblePostFields.has('{f}')}}\n    "
+        + _svelte_form_field(f, all_fields)
+        + '\n    {/if}'
         for f in visible_post
     )
     return f"""\
@@ -1164,6 +1166,7 @@ def _new_page(
     try {{
       const payload = Object.fromEntries(
         Object.entries(form)
+          .filter(([k]) => !silo.inaccessiblePostFields.has(k))
           .filter(([k, v]) => !optionalFields.has(k) || v !== '')
           {_null_map_js()}
       );
@@ -1278,7 +1281,9 @@ def _detail_page(
 
     # Edit form fields
     form_fields = '\n    '.join(
-        _svelte_form_field(f, all_fields)
+        f"{{#if !silo.inaccessiblePutFields.has('{f}')}}\n    "
+        + _svelte_form_field(f, all_fields)
+        + '\n    {/if}'
         for f in visible_put
     ) if visible_put else ''
 
@@ -1315,6 +1320,7 @@ def _detail_page(
             f'    try {{\n'
             f'      const putPayload = Object.fromEntries(\n'
             f'        Object.entries(form)\n'
+            f'          .filter(([k]) => !silo.inaccessiblePutFields.has(k))\n'
             f'          {_null_map_js("putTextFields")}\n'
             f'      );\n'
             f'      const res = await silo.update(id, putPayload);\n'
