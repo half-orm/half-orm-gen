@@ -16,6 +16,7 @@ interface AccessEntry {{
 interface ResourceInfo {{
   fields: string[];
   pk_fields: string[];
+  fields_with_defaults: string[];
   dynamic_roles: string[];
   filters: FilterInfo[];
   access: Record<string, Record<string, AccessEntry>>;
@@ -94,6 +95,9 @@ const VERB_COLOR: Record<string, string> = {{
                                (change)="toggleAccess(entry[0], verb, !acc)"
                                class="rounded border-gray-300">
                         <span class="text-xs font-mono font-semibold" [class]="verbColor(verb)">{{{{ verb }}}}</span>
+                        @if (acc && hasConfigIssue(entry[0], verb)) {{
+                          <span class="text-amber-500 text-xs" title="No fields configured — requests will return 403">⚠</span>
+                        }}
                       </label>
                       @if (acc && verb !== 'DELETE') {{
                         <button (click)="togglePanel(entry[0], verb)"
@@ -142,7 +146,11 @@ const VERB_COLOR: Record<string, string> = {{
                                        [disabled]="panelAccess()!.all_fields_in"
                                        (change)="toggleField(f, 'in', !panelAccess()!.in.includes(f))"
                                        class="rounded border-gray-300 text-blue-600 w-3 h-3">
-                                <span class="font-mono text-gray-700">{{{{ f }}}}</span>
+                                <span class="font-mono"
+                                      [class]="(panelInfo()!.fields_with_defaults ?? []).includes(f) ? 'text-gray-400' : 'text-gray-700'">{{{{ f }}}}</span>
+                                @if ((panelInfo()!.fields_with_defaults ?? []).includes(f)) {{
+                                  <span class="text-[9px] bg-gray-100 text-gray-400 px-1 rounded" title="Has DB default — won't appear in forms">auto</span>
+                                }}
                               </label>
                             }}
                           </div>
@@ -169,6 +177,9 @@ const VERB_COLOR: Record<string, string> = {{
                                      (change)="toggleField(f, 'out', !panelAccess()!.out.includes(f))"
                                      class="rounded border-gray-300 text-emerald-600 w-3 h-3">
                               <span class="font-mono text-gray-700">{{{{ f }}}}</span>
+                              @if ((panelInfo()!.fields_with_defaults ?? []).includes(f)) {{
+                                <span class="text-[9px] bg-gray-100 text-gray-400 px-1 rounded" title="Has DB default">auto</span>
+                              }}
                             </label>
                           }}
                         </div>
@@ -233,7 +244,7 @@ export class HoAdminComponent implements OnInit {{
 
   ngOnInit(): void {{
     const token = this.auth.token();
-    if (token !== 'admin' && token !== 'ho_dev') {{
+    if (token !== 'admin') {{
       void this.router.navigate(['/ho_bo']);
       return;
     }}
@@ -271,6 +282,19 @@ export class HoAdminComponent implements OnInit {{
 
   verbColor(verb: string): string {{
     return VERB_COLOR[verb] ?? 'text-gray-600';
+  }}
+
+  hasConfigIssue(resource: string, verb: string): boolean {{
+    const role = this.selectedRole();
+    if (!role) return false;
+    const acc = this.catalog()[resource]?.access?.[verb]?.[role];
+    if (!acc || verb === 'DELETE') return false;
+    const noOut = !acc.all_fields_out && acc.out.length === 0;
+    const noIn  = !acc.all_fields_in  && acc.in.length  === 0;
+    if (verb === 'GET')  return noOut;
+    if (verb === 'POST') return noIn;
+    if (verb === 'PUT')  return noIn || noOut;
+    return false;
   }}
 
   isPanel(resource: string, verb: string): boolean {{

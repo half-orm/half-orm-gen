@@ -134,12 +134,6 @@ const API_BASE = '{api_base}';
                     </button>
                   }}
                 }}
-                <div class="mx-3 my-1 border-t border-dashed border-orange-200"></div>
-                <button (click)="selectRole('ho_dev')"
-                        [class]="'w-full text-left px-4 py-2 text-xs text-orange-600 hover:bg-orange-50 transition-colors ' +
-                                 (auth.token() === 'ho_dev' ? 'font-semibold' : '')">
-                  ho_dev <span class="opacity-60 text-xs">(dev)</span>
-                </button>
                 @if (auth.token()) {{
                   <div class="mx-3 my-1 border-t border-gray-100"></div>
                   <button (click)="logout()"
@@ -167,7 +161,7 @@ const API_BASE = '{api_base}';
               }}
             </nav>
             <div class="px-4 py-3 border-t flex items-center justify-between">
-              @if (auth.token() === 'admin' || auth.token() === 'ho_dev') {{
+              @if (auth.token() === 'admin') {{
                 <a routerLink="/ho_bo/admin" routerLinkActive="text-blue-600"
                    class="text-gray-400 hover:text-blue-600 transition-colors text-xs font-medium" title="Admin">⚙</a>
               }}
@@ -278,7 +272,7 @@ export function adminGuard(): boolean {
   const auth  = inject(AuthService);
   const router = inject(Router);
   const token  = auth.token();
-  if (token === 'admin' || token === 'ho_dev') return true;
+  if (token === 'admin') return true;
   void router.navigate(['/ho_bo']);
   return false;
 }

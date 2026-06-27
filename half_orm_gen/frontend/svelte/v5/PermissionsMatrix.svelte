@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type { Verb, PermMatrix } from '$lib/generated/stores/schema.types';
   import PermissionsFields from '$lib/generated/PermissionsFields.svelte';
 
@@ -10,7 +10,7 @@
   } = $props();
 
   const verbs: Verb[] = ['GET', 'POST', 'PUT', 'DELETE'];
-  let open = $state(defaultOpen);
+  let open = $state(untrack(() => defaultOpen));
   let hovered: { role: string; verb: Verb } | null = $state(null);
   let tooltipEl: HTMLElement;
 
@@ -55,7 +55,8 @@
               {#each verbs as verb}
                 <td class="px-4 py-2 text-center">
                   {#if permissions[role]?.[verb]}
-                    <span class="text-green-600 cursor-default select-none"
+                    <span role="img" aria-label="{role} {verb} allowed"
+                          class="text-green-600 cursor-default select-none"
                           onmouseenter={(e) => onEnter(e, role, verb)}
                           onmouseleave={onLeave}>✓</span>
                   {:else}

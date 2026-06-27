@@ -604,12 +604,6 @@ def _layout(resources: list, version_prefix: str = '') -> str:
               </button>
             {{/each}}
           {{/if}}
-          <div class="mx-3 my-1 border-t border-dashed border-orange-200"></div>
-          <button onclick={{() => selectRole('ho_dev')}}
-                  class="w-full text-left px-4 py-2 text-xs text-orange-600 hover:bg-orange-50 transition-colors
-                         {{auth.token === 'ho_dev' ? 'font-semibold' : ''}}">
-            ho_dev <span class="opacity-60">(dev)</span>
-          </button>
           {{#if auth.token}}
             <div class="mx-3 my-1 border-t border-gray-100"></div>
             <button onclick={{logout}}

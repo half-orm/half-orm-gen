@@ -70,9 +70,6 @@ _HO_WARN = """
   /ho_access : exposes the full access map filtered by role
   _get_roles : bearer token used directly as a role name
                (no signature verification)
-  ho_dev     : super-role with full access to all resources
-               (Authorization: Bearer ho_dev)
-
   Replace the Authorization middleware with a real JWT implementation
   before deploying to production.
 ======================================================================
@@ -180,8 +177,6 @@ def _get_role_filter(crud_access, verb, authorized_roles):
 
 def _effective_out_fields(crud_access, verb, authorized_roles, api_excluded=None):
     api_excluded = api_excluded or []
-    if 'ho_dev' in authorized_roles:
-        return []  # ho_dev: unrestricted access to all fields
     role_map = crud_access.get(verb, {})
     get_map = crud_access.get('GET', {})
     fields = []
@@ -219,20 +214,10 @@ def _effective_in_fields(crud_access, verb, authorized_roles, api_excluded=None)
 
 
 def get_access_map():
-    result = {}
-    for resource, verbs in _STATIC_ACCESS_MAP.items():
-        entry = {}
-        for verb, roles in verbs.items():
-            entry[verb] = dict(roles)
-        result[resource] = entry
-    if not MODEL._production_mode:
-        for resource, ho_verbs in _HO_DEV_MAP.items():
-            entry = result.setdefault(resource, {})
-            for verb, ho_val in ho_verbs.items():
-                verb_entry = dict(entry.get(verb, {}))
-                verb_entry['ho_dev'] = ho_val
-                entry[verb] = verb_entry
-    return result
+    return {
+        resource: {verb: dict(roles) for verb, roles in verbs.items()}
+        for resource, verbs in _STATIC_ACCESS_MAP.items()
+    }
 
 
 def _filter_access_for_roles(access_map, authorized_roles):

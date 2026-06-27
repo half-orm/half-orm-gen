@@ -52,9 +52,6 @@ _HO_WARN = """
   /ho_access : exposes the full access map filtered by role
   _get_roles : bearer token used directly as a role name
                (no signature verification)
-  ho_dev     : super-role with full access to all resources
-               (Authorization: Bearer ho_dev)
-
   Replace the Authorization middleware with a real JWT implementation
   before deploying to production.
 ======================================================================

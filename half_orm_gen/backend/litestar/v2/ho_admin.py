@@ -1,7 +1,7 @@
 """
 Admin endpoints for managing CRUD access rights via "half_orm_meta.api" tables.
 
-All endpoints require an active role of 'admin' or 'ho_dev'.
+All endpoints require an active role of 'admin'.
 After each mutating operation the in-memory crud_access_by_res and
 access_map_holder are refreshed so that /ho_access reflects the change
 immediately, without a server restart.
@@ -21,7 +21,7 @@ from half_orm_gen.backend.litestar.v2.runtime import _manager
 def _check_admin(request: Request) -> list[str]:
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
     roles = [token, 'anonymous'] if token else ['anonymous']
-    if not any(r in roles for r in ('admin', 'ho_dev')):
+    if 'admin' not in roles:
         raise HTTPException(status_code=403, detail='Admin access required')
     return roles
 
@@ -44,17 +44,6 @@ async def _reload_resource_access(
     all_f = [f for f in all_field_names if f not in api_excluded]
 
     access_entry = _build_access_entry(crud_access, api_excluded, all_field_names)
-    if not model._production_mode and access_entry:
-        for verb in ('GET', 'POST', 'PUT', 'DELETE'):
-            if crud_access.get(verb):
-                verb_entry = dict(access_entry.get(verb, {}))
-                if verb == 'GET':
-                    verb_entry['ho_dev'] = {'out': all_f}
-                elif verb == 'DELETE':
-                    verb_entry['ho_dev'] = 'allowed'
-                else:
-                    verb_entry['ho_dev'] = {'in': all_f, 'out': all_f}
-                access_entry[verb] = verb_entry
 
     access_map = dict(access_map_holder[0])
     if access_entry:
@@ -119,7 +108,13 @@ def make_ho_admin_handlers(
             fields = [r['column_name'] for r in field_rows]
 
             rel_cls = model.get_relation_class(f'{schema}.{table}')
-            pk_fields = list(rel_cls()._ho_pkey.keys())
+            rel_inst = rel_cls()
+            pk_fields = list(rel_inst._ho_pkey.keys())
+            ho_fields = getattr(rel_inst, '_ho_fields', {})
+            fields_with_defaults = [
+                f for f, obj in ho_fields.items()
+                if getattr(obj, 'has_default_value', None) is not None
+            ]
 
             dynamic_roles = [name for (s, t, name) in _ROLE_REGISTRY if s == schema and t == table]
 
@@ -148,11 +143,12 @@ def make_ho_admin_handlers(
                     access[verb] = verb_entry
 
             result[resource_key] = {
-                'fields':        fields,
-                'pk_fields':     pk_fields,
-                'dynamic_roles': dynamic_roles,
-                'filters':       filters,
-                'access':        access,
+                'fields':               fields,
+                'pk_fields':            pk_fields,
+                'fields_with_defaults': fields_with_defaults,
+                'dynamic_roles':        dynamic_roles,
+                'filters':              filters,
+                'access':               access,
             }
         return result
 

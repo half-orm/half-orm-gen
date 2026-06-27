@@ -271,8 +271,7 @@ def generate_crud_routes(
     handler_blocks: list[str] = [] # route handlers
     route_handlers: list[str] = []
     access_map: dict = {}
-    ho_dev_map: dict = {}
-    roles: set[str] = {'ho_dev'}
+    roles: set[str] = set()
     crud_resource_map: list[tuple] = []  # (resource, module_alias, class_name, pk_field)
 
     version_prefix = f'/v{api_version}' if api_version is not None else ''
@@ -465,23 +464,6 @@ def generate_crud_routes(
         if entry:
             access_map[map_key] = entry
 
-        # ho_dev_map: full access entry for every generated resource
-        out_all = [f for f in all_names if f not in api_excluded]
-        ho_dev_entry: dict = {}
-        if 'GET' in crud_access and (module_str, 'GET') not in covered:
-            ho_dev_entry['GET'] = {'out': out_all}
-        if is_table and pk_info:
-            _pk_names_set = {f for f, _, _ in pk_cols}
-            in_all = [f for f in all_names if f not in api_excluded and f not in _pk_names_set]
-            if 'POST' in crud_access and (module_str, 'POST') not in covered:
-                ho_dev_entry['POST'] = {'in': in_all, 'out': out_all}
-            if 'PUT' in crud_access and (module_str, 'PUT') not in covered:
-                ho_dev_entry['PUT'] = {'in': in_all, 'out': out_all}
-            if 'DELETE' in crud_access and (module_str, 'DELETE') not in covered:
-                ho_dev_entry['DELETE'] = 'allowed'
-        if ho_dev_entry:
-            ho_dev_map[map_key] = ho_dev_entry
-
     # Assemble: decl_blocks first, then WS helpers, then route handlers
     blocks = decl_blocks
 
@@ -511,15 +493,14 @@ def generate_crud_routes(
     if roles:
         blocks.append(
             templates.HO_ROLES_ROUTE.format(
-                roles_json=json.dumps(sorted(roles - {'ho_dev', 'anonymous'})),
+                roles_json=json.dumps(sorted(roles - {'anonymous'})),
                 version_prefix=version_prefix,
             )
         )
         route_handlers.append('_crud_roles_list')
 
     # /ho_access endpoint — filtered by the caller's authorized_roles
-    if ho_dev_map or access_map:
-        blocks.append(f'\n_HO_DEV_MAP = {pprint.pformat(ho_dev_map)}\n')
+    if access_map:
         json_str = json.dumps(access_map, indent=4)
         blocks.append(
             templates.HO_ACCESS_ROUTE.format(
