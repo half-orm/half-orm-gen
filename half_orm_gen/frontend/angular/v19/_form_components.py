@@ -1,61 +1,10 @@
-from half_orm_gen.backend.crud_routes import _py_type_str
+from half_orm_gen.frontend.base import (
+    _is_bool_field, _is_text_field, _is_textarea_field,
+    _is_required, _is_server_generated, _input_type, _text_fields,
+)
 from ._helpers import _selector, _title, _field_type_category
 
-
-def _is_bool_field(f: str, all_fields: dict) -> bool:
-    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'bool'
-
-
-def _is_text_field(f: str, all_fields: dict) -> bool:
-    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
-
-
-def _is_textarea_field(f: str, all_fields: dict) -> bool:
-    fo = all_fields.get(f)
-    if not fo:
-        return False
-    try:
-        return fo._Field__sql_type.lower().strip() == 'text'
-    except AttributeError:
-        return False
-
-
-def _is_required(f: str, all_fields: dict) -> bool:
-    fo = all_fields.get(f)
-    return bool(fo and fo.is_not_null() and fo.has_default_value is None)
-
-
-def _is_server_generated(f: str, all_fields: dict) -> bool:
-    fo = all_fields.get(f)
-    if not fo or fo.has_default_value is None:
-        return False
-    dv = fo.has_default_value.lower().strip()
-    return dv.startswith('current') or dv in ('now()', 'clock_timestamp()')
-
-
-def _input_type(f: str, all_fields: dict) -> str:
-    if f not in all_fields:
-        return 'text'
-    fo = all_fields[f]
-    t = _py_type_str(fo.py_type)
-    if t == 'datetime.datetime':
-        return 'datetime-local'
-    if t == 'datetime.date':
-        return 'date'
-    try:
-        sql = fo._Field__sql_type.lower()
-        if 'timestamp' in sql:
-            return 'datetime-local'
-        if sql == 'date':
-            return 'date'
-    except AttributeError:
-        pass
-    return 'text'
-
-
-def _text_fields_ts(field_names: list, all_fields: dict) -> str:
-    text = [f for f in field_names if _is_text_field(f, all_fields)]
-    return ', '.join(repr(f) for f in text)
+_text_fields_ts = _text_fields
 
 
 def _ng_form_field(f: str, all_fields: dict) -> str:

@@ -1,10 +1,112 @@
 """
 Abstract base class for frontend store generators.
+
+Module-level helpers shared across all framework generators.
 """
 
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from half_orm_gen.backend.crud_routes import _py_type_str
+
+
+# ---------------------------------------------------------------------------
+# Name helpers
+# ---------------------------------------------------------------------------
+
+def _cname(schema_name: str, table_name: str) -> str:
+    """PascalCase — BlogAuthor"""
+    schema_name = schema_name.replace('.', '_')
+    return ''.join(p.capitalize() for p in f'{schema_name}_{table_name}'.split('_'))
+
+
+def _rname(schema_name: str, table_name: str) -> str:
+    """camelCase — blogAuthor"""
+    schema_name = schema_name.replace('.', '_')
+    parts = schema_name.split('_') + table_name.split('_')
+    return parts[0].lower() + ''.join(p.capitalize() for p in parts[1:])
+
+
+def _title(schema_name: str, table_name: str) -> str:
+    return f'{schema_name}.{table_name}'
+
+
+# ---------------------------------------------------------------------------
+# Field type helpers
+# ---------------------------------------------------------------------------
+
+def _field_type_category(field_obj) -> str:
+    """Map Python type → validation category: date, datetime, number, or string."""
+    py_type = _py_type_str(field_obj.py_type)
+    if py_type == 'datetime.date':
+        return 'date'
+    if py_type == 'datetime.datetime':
+        return 'datetime'
+    if py_type in ('int', 'float', 'decimal.Decimal'):
+        return 'number'
+    return 'string'
+
+
+def _is_bool_field(f: str, all_fields: dict) -> bool:
+    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'bool'
+
+
+def _is_text_field(f: str, all_fields: dict) -> bool:
+    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
+
+
+def _is_textarea_field(f: str, all_fields: dict) -> bool:
+    fo = all_fields.get(f)
+    if not fo:
+        return False
+    try:
+        return fo._Field__sql_type.lower().strip() == 'text'
+    except AttributeError:
+        return False
+
+
+def _is_required(f: str, all_fields: dict) -> bool:
+    fo = all_fields.get(f)
+    return bool(fo and fo.is_not_null() and fo.has_default_value is None)
+
+
+def _is_server_generated(f: str, all_fields: dict) -> bool:
+    fo = all_fields.get(f)
+    if not fo or fo.has_default_value is None:
+        return False
+    dv = fo.has_default_value.lower().strip()
+    return dv.startswith('current') or dv in ('now()', 'clock_timestamp()')
+
+
+def _input_type(f: str, all_fields: dict) -> str:
+    if f not in all_fields:
+        return 'text'
+    fo = all_fields[f]
+    t = _py_type_str(fo.py_type)
+    if t == 'datetime.datetime':
+        return 'datetime-local'
+    if t == 'datetime.date':
+        return 'date'
+    try:
+        sql = fo._Field__sql_type.lower()
+        if 'timestamp' in sql:
+            return 'datetime-local'
+        if sql == 'date':
+            return 'date'
+    except AttributeError:
+        pass
+    return 'text'
+
+
+def _text_fields(field_names: list, all_fields: dict) -> str:
+    """Return a JS/TS set literal body: 'field1', 'field2', ..."""
+    text = [f for f in field_names if _is_text_field(f, all_fields)]
+    return ', '.join(repr(f) for f in text)
+
+
+# ---------------------------------------------------------------------------
+# Abstract base class
+# ---------------------------------------------------------------------------
 
 class StoreGenerator(ABC):
 
@@ -26,15 +128,11 @@ class StoreGenerator(ABC):
 
     def resource_name(self, schema: str, table: str) -> str:
         """blogAuthor (camelCase)"""
-        schema = schema.replace('.', '_')
-        parts = schema.split('_') + table.split('_')
-        return parts[0].lower() + ''.join(p.capitalize() for p in parts[1:])
+        return _rname(schema, table)
 
     def interface_name(self, schema: str, table: str) -> str:
         """BlogAuthor (PascalCase)"""
-        schema = schema.replace('.', '_')
-        parts = schema.split('_') + table.split('_')
-        return ''.join(p.capitalize() for p in parts)
+        return _cname(schema, table)
 
     def _fk_deps(self, inst, out_names: list, crud_resources: set) -> list:
         """Return (local_field, remote_schema, remote_table, remote_pk) for each

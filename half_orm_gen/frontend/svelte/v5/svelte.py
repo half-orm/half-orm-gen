@@ -19,25 +19,18 @@ from half_orm_gen.backend.crud_routes import (
     _instance,
     _py_type_str,
 )
-from half_orm_gen.frontend.base import StoreGenerator
+from half_orm_gen.frontend.base import (
+    StoreGenerator,
+    _title, _cname, _rname, _field_type_category,
+    _is_bool_field, _is_text_field, _is_textarea_field,
+    _is_required, _is_server_generated, _input_type, _text_fields,
+)
 from half_orm_gen.frontend.angular.v19._permissions_matrix import _build_perm_data
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _field_type_category(field_obj) -> str:
-    """Map Python type to validation category: date, datetime, number, or string."""
-    py_type = _py_type_str(field_obj.py_type)
-    if py_type == 'datetime.date':
-        return 'date'
-    if py_type == 'datetime.datetime':
-        return 'datetime'
-    if py_type in ('int', 'float', 'decimal.Decimal'):
-        return 'number'
-    return 'string'
-
 
 # ---------------------------------------------------------------------------
 # Static file templates
@@ -375,10 +368,6 @@ def _access_page(version_prefix: str) -> str:
 # Dynamic template helpers
 # ---------------------------------------------------------------------------
 
-def _title(schema_name: str, table_name: str) -> str:
-    return f'{schema_name}.{table_name}'
-
-
 def _schema_page_svelte() -> str:
     return """\
 <script lang="ts">
@@ -646,19 +635,6 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   </div>
 </div>
 """
-
-
-def _cname(schema_name: str, table_name: str) -> str:
-    """PascalCase component/interface name — e.g. BlogComment"""
-    schema_name = schema_name.replace('.', '_')
-    return ''.join(p.capitalize() for p in f'{schema_name}_{table_name}'.split('_'))
-
-
-def _rname(schema_name: str, table_name: str) -> str:
-    """camelCase resource name — e.g. blogComment"""
-    schema_name = schema_name.replace('.', '_')
-    parts = schema_name.split('_') + table_name.split('_')
-    return parts[0].lower() + ''.join(p.capitalize() for p in parts[1:])
 
 
 def _list_component(
@@ -1118,62 +1094,6 @@ def _detail_page_wrapper(stem: str) -> str:
 """
 
 
-def _is_bool_field(f: str, all_fields: dict) -> bool:
-    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'bool'
-
-
-def _is_text_field(f: str, all_fields: dict) -> bool:
-    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
-
-
-def _is_textarea_field(f: str, all_fields: dict) -> bool:
-    fo = all_fields.get(f)
-    if not fo:
-        return False
-    try:
-        return fo._Field__sql_type.lower().strip() == 'text'
-    except AttributeError:
-        return False
-
-
-def _is_required(f: str, all_fields: dict) -> bool:
-    fo = all_fields.get(f)
-    return bool(fo and fo.is_not_null() and fo.has_default_value is None)
-
-
-def _is_server_generated(f: str, all_fields: dict) -> bool:
-    fo = all_fields.get(f)
-    if not fo or fo.has_default_value is None:
-        return False
-    dv = fo.has_default_value.lower().strip()
-    return dv.startswith('current') or dv in ('now()', 'clock_timestamp()')
-
-
-def _input_type(f: str, all_fields: dict) -> str:
-    if f not in all_fields:
-        return 'text'
-    fo = all_fields[f]
-    t = _py_type_str(fo.py_type)
-    if t == 'datetime.datetime':
-        return 'datetime-local'
-    if t == 'datetime.date':
-        return 'date'
-    try:
-        sql = fo._Field__sql_type.lower()
-        if 'timestamp' in sql:
-            return 'datetime-local'
-        if sql == 'date':
-            return 'date'
-    except AttributeError:
-        pass
-    return 'text'
-
-
-def _text_fields_js(field_names: list, all_fields: dict) -> str:
-    text = [f for f in field_names if _is_text_field(f, all_fields)]
-    return ', '.join(f"'{f}'" for f in text)
-
-
 def _null_map_js(text_fields_var: str = 'textFields') -> str:
     return f'.map(([k, v]) => [k, !{text_fields_var}.has(k) && v === \'\' ? null : v] as [string, unknown])'
 
@@ -1222,7 +1142,7 @@ def _new_page(
     )
     map_key         = f'{schema_name}/{table_name}'
     optional_set_js = ', '.join(f"'{f}'" for f in optional_post_fields)
-    text_fields_js  = _text_fields_js(visible_post, all_fields)
+    text_fields_js  = _text_fields(visible_post, all_fields)
     form_fields = '\n    '.join(
         _svelte_form_field(f, all_fields)
         for f in visible_post
@@ -1379,7 +1299,7 @@ def _detail_page(
                 return f'form.{f} = item.{f} ? String(item.{f}).slice(0, 16) : "";'
             return f'form.{f} = (item.{f} as string) ?? "";'
         effect_body = '\n        '.join(_effect_assign(f) for f in visible_put)
-        put_text_fields_js = _text_fields_js(visible_put, all_fields)
+        put_text_fields_js = _text_fields(visible_put, all_fields)
         extra_script = (
             f'\n  let editing = $state(false);\n'
             f'  let form = $state<Record<string, unknown>>({{ {empty_init} }});\n'
