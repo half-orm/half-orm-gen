@@ -39,11 +39,12 @@ async def _reload_resource_access(
 
     api_excluded = api_excluded_by_res.get(resource, [])
     rel_cls = model.get_relation_class(f'{schema}.{table}')
-    sfqrn = rel_cls()._t_fqrn
+    rel_inst = rel_cls()
+    sfqrn = rel_inst._t_fqrn
     all_field_names = list(model._fields_metadata(sfqrn).keys())
-    all_f = [f for f in all_field_names if f not in api_excluded]
+    pk_fields = list(getattr(rel_inst, '_ho_pkey', {}).keys()) or None
 
-    access_entry = _build_access_entry(crud_access, api_excluded, all_field_names)
+    access_entry = _build_access_entry(crud_access, api_excluded, all_field_names, pk_fields)
 
     access_map = dict(access_map_holder[0])
     if access_entry:

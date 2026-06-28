@@ -124,7 +124,7 @@ def _pk_info(cls) -> list[tuple[str, str]]:
 def _make_list_handler(
     path: str, cls, resource: str,
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
-    parent_map_holder: list,
+    parent_map_holder: list, pk_names: list | None = None,
 ):
     slug = resource.replace('/', '_')
 
@@ -149,7 +149,7 @@ def _make_list_handler(
             if k.startswith('ho_col_') and k[7:] not in api_excluded
         }
         role_filter = _get_role_filter(crud_access, 'GET', roles)
-        authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded, all_fields_by_res.get(resource, []))
+        authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded, all_fields_by_res.get(resource, []), pk_names)
         if not authorized:
             raise HTTPException(status_code=403)
         projection = [f for f in fields if f in authorized] if fields else authorized
@@ -189,7 +189,7 @@ def _make_get_handler(
         api_excluded = api_excluded_by_res.get(resource, [])
         roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         role_filter = _get_role_filter(crud_access, 'GET', roles)
-        authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded, all_fields_by_res.get(resource, []))
+        authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded, all_fields_by_res.get(resource, []), pk_names)
         if not authorized:
             raise HTTPException(status_code=403)
         pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
@@ -409,7 +409,7 @@ def build_crud_app(
             ws_rmap[resource] = (cls, pk_info[0][0])
 
         relation_handlers.append(
-            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder)
+            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder, [p[0] for p in pk_info] if pk_info else None)
         )
         if pk_info:
             relation_handlers.append(
@@ -478,7 +478,8 @@ def build_crud_app(
                 if isinstance(verb_roles, dict):
                     roles_set.update(verb_roles.keys())
 
-            access_entry = _build_access_entry(crud_access, api_excluded, all_field_names)
+            pk_names_startup = [p[0] for p in pk_info] if pk_info else None
+            access_entry = _build_access_entry(crud_access, api_excluded, all_field_names, pk_names_startup)
 
             if access_entry:
                 access_map[resource] = access_entry

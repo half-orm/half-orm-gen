@@ -207,14 +207,18 @@ const VERB_COLOR: Record<string, string> = {{
                         </div>
                         <div class="space-y-1">
                           @for (f of panelInfo()!.fields; track f) {{
-                            <label class="flex items-center gap-2 text-xs" [class]="panelInheritedFrom() ? 'cursor-default' : 'cursor-pointer'">
+                            @let isPk = panel()!.verb === 'GET' && panelInfo()!.pk_fields.includes(f);
+                            <label class="flex items-center gap-2 text-xs"
+                                   [class]="(panelInheritedFrom() || isPk) ? 'cursor-default' : 'cursor-pointer'">
                               <input type="checkbox"
-                                     [checked]="panelEffectiveAccess()!.out.includes(f) || isInheritedField(f, 'out')"
-                                     [disabled]="!!panelInheritedFrom() || isInheritedField(f, 'out')"
-                                     (change)="!panelInheritedFrom() && !isInheritedField(f, 'out') && toggleField(f, 'out', !panelAccess()!.out.includes(f))"
+                                     [checked]="isPk || panelEffectiveAccess()!.out.includes(f) || isInheritedField(f, 'out')"
+                                     [disabled]="isPk || !!panelInheritedFrom() || isInheritedField(f, 'out')"
+                                     (change)="!isPk && !panelInheritedFrom() && !isInheritedField(f, 'out') && toggleField(f, 'out', !panelAccess()!.out.includes(f))"
                                      class="rounded border-gray-300 text-emerald-600 w-3 h-3">
                               <span class="font-mono text-gray-700">{{{{ f }}}}</span>
-                              @if (panelInfo()!.fields_with_defaults.includes(f)) {{
+                              @if (isPk) {{
+                                <span class="text-[9px] bg-blue-50 text-blue-400 px-1 rounded" title="Primary key — always included in GET">pk</span>
+                              }} @else if (panelInfo()!.fields_with_defaults.includes(f)) {{
                                 <span class="text-[9px] bg-gray-100 text-gray-400 px-1 rounded" title="Has DB default">auto</span>
                               }}
                             </label>
@@ -475,7 +479,8 @@ export class HoAdminComponent implements OnInit {{
     const toAdd = info.fields.filter(f =>
       !this.isInheritedField(f, dir) &&
       !existing.includes(f) &&
-      !(dir === 'in' && info.fields_with_defaults.includes(f))
+      !(dir === 'in' && info.fields_with_defaults.includes(f)) &&
+      !(dir === 'out' && this.panel()!.verb === 'GET' && info.pk_fields.includes(f))
     );
     if (toAdd.length === 0) return;
     const endpoint = dir === 'in' ? 'field_access_in' : 'field_access_out';

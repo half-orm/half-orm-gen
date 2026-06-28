@@ -57,12 +57,13 @@ def _effective_out_fields(
     authorized_roles: list[str],
     api_excluded: list | None = None,
     all_field_names: list | None = None,
+    pk_fields: list | None = None,
 ) -> list | None:
     """Return the list of fields the caller may read for this verb.
 
     For non-GET verbs without an explicit 'out', falls back to the GET out
     fields for that role. Returns None when no role matched (→ 403).
-    Never returns [].
+    Never returns []. PK fields are always injected into GET results.
     """
     api_excluded = api_excluded or []
     role_map = crud_access.get(verb, {})
@@ -86,6 +87,10 @@ def _effective_out_fields(
     if not matched:
         return None
     result = list(dict.fromkeys(fields))
+    if verb == 'GET' and matched and pk_fields:
+        for pk in reversed(pk_fields):
+            if pk not in result and pk not in api_excluded:
+                result.insert(0, pk)
     return result if result else None
 
 
@@ -139,7 +144,12 @@ def _resolved_in(crud_access: dict, verb: str, role: str) -> list:
 # Access-map helpers  (used by /ho_access)
 # ---------------------------------------------------------------------------
 
-def _build_access_entry(crud_access: dict, api_excluded: list, all_field_names: list) -> dict:
+def _build_access_entry(
+    crud_access: dict,
+    api_excluded: list,
+    all_field_names: list,
+    pk_fields: list | None = None,
+) -> dict:
     """Build the normalized access entry dict for one resource.
 
     Expands None/"all fields" shorthands into explicit field lists, applies
@@ -158,9 +168,12 @@ def _build_access_entry(crud_access: dict, api_excluded: list, all_field_names: 
             if verb == 'GET':
                 rv = roles[role]
                 out = rv.get('out', []) if isinstance(rv, dict) else []
-                verb_entry[role] = {
-                    'out': [f for f in out if f not in api_excluded]
-                }
+                out_fields = [f for f in out if f not in api_excluded]
+                if pk_fields:
+                    for pk in reversed(pk_fields):
+                        if pk not in out_fields and pk not in api_excluded:
+                            out_fields.insert(0, pk)
+                verb_entry[role] = {'out': out_fields}
             elif verb == 'DELETE':
                 verb_entry[role] = 'allowed'
             else:
