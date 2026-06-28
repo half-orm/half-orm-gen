@@ -6,7 +6,7 @@ def _auth_service(version_prefix: str) -> str:
 import {{ Injectable, computed, signal, inject }} from '@angular/core';
 import {{ Router }} from '@angular/router';
 import {{ Subject }} from 'rxjs';
-import {{ clearAllStates }} from './state-registry';
+import {{ clearAllStates, clearStateForKey }} from './state-registry';
 
 export interface WsEvent {{
   event: 'create' | 'update' | 'delete' | 'access_reload';
@@ -17,15 +17,17 @@ export interface WsEvent {{
 @Injectable({{ providedIn: 'root' }})
 export class AuthService {{
   private router = inject(Router);
-  readonly token        = signal<string | null>(
+  readonly token                = signal<string | null>(
     typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
   );
-  readonly access       = signal<Record<string, any>>({{}});
-  readonly roles        = signal<string[]>([]);
-  readonly activeRoles  = computed<string[]>(() =>
+  readonly access               = signal<Record<string, any>>({{}});
+  readonly roles                = signal<string[]>([]);
+  readonly accessVersion        = signal<number>(0);
+  readonly resourceAccessVersion = signal<Record<string, number>>({{}});
+  readonly activeRoles          = computed<string[]>(() =>
     this.token() ? [this.token()!] : ['anonymous']
   );
-  readonly wsEvent$   = new Subject<WsEvent>();
+  readonly wsEvent$    = new Subject<WsEvent>();
   readonly fetchedRoutes = new Set<string>();
 
   login(t: string): void {{
@@ -68,9 +70,23 @@ export class AuthService {{
   async _fetchRoles(): Promise<void> {{
     try {{
       const res = await fetch('{version_prefix}/ho_roles');
-      this.roles.set(res.ok ? await res.json() : []);
-    }} catch {{
-      this.roles.set([]);
+      if (res.ok) this.roles.set(await res.json());
+    }} catch {{}}
+  }}
+
+  async _reloadAccess(resource?: string): Promise<void> {{
+    if (resource) {{
+      for (const url of [...this.fetchedRoutes]) {{
+        if (url.includes(`/${{resource}}`)) this.fetchedRoutes.delete(url);
+      }}
+      clearStateForKey(resource);
+      await this._fetchAccess();
+      this.resourceAccessVersion.update(v => ({{ ...v, [resource]: (v[resource] ?? 0) + 1 }}));
+    }} else {{
+      this.fetchedRoutes.clear();
+      clearAllStates();
+      await Promise.all([this._fetchAccess(), this._fetchRoles()]);
+      this.accessVersion.update(v => v + 1);
     }}
   }}
 
@@ -81,7 +97,7 @@ export class AuthService {{
     ws.onmessage = (e) => {{
       try {{
         const msg = JSON.parse(e.data) as WsEvent;
-        if (msg.event === 'access_reload') {{ void this._fetchAccess(); }}
+        if (msg.event === 'access_reload') {{ void this._reloadAccess((msg as any).resource); }}
         else {{ this.wsEvent$.next(msg); }}
       }} catch {{}}
     }};

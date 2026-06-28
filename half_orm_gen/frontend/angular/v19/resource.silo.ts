@@ -2,7 +2,7 @@ import { computed, signal, Signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { catchError, filter, map, of, tap } from 'rxjs';
 import { AuthService } from '../core/auth.service';
-import { registerClear } from '../core/state-registry';
+import { registerClear, registerClearForKey } from '../core/state-registry';
 import { ResourceSchema } from './schema.types';
 import type { PermMatrix } from './schema.types';
 
@@ -84,6 +84,7 @@ export class ResourceSilo {
     });
 
     registerClear(() => this.clear());
+    registerClearForKey(key, () => this.clear());
     auth.wsEvent$
       .pipe(filter(ev => ev.resource === key))
       .subscribe(ev => {

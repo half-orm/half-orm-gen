@@ -7,8 +7,6 @@ import {{ AuthService }} from '../../core/auth.service';
 interface FilterInfo  {{ id: string; name: string; }}
 interface AccessEntry {{
   id: string;
-  all_fields_in: boolean;
-  all_fields_out: boolean;
   in: string[];
   out: string[];
   active_filters: string[];
@@ -21,7 +19,7 @@ interface ResourceInfo {{
   filters: FilterInfo[];
   access: Record<string, Record<string, AccessEntry>>;
 }}
-interface RoleInfo {{ name: string; deletable: boolean; kind: 'system' | 'dynamic' | 'user'; }}
+interface RoleInfo {{ name: string; deletable: boolean; kind: 'system' | 'dynamic' | 'user'; parent_name: string | null; }}
 type Catalog = Record<string, ResourceInfo>;
 
 const VERB_COLOR: Record<string, string> = {{
@@ -39,25 +37,55 @@ const VERB_COLOR: Record<string, string> = {{
 
       <!-- Left: role list -->
       <div class="w-52 shrink-0 border-r bg-white flex flex-col h-full">
-        <div class="px-4 py-3 border-b">
+        <div class="px-4 py-3 border-b flex items-center justify-between">
           <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Roles</h2>
+          <button (click)="showNewRole.set(!showNewRole())"
+                  class="text-xs text-blue-600 hover:text-blue-800 font-semibold">+</button>
         </div>
+        @if (showNewRole()) {{
+          <div class="px-3 py-2 border-b bg-gray-50 space-y-1.5">
+            <input [value]="newRoleName()" (input)="newRoleName.set($any($event.target).value)"
+                   placeholder="Role name" class="w-full text-xs border rounded px-2 py-1" />
+            <select [value]="newRoleParent()" (change)="newRoleParent.set($any($event.target).value)"
+                    class="w-full text-xs border rounded px-2 py-1">
+              @for (r of roles(); track r.name) {{
+                <option [value]="r.name">{{{{ r.name }}}}</option>
+              }}
+            </select>
+            <button (click)="createRole()"
+                    class="w-full text-xs bg-blue-600 text-white rounded py-1 hover:bg-blue-700">Create</button>
+          </div>
+        }}
         <div class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
           @for (r of roles(); track r.name) {{
-            <button (click)="selectRole(r.name)"
-                    class="w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center justify-between gap-1"
-                    [class]="selectedRole() === r.name
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-700 hover:bg-gray-100'">
-              <span>{{{{ r.name }}}}</span>
-              @if (r.kind === 'system') {{
-                <span class="text-[10px] px-1.5 rounded"
-                      [class]="selectedRole() === r.name ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'">sys</span>
-              }} @else if (r.kind === 'dynamic') {{
-                <span class="text-[10px] px-1.5 rounded"
-                      [class]="selectedRole() === r.name ? 'bg-blue-500 text-white' : 'bg-purple-100 text-purple-600'">dyn</span>
-              }}
-            </button>
+            <div class="group relative">
+              <button (click)="selectRole(r.name)"
+                      class="w-full text-left px-3 py-1.5 rounded text-sm transition-colors"
+                      [class]="selectedRole() === r.name
+                        ? 'bg-blue-600 text-white'
+                        : 'text-gray-700 hover:bg-gray-100'">
+                <div class="flex items-center justify-between gap-1">
+                  <span>{{{{ r.name }}}}</span>
+                  <div class="flex items-center gap-1">
+                    @if (r.kind === 'system') {{
+                      <span class="text-[10px] px-1.5 rounded"
+                            [class]="selectedRole() === r.name ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'">sys</span>
+                    }} @else if (r.kind === 'dynamic') {{
+                      <span class="text-[10px] px-1.5 rounded"
+                            [class]="selectedRole() === r.name ? 'bg-blue-500 text-white' : 'bg-purple-100 text-purple-600'">dyn</span>
+                    }} @else {{
+                      <button (click)="$event.stopPropagation(); deleteRole(r.name)"
+                              class="text-[10px] px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                              [class]="selectedRole() === r.name ? 'text-blue-200 hover:text-white' : 'text-gray-400 hover:text-red-500'"
+                              title="Delete role">✕</button>
+                    }}
+                  </div>
+                </div>
+                @if (r.parent_name) {{
+                  <div class="text-[10px] opacity-60 mt-0.5">↳ {{{{ r.parent_name }}}}</div>
+                }}
+              </button>
+            </div>
           }}
         </div>
       </div>
@@ -89,17 +117,23 @@ const VERB_COLOR: Record<string, string> = {{
                 <div class="px-4 py-3 flex gap-5 flex-wrap items-start">
                   @for (verb of verbs; track verb) {{
                     @let acc = getAccess(entry[0], verb);
+                    @let inherited = isInherited(entry[0], verb);
+                    @let hasAccess = !!(acc || inherited);
                     <div class="flex flex-col items-center gap-0.5 min-w-[52px]">
-                      <label class="flex items-center gap-1.5 cursor-pointer select-none">
-                        <input type="checkbox" [checked]="!!acc"
-                               (change)="toggleAccess(entry[0], verb, !acc)"
+                      <label class="flex items-center gap-1.5 select-none" [class]="inherited ? 'cursor-default opacity-60' : 'cursor-pointer'">
+                        <input type="checkbox" [checked]="hasAccess"
+                               [disabled]="inherited"
+                               (change)="!inherited && toggleAccess(entry[0], verb, !acc)"
                                class="rounded border-gray-300">
                         <span class="text-xs font-mono font-semibold" [class]="verbColor(verb)">{{{{ verb }}}}</span>
                         @if (acc && hasConfigIssue(entry[0], verb)) {{
                           <span class="text-amber-500 text-xs" title="No fields configured — requests will return 403">⚠</span>
                         }}
                       </label>
-                      @if (acc && verb !== 'DELETE') {{
+                      @if (inherited) {{
+                        <span class="text-[9px] text-gray-400">↑ {{{{ getInheritedAccess(entry[0], verb)!.from }}}}</span>
+                      }}
+                      @if (hasAccess && verb !== 'DELETE') {{
                         <button (click)="togglePanel(entry[0], verb)"
                                 class="text-[10px] leading-tight transition-colors"
                                 [class]="isPanel(entry[0], verb)
@@ -113,12 +147,19 @@ const VERB_COLOR: Record<string, string> = {{
                 </div>
 
                 <!-- Inline field/filter editor — shown below the verb row for this resource -->
-                @if (isPanel(entry[0], panel()?.verb ?? '') && panelAccess() && panelInfo()) {{
+                @if (isPanel(entry[0], panel()?.verb ?? '') && panelEffectiveAccess() && panelInfo()) {{
                   <div class="border-t bg-gray-50 px-5 py-4">
                     <div class="flex items-center justify-between mb-4">
                       <span class="text-xs font-semibold text-gray-500">
                         <span [class]="verbColor(panel()!.verb)">{{{{ panel()!.verb }}}}</span>
                         — field access
+                        @if (panelInheritedFrom()) {{
+                          <span class="ml-2 text-[10px] text-gray-400 font-normal">↑ inherited from <span class="font-semibold">{{{{ panelInheritedFrom() }}}}</span></span>
+                          <button (click)="overrideVerb(panel()!.resource, panel()!.verb)"
+                                  class="ml-3 text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200">
+                            + define for {{{{ selectedRole() }}}}
+                          </button>
+                        }}
                       </span>
                       <button (click)="panel.set(null)"
                               class="text-gray-400 hover:text-gray-600 leading-none text-base">✕</button>
@@ -131,20 +172,18 @@ const VERB_COLOR: Record<string, string> = {{
                         <div class="min-w-[140px]">
                           <div class="flex items-center gap-3 mb-2">
                             <div class="text-[10px] font-bold uppercase tracking-widest text-blue-500">In <span class="normal-case font-normal opacity-70">client → api</span></div>
-                            <label class="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
-                              <input type="checkbox" [checked]="panelAccess()!.all_fields_in"
-                                     (change)="updateAllFields('in', !panelAccess()!.all_fields_in)"
-                                     class="rounded border-gray-300 text-blue-600 w-3 h-3">
-                              all
-                            </label>
+                            @if (!panelInheritedFrom()) {{
+                              <button (click)="addAllFields('in')"
+                                      class="text-[10px] px-1.5 py-0.5 rounded border border-blue-200 text-blue-500 hover:bg-blue-50">all</button>
+                            }}
                           </div>
                           <div class="space-y-1">
                             @for (f of panelInfo()!.fields; track f) {{
-                              <label class="flex items-center gap-2 text-xs cursor-pointer">
+                              <label class="flex items-center gap-2 text-xs" [class]="panelInheritedFrom() ? 'cursor-default' : 'cursor-pointer'">
                                 <input type="checkbox"
-                                       [checked]="panelAccess()!.all_fields_in || panelAccess()!.in.includes(f)"
-                                       [disabled]="panelAccess()!.all_fields_in || panelInfo()!.fields_with_defaults.includes(f)"
-                                       (change)="toggleField(f, 'in', !panelAccess()!.in.includes(f))"
+                                       [checked]="panelEffectiveAccess()!.in.includes(f) || isInheritedField(f, 'in')"
+                                       [disabled]="!!panelInheritedFrom() || isInheritedField(f, 'in') || panelInfo()!.fields_with_defaults.includes(f)"
+                                       (change)="!panelInheritedFrom() && !isInheritedField(f, 'in') && toggleField(f, 'in', !panelAccess()!.in.includes(f))"
                                        class="rounded border-gray-300 text-blue-600 w-3 h-3">
                                 <span class="font-mono"
                                       [class]="panelInfo()!.fields_with_defaults.includes(f) ? 'text-gray-400' : 'text-gray-700'">{{{{ f }}}}</span>
@@ -161,20 +200,18 @@ const VERB_COLOR: Record<string, string> = {{
                       <div class="min-w-[140px]">
                         <div class="flex items-center gap-3 mb-2">
                           <div class="text-[10px] font-bold uppercase tracking-widest text-emerald-500">Out <span class="normal-case font-normal opacity-70">api → client</span></div>
-                          <label class="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
-                            <input type="checkbox" [checked]="panelAccess()!.all_fields_out"
-                                   (change)="updateAllFields('out', !panelAccess()!.all_fields_out)"
-                                   class="rounded border-gray-300 text-emerald-600 w-3 h-3">
-                            all
-                          </label>
+                          @if (!panelInheritedFrom()) {{
+                            <button (click)="addAllFields('out')"
+                                    class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-500 hover:bg-emerald-50">all</button>
+                          }}
                         </div>
                         <div class="space-y-1">
                           @for (f of panelInfo()!.fields; track f) {{
-                            <label class="flex items-center gap-2 text-xs cursor-pointer">
+                            <label class="flex items-center gap-2 text-xs" [class]="panelInheritedFrom() ? 'cursor-default' : 'cursor-pointer'">
                               <input type="checkbox"
-                                     [checked]="panelAccess()!.all_fields_out || panelAccess()!.out.includes(f)"
-                                     [disabled]="panelAccess()!.all_fields_out"
-                                     (change)="toggleField(f, 'out', !panelAccess()!.out.includes(f))"
+                                     [checked]="panelEffectiveAccess()!.out.includes(f) || isInheritedField(f, 'out')"
+                                     [disabled]="!!panelInheritedFrom() || isInheritedField(f, 'out')"
+                                     (change)="!panelInheritedFrom() && !isInheritedField(f, 'out') && toggleField(f, 'out', !panelAccess()!.out.includes(f))"
                                      class="rounded border-gray-300 text-emerald-600 w-3 h-3">
                               <span class="font-mono text-gray-700">{{{{ f }}}}</span>
                               @if (panelInfo()!.fields_with_defaults.includes(f)) {{
@@ -225,16 +262,53 @@ export class HoAdminComponent implements OnInit {{
   readonly loading      = signal(true);
   readonly selectedRole = signal<string | null>(null);
   readonly panel        = signal<{{resource: string; verb: string}} | null>(null);
+  readonly showNewRole  = signal(false);
+  readonly newRoleName  = signal('');
+  readonly newRoleParent = signal('connected');
 
   readonly verbs = ['GET', 'POST', 'PUT', 'DELETE'] as const;
 
   readonly catalogEntries = computed(() => Object.entries(this.catalog()));
+
+  readonly parentMap = computed(() =>
+    Object.fromEntries(this.roles().map(r => [r.name, r.parent_name ?? null]))
+  );
+
+  readonly ancestorChain = computed<string[]>(() => {{
+    const role = this.selectedRole();
+    if (!role) return [];
+    const pm = this.parentMap();
+    const chain: string[] = [];
+    let cur: string | null = pm[role] ?? null;
+    while (cur) {{ chain.push(cur); cur = pm[cur] ?? null; }}
+    return chain;
+  }});
 
   readonly panelAccess = computed<AccessEntry | undefined>(() => {{
     const p = this.panel();
     const role = this.selectedRole();
     if (!p || !role) return undefined;
     return this.catalog()[p.resource]?.access?.[p.verb]?.[role];
+  }});
+
+  readonly panelEffectiveAccess = computed<AccessEntry | undefined>(() => {{
+    const own = this.panelAccess();
+    if (own) return own;
+    const p = this.panel();
+    if (!p) return undefined;
+    return this.getMergedAncestorAccess(p.resource, p.verb) ?? undefined;
+  }});
+
+  readonly panelInheritedFrom = computed<string | null>(() => {{
+    const p = this.panel();
+    if (!p || this.panelAccess()) return null;
+    return this.getInheritedAccess(p.resource, p.verb)?.from ?? null;
+  }});
+
+  readonly panelInheritedEntry = computed<AccessEntry | undefined>(() => {{
+    const p = this.panel();
+    if (!p) return undefined;
+    return this.getMergedAncestorAccess(p.resource, p.verb) ?? undefined;
   }});
 
   readonly panelInfo = computed<ResourceInfo | undefined>(() => {{
@@ -280,20 +354,45 @@ export class HoAdminComponent implements OnInit {{
     return role ? this.catalog()[resource]?.access?.[verb]?.[role] : undefined;
   }}
 
+  getInheritedAccess(resource: string, verb: string): {{entry: AccessEntry; from: string}} | null {{
+    for (const anc of this.ancestorChain()) {{
+      const e = this.catalog()[resource]?.access?.[verb]?.[anc];
+      if (e) return {{entry: e, from: anc}};
+    }}
+    return null;
+  }}
+
+  getMergedAncestorAccess(resource: string, verb: string): AccessEntry | null {{
+    let found = false;
+    const ins  = new Set<string>();
+    const outs = new Set<string>();
+    const filters = new Set<string>();
+    for (const anc of this.ancestorChain()) {{
+      const e = this.catalog()[resource]?.access?.[verb]?.[anc];
+      if (!e) continue;
+      found = true;
+      e.in.forEach(f  => ins.add(f));
+      e.out.forEach(f => outs.add(f));
+      e.active_filters.forEach(f => filters.add(f));
+    }}
+    if (!found) return null;
+    return {{ id: '', in: [...ins], out: [...outs], active_filters: [...filters] }};
+  }}
+
+  isInherited(resource: string, verb: string): boolean {{
+    return !this.getAccess(resource, verb) && !!this.getInheritedAccess(resource, verb);
+  }}
+
   verbColor(verb: string): string {{
     return VERB_COLOR[verb] ?? 'text-gray-600';
   }}
 
   hasConfigIssue(resource: string, verb: string): boolean {{
-    const role = this.selectedRole();
-    if (!role) return false;
-    const acc = this.catalog()[resource]?.access?.[verb]?.[role];
+    const acc = this.getAccess(resource, verb);
     if (!acc || verb === 'DELETE') return false;
-    const noOut = !acc.all_fields_out && acc.out.length === 0;
-    const noIn  = !acc.all_fields_in  && acc.in.length  === 0;
-    if (verb === 'GET')  return noOut;
-    if (verb === 'POST') return noIn;
-    if (verb === 'PUT')  return noIn || noOut;
+    if (verb === 'GET')  return acc.out.length === 0;
+    if (verb === 'POST') return acc.in.length  === 0;
+    if (verb === 'PUT')  return acc.in.length  === 0 || acc.out.length === 0;
     return false;
   }}
 
@@ -309,6 +408,40 @@ export class HoAdminComponent implements OnInit {{
   selectRole(name: string): void {{
     this.panel.set(null);
     this.selectedRole.set(name);
+  }}
+
+  async createRole(): Promise<void> {{
+    const name = this.newRoleName().trim();
+    if (!name) return;
+    await fetch('{version_prefix}/ho_admin/roles', {{
+      method: 'POST',
+      headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
+      body: JSON.stringify({{name, parent_name: this.newRoleParent()}}),
+    }});
+    this.newRoleName.set('');
+    this.showNewRole.set(false);
+    const res = await fetch('{version_prefix}/ho_admin/roles', {{headers: this._hdrs}});
+    if (res.ok) this.roles.set(await res.json() as RoleInfo[]);
+  }}
+
+  async deleteRole(name: string): Promise<void> {{
+    if (!confirm(`Delete role "${{name}}"?`)) return;
+    await fetch(`{version_prefix}/ho_admin/roles/${{name}}`, {{
+      method: 'DELETE', headers: this._hdrs,
+    }});
+    if (this.selectedRole() === name) this.selectedRole.set(null);
+    const res = await fetch('{version_prefix}/ho_admin/roles', {{headers: this._hdrs}});
+    if (res.ok) this.roles.set(await res.json() as RoleInfo[]);
+  }}
+
+  isInheritedField(field: string, dir: 'in' | 'out'): boolean {{
+    const inh = this.panelInheritedEntry();
+    if (!inh) return false;
+    return dir === 'out' ? inh.out.includes(field) : inh.in.includes(field);
+  }}
+
+  async overrideVerb(resource: string, verb: string): Promise<void> {{
+    await this.toggleAccess(resource, verb, true);
   }}
 
   async toggleAccess(resource: string, verb: string, enable: boolean): Promise<void> {{
@@ -334,14 +467,22 @@ export class HoAdminComponent implements OnInit {{
     await this._reloadCatalog();
   }}
 
-  async updateAllFields(dir: 'in' | 'out', value: boolean): Promise<void> {{
-    const acc = this.panelAccess();
-    if (!acc) return;
-    const body = dir === 'in' ? {{all_fields_in: value}} : {{all_fields_out: value}};
-    await fetch(`{version_prefix}/ho_admin/access/${{acc.id}}`, {{
-      method: 'PUT',
+  async addAllFields(dir: 'in' | 'out'): Promise<void> {{
+    const acc  = this.panelAccess();
+    const info = this.panelInfo();
+    if (!acc || !info) return;
+    const existing = dir === 'in' ? acc.in : acc.out;
+    const toAdd = info.fields.filter(f =>
+      !this.isInheritedField(f, dir) &&
+      !existing.includes(f) &&
+      !(dir === 'in' && info.fields_with_defaults.includes(f))
+    );
+    if (toAdd.length === 0) return;
+    const endpoint = dir === 'in' ? 'field_access_in' : 'field_access_out';
+    await fetch(`{version_prefix}/ho_admin/${{endpoint}}/batch`, {{
+      method: 'POST',
       headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
-      body: JSON.stringify(body),
+      body: JSON.stringify({{access_id: acc.id, field_names: toAdd}}),
     }});
     await this._reloadCatalog();
   }}

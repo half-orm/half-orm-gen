@@ -171,7 +171,7 @@ function escHtml(s: string): string {
 def _auth_store(version_prefix: str) -> str:
     return f"""\
 import {{ goto }} from '$app/navigation';
-import {{ clearAllStates }} from '$lib/stateRegistry';
+import {{ clearAllStates, clearStateForKey }} from '$lib/stateRegistry';
 
 export type WsEvent = {{ event: 'create' | 'update' | 'delete' | 'access_reload'; resource: string; id: unknown }};
 
@@ -179,9 +179,12 @@ class AuthState {{
     token         = $state<string | null>(
         typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
     );
-    access        = $state<Record<string, any>>({{}});
-    lastEvent     = $state<WsEvent | null>(null);
-    fetchedRoutes = new Set<string>();
+    access                = $state<Record<string, any>>({{}});
+    roles                 = $state<string[]>([]);
+    lastEvent             = $state<WsEvent | null>(null);
+    accessVersion         = $state(0);
+    resourceAccessVersion = $state<Record<string, number>>({{}});
+    fetchedRoutes         = new Set<string>();
 
     login(t: string) {{
         sessionStorage.setItem('ho_token', t);
@@ -189,6 +192,7 @@ class AuthState {{
         this.fetchedRoutes = new Set();
         clearAllStates();
         this._fetchAccess();
+        this._fetchRoles();
     }}
 
     logout() {{
@@ -212,6 +216,32 @@ class AuthState {{
         }}
     }}
 
+    async _fetchRoles() {{
+        try {{
+            const res = await fetch('{version_prefix}/ho_roles');
+            if (res.ok) this.roles = await res.json();
+        }} catch {{}}
+    }}
+
+    async _reloadAccess(resource?: string) {{
+        if (resource) {{
+            for (const url of [...this.fetchedRoutes]) {{
+                if (url.includes(`/${{resource}}`)) this.fetchedRoutes.delete(url);
+            }}
+            clearStateForKey(resource);
+            await this._fetchAccess();
+            this.resourceAccessVersion = {{
+                ...this.resourceAccessVersion,
+                [resource]: (this.resourceAccessVersion[resource] ?? 0) + 1,
+            }};
+        }} else {{
+            this.fetchedRoutes = new Set();
+            clearAllStates();
+            await Promise.all([this._fetchAccess(), this._fetchRoles()]);
+            this.accessVersion++;
+        }}
+    }}
+
     _connectWs() {{
         const base = (import.meta.env.VITE_WS_BASE ?? '').replace(/^http/, 'ws')
                      || `${{window.location.protocol === 'https:' ? 'wss' : 'ws'}}://${{window.location.host}}`;
@@ -219,7 +249,7 @@ class AuthState {{
         ws.onmessage = (e) => {{
             try {{
                 const msg = JSON.parse(e.data) as WsEvent;
-                if (msg.event === 'access_reload') {{ void this._fetchAccess(); }}
+                if (msg.event === 'access_reload') {{ void this._reloadAccess((msg as any).resource); }}
                 else {{ this.lastEvent = msg; }}
             }} catch {{}}
         }};
@@ -232,6 +262,7 @@ export const auth = new AuthState();
 
 if (typeof window !== 'undefined') {{
     auth._fetchAccess();
+    auth._fetchRoles();
     auth._connectWs();
 }}
 """
@@ -278,18 +309,8 @@ def _access_page(version_prefix: str) -> str:
     return f"""\
 <script lang="ts">
   import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ onMount }} from 'svelte';
-
-  let roles        = $state<string[]>([]);
-  let rolesLoading = $state(true);
 
   const activeRole = $derived(auth.token ?? 'anonymous');
-
-  onMount(() => {{
-    fetch('{version_prefix}/ho_roles')
-      .then(r => r.json())
-      .then(d => {{ roles = d; rolesLoading = false; }});
-  }});
 
   function selectRole(role: string) {{
     if (role === 'anonymous') auth.logout();
@@ -307,11 +328,11 @@ def _access_page(version_prefix: str) -> str:
 <div class="flex h-full gap-6">
   <div class="w-44 shrink-0">
     <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Roles</h2>
-    {{#if rolesLoading}}
+    {{#if auth.roles.length === 0}}
       <p class="text-gray-400 text-sm">Loading…</p>
     {{:else}}
       <div class="space-y-1">
-        {{#each roles as role}}
+        {{#each auth.roles as role}}
           <button
             onclick={{() => selectRole(role)}}
             class="w-full text-left px-3 py-2 rounded text-sm transition-colors
@@ -532,18 +553,10 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
   import {{ page }} from '$app/state';
-  import {{ onMount }} from 'svelte';
 
   let {{ children }} = $props();
   let navFilter  = $state('');
-  let roles      = $state<string[]>([]);
   let menuOpen   = $state(!auth.token);
-
-  onMount(() => {{
-    fetch('{version_prefix}/ho_roles')
-      .then(r => r.ok ? r.json() : [])
-      .then((d: string[]) => {{ roles = d; }});
-  }});
 
   function selectRole(role: string) {{
     auth.login(role);
@@ -582,10 +595,10 @@ def _layout(resources: list, version_prefix: str = '') -> str:
       </button>
       {{#if menuOpen}}
         <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-44 py-1">
-          {{#if roles.length === 0}}
+          {{#if auth.roles.length === 0}}
             <p class="px-4 py-2 text-xs text-gray-400">Loading…</p>
           {{:else}}
-            {{#each roles as role}}
+            {{#each auth.roles as role}}
               <button onclick={{() => selectRole(role)}}
                       class="w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition-colors
                              {{auth.token === role ? 'font-semibold text-blue-600' : 'text-gray-700'}}">
@@ -907,6 +920,8 @@ def _list_component(
 
   $effect(() => {{
     void auth.token;
+    void auth.accessVersion;
+    void (auth.resourceAccessVersion as any)[silo.key];
     void silo.list(filters);
   }});
 
@@ -1571,8 +1586,11 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(output_dir / 'src' / 'lib' / 'latex.ts', _LATEX_TS)
         self._write(output_dir / 'src' / 'lib' / 'stateRegistry.ts',
             "const _fns: Array<() => void> = [];\n"
+            "const _keyFns = new Map<string, () => void>();\n"
             "export const registerClear = (fn: () => void): void => { _fns.push(fn); };\n"
+            "export const registerClearForKey = (key: string, fn: () => void): void => { _keyFns.set(key, fn); };\n"
             "export const clearAllStates = (): void => { _fns.forEach(fn => fn()); };\n"
+            "export const clearStateForKey = (key: string): void => { _keyFns.get(key)?.(); };\n"
         )
         self._write(output_dir / 'src' / 'lib' / 'auth.svelte.ts', _auth_store(version_prefix))
         env_local = output_dir / '.env.local'

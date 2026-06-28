@@ -16,6 +16,7 @@ from litestar.logging import LoggingConfig
 
 from half_orm_gen.backend.ho_api.loader import (
     load_crud_access,
+    load_role_parents,
     ensure_system_roles,
     reconcile_catalog,
 )
@@ -25,6 +26,7 @@ from half_orm_gen.backend.crud_helpers import (
     _effective_out_fields, _effective_in_fields,
     _resolved_out, _resolved_in,
     _parse_q, _build_access_entry, _filter_access_for_roles,
+    _expand_roles,
     _ws_broadcast_cascade,
 )
 
@@ -122,6 +124,7 @@ def _pk_info(cls) -> list[tuple[str, str]]:
 def _make_list_handler(
     path: str, cls, resource: str,
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
+    parent_map_holder: list,
 ):
     slug = resource.replace('/', '_')
 
@@ -134,7 +137,7 @@ def _make_list_handler(
     ) -> dict:
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
-        roles = _get_roles(request)
+        roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         filter_kwargs: dict = {}
         search_cols: list[str] = []
         range_filters: list = []
@@ -174,6 +177,7 @@ def _make_get_handler(
     path: str, cls, resource: str,
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
     pk_info: list[tuple[str, str]],
+    parent_map_holder: list,
 ):
     pk_names = [p[0] for p in pk_info]
     is_simple = len(pk_names) == 1
@@ -183,7 +187,7 @@ def _make_get_handler(
     async def handler(request: Request, id: str) -> dict:
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
-        roles = _get_roles(request)
+        roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         role_filter = _get_role_filter(crud_access, 'GET', roles)
         authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded, all_fields_by_res.get(resource, []))
         if not authorized:
@@ -202,13 +206,14 @@ def _make_post_handler(
     path: str, cls, resource: str,
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
     pk_name: str,
+    parent_map_holder: list,
 ):
     slug = resource.replace('/', '_')
 
     async def handler(request: Request, data: dict[str, Any]) -> dict:
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
-        roles = _get_roles(request)
+        roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         if not crud_access.get('POST'):
             raise HTTPException(status_code=403)
         in_fields = _effective_in_fields(crud_access, 'POST', roles, api_excluded, all_fields_by_res.get(resource, []))
@@ -231,6 +236,7 @@ def _make_put_handler(
     path: str, cls, resource: str,
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
     pk_info: list[tuple[str, str]],
+    parent_map_holder: list,
 ):
     pk_names = [p[0] for p in pk_info]
     is_simple = len(pk_names) == 1
@@ -240,7 +246,7 @@ def _make_put_handler(
     async def handler(request: Request, id: str, data: dict[str, Any]) -> dict:
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
-        roles = _get_roles(request)
+        roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         if not crud_access.get('PUT'):
             raise HTTPException(status_code=403)
         in_fields = _effective_in_fields(crud_access, 'PUT', roles, api_excluded, all_fields_by_res.get(resource, []))
@@ -268,6 +274,7 @@ def _make_delete_handler(
     crud_access_by_res: dict, api_excluded_by_res: dict,
     pk_info: list[tuple[str, str]],
     ws_rmap: dict,
+    parent_map_holder: list,
 ):
     pk_names = [p[0] for p in pk_info]
     is_simple = len(pk_names) == 1
@@ -276,7 +283,7 @@ def _make_delete_handler(
 
     async def handler(request: Request, id: str) -> None:
         crud_access = crud_access_by_res.get(resource, {})
-        roles = _get_roles(request)
+        roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         if not crud_access.get('DELETE'):
             raise HTTPException(status_code=403)
         pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
@@ -310,12 +317,12 @@ def _make_ho_roles(roles_holder: list, prefix: str):
     return ho_roles
 
 
-def _make_ho_access(access_map_holder: list, model, prefix: str):
+def _make_ho_access(access_map_holder: list, parent_map_holder: list, model, prefix: str):
     """access_map_holder[0] is the access map, populated at startup."""
     @get(f'{prefix}/ho_access')
     async def ho_access(request: Request) -> dict:
         roles = _get_roles(request)
-        return _filter_access_for_roles(access_map_holder[0], roles)
+        return _filter_access_for_roles(access_map_holder[0], roles, parent_map_holder[0])
     return ho_access
 
 
@@ -373,8 +380,9 @@ def build_crud_app(
     crud_access_by_res: dict[str, dict]  = {}
     api_excluded_by_res: dict[str, list] = {}
     all_fields_by_res: dict[str, list]   = {}
-    access_map_holder: list = [{}]   # access_map_holder[0] = actual map
-    roles_holder: list     = [[]]    # roles_holder[0]      = sorted roles list
+    access_map_holder: list  = [{}]   # access_map_holder[0]  = actual map
+    parent_map_holder: list  = [{}]   # parent_map_holder[0]  = {role: parent_name}
+    roles_holder: list       = [[]]   # roles_holder[0]       = sorted roles list
 
     ws_rmap: dict = {}
     relation_handlers: list = []
@@ -401,29 +409,29 @@ def build_crud_app(
             ws_rmap[resource] = (cls, pk_info[0][0])
 
         relation_handlers.append(
-            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res)
+            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder)
         )
         if pk_info:
             relation_handlers.append(
-                _make_get_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info)
+                _make_get_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info, parent_map_holder)
             )
             relation_handlers.append(
-                _make_post_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info[0][0])
+                _make_post_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info[0][0], parent_map_holder)
             )
             relation_handlers.append(
-                _make_put_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info)
+                _make_put_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info, parent_map_holder)
             )
             relation_handlers.append(
-                _make_delete_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info, ws_rmap)
+                _make_delete_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info, ws_rmap, parent_map_holder)
             )
 
     from half_orm_gen.backend.litestar.v2.ho_admin import make_ho_admin_handlers
     special_handlers = [
         _make_ho_meta(model, prefix),
         _make_ho_roles(roles_holder, prefix),
-        _make_ho_access(access_map_holder, model, prefix),
+        _make_ho_access(access_map_holder, parent_map_holder, model, prefix),
         _make_ws_handler(prefix),
-        *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder),
+        *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
     ]
 
     logging_config = LoggingConfig(
@@ -477,6 +485,7 @@ def build_crud_app(
 
         access_map_holder[0] = access_map
         roles_holder[0] = sorted(roles_set - {'anonymous'})
+        parent_map_holder[0] = await load_role_parents(model)
 
     return Litestar(
         route_handlers=special_handlers + relation_handlers + (route_handlers or []),

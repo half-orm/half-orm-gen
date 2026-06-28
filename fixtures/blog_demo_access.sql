@@ -1,4 +1,4 @@
--- blog_demo access rules — translation of the former CRUD_ACCESS Python dicts.
+-- blog_demo access rules.
 -- Run after `half_orm gen api` (which seeds routes and fields via reconcile_catalog).
 
 BEGIN;
@@ -6,13 +6,13 @@ BEGIN;
 -- ── blog.author ───────────────────────────────────────────────────────────────
 
 INSERT INTO "half_orm_meta.api".access
-    (role_name, schema_name, table_name, verb, all_fields_in, all_fields_out)
+    (role_name, schema_name, table_name, verb)
 VALUES
-    ('anonymous', 'blog', 'author', 'GET',    FALSE, FALSE),
-    ('connected', 'blog', 'author', 'GET',    FALSE, TRUE),
-    ('connected', 'blog', 'author', 'POST',   FALSE, TRUE),
-    ('connected', 'blog', 'author', 'PUT',    FALSE, TRUE),
-    ('admin',     'blog', 'author', 'DELETE', TRUE,  TRUE)
+    ('anonymous', 'blog', 'author', 'GET'),
+    ('connected', 'blog', 'author', 'GET'),
+    ('connected', 'blog', 'author', 'POST'),
+    ('connected', 'blog', 'author', 'PUT'),
+    ('admin',     'blog', 'author', 'DELETE')
 ON CONFLICT (role_name, schema_name, table_name, verb) DO NOTHING;
 
 -- anonymous/GET: out = [id, name]
@@ -24,7 +24,16 @@ WHERE a.role_name = 'anonymous'
   AND a.schema_name = 'blog' AND a.table_name = 'author' AND a.verb = 'GET'
 ON CONFLICT DO NOTHING;
 
--- connected/POST: in = [name, email]
+-- connected/GET: out = [id, name, email]
+INSERT INTO "half_orm_meta.api".field_access_out (access_id, field_name)
+SELECT a.id, f.field_name
+FROM "half_orm_meta.api".access a
+CROSS JOIN (VALUES ('id'), ('name'), ('email')) AS f(field_name)
+WHERE a.role_name = 'connected'
+  AND a.schema_name = 'blog' AND a.table_name = 'author' AND a.verb = 'GET'
+ON CONFLICT DO NOTHING;
+
+-- connected/POST: in = [name, email]  (out falls back to connected/GET out)
 INSERT INTO "half_orm_meta.api".field_access_in (access_id, field_name)
 SELECT a.id, f.field_name
 FROM "half_orm_meta.api".access a
@@ -33,7 +42,7 @@ WHERE a.role_name = 'connected'
   AND a.schema_name = 'blog' AND a.table_name = 'author' AND a.verb = 'POST'
 ON CONFLICT DO NOTHING;
 
--- connected/PUT: in = [name, email]
+-- connected/PUT: in = [name, email]  (out falls back to connected/GET out)
 INSERT INTO "half_orm_meta.api".field_access_in (access_id, field_name)
 SELECT a.id, f.field_name
 FROM "half_orm_meta.api".access a
@@ -48,13 +57,13 @@ ON CONFLICT DO NOTHING;
 -- here — it will be re-implemented as a @ho_api_role method in blog/post.py.
 
 INSERT INTO "half_orm_meta.api".access
-    (role_name, schema_name, table_name, verb, all_fields_in, all_fields_out)
+    (role_name, schema_name, table_name, verb)
 VALUES
-    ('anonymous', 'blog', 'post', 'GET',    FALSE, FALSE),
-    ('connected', 'blog', 'post', 'GET',    FALSE, TRUE),
-    ('connected', 'blog', 'post', 'POST',   FALSE, TRUE),
-    ('connected', 'blog', 'post', 'PUT',    FALSE, TRUE),
-    ('admin',     'blog', 'post', 'DELETE', TRUE,  TRUE)
+    ('anonymous', 'blog', 'post', 'GET'),
+    ('connected', 'blog', 'post', 'GET'),
+    ('connected', 'blog', 'post', 'POST'),
+    ('connected', 'blog', 'post', 'PUT'),
+    ('admin',     'blog', 'post', 'DELETE')
 ON CONFLICT (role_name, schema_name, table_name, verb) DO NOTHING;
 
 -- anonymous/GET: out = [id, title, published, author_id]
@@ -66,7 +75,16 @@ WHERE a.role_name = 'anonymous'
   AND a.schema_name = 'blog' AND a.table_name = 'post' AND a.verb = 'GET'
 ON CONFLICT DO NOTHING;
 
--- connected/POST: in = [title, content, author_id]
+-- connected/GET: out = [id, title, content, published, author_id]
+INSERT INTO "half_orm_meta.api".field_access_out (access_id, field_name)
+SELECT a.id, f.field_name
+FROM "half_orm_meta.api".access a
+CROSS JOIN (VALUES ('id'), ('title'), ('content'), ('published'), ('author_id')) AS f(field_name)
+WHERE a.role_name = 'connected'
+  AND a.schema_name = 'blog' AND a.table_name = 'post' AND a.verb = 'GET'
+ON CONFLICT DO NOTHING;
+
+-- connected/POST: in = [title, content, author_id]  (out falls back to connected/GET out)
 INSERT INTO "half_orm_meta.api".field_access_in (access_id, field_name)
 SELECT a.id, f.field_name
 FROM "half_orm_meta.api".access a
@@ -75,7 +93,7 @@ WHERE a.role_name = 'connected'
   AND a.schema_name = 'blog' AND a.table_name = 'post' AND a.verb = 'POST'
 ON CONFLICT DO NOTHING;
 
--- connected/PUT: in = [title, content, published]
+-- connected/PUT: in = [title, content, published]  (out falls back to connected/GET out)
 INSERT INTO "half_orm_meta.api".field_access_in (access_id, field_name)
 SELECT a.id, f.field_name
 FROM "half_orm_meta.api".access a
@@ -88,11 +106,11 @@ ON CONFLICT DO NOTHING;
 -- ── blog.comment ──────────────────────────────────────────────────────────────
 
 INSERT INTO "half_orm_meta.api".access
-    (role_name, schema_name, table_name, verb, all_fields_in, all_fields_out)
+    (role_name, schema_name, table_name, verb)
 VALUES
-    ('anonymous', 'blog', 'comment', 'GET',    FALSE, FALSE),
-    ('connected', 'blog', 'comment', 'POST',   FALSE, TRUE),
-    ('admin',     'blog', 'comment', 'DELETE', TRUE,  TRUE)
+    ('anonymous', 'blog', 'comment', 'GET'),
+    ('connected', 'blog', 'comment', 'POST'),
+    ('admin',     'blog', 'comment', 'DELETE')
 ON CONFLICT (role_name, schema_name, table_name, verb) DO NOTHING;
 
 -- anonymous/GET: out = [id, content, post_id, author_id, comment_type]
@@ -117,9 +135,17 @@ ON CONFLICT DO NOTHING;
 -- ── blog.comment_type ─────────────────────────────────────────────────────────
 
 INSERT INTO "half_orm_meta.api".access
-    (role_name, schema_name, table_name, verb, all_fields_in, all_fields_out)
+    (role_name, schema_name, table_name, verb)
 VALUES
-    ('anonymous', 'blog', 'comment_type', 'GET', FALSE, TRUE)
+    ('anonymous', 'blog', 'comment_type', 'GET')
 ON CONFLICT (role_name, schema_name, table_name, verb) DO NOTHING;
+
+-- anonymous/GET: out = [name]  (only column of comment_type)
+INSERT INTO "half_orm_meta.api".field_access_out (access_id, field_name)
+SELECT a.id, 'name'
+FROM "half_orm_meta.api".access a
+WHERE a.role_name = 'anonymous'
+  AND a.schema_name = 'blog' AND a.table_name = 'comment_type' AND a.verb = 'GET'
+ON CONFLICT DO NOTHING;
 
 COMMIT;

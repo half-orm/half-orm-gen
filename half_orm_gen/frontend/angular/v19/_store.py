@@ -16,7 +16,7 @@ def _store(
     lines.append("import { inject } from '@angular/core';")
     lines.append("import { catchError, filter, of, tap } from 'rxjs';")
     lines.append("import { AuthService } from '../../core/auth.service';")
-    lines.append("import { registerClear } from '../../core/state-registry';")
+    lines.append("import { registerClear, registerClearForKey } from '../../core/state-registry';")
     lines.append('')
 
     def _interface(name: str, field_names: list) -> list:
@@ -67,13 +67,18 @@ def _store(
         map_key_store = f'{schema_name}/{table_name}'
         lines.append(f'  constructor() {{')
         lines.append(f'    registerClear(() => this.clear());')
+        lines.append(f"    registerClearForKey('{map_key_store}', () => this.clear());")
         lines.append(f"    this.auth.wsEvent$.pipe(filter(ev => ev.resource === '{map_key_store}')).subscribe(ev => {{")
         lines.append(f"      if (ev.event === 'delete') this.removeItem(String(ev.id));")
         lines.append(f"      else this.refresh(String(ev.id)).subscribe();")
         lines.append(f'    }});')
         lines.append(f'  }}')
     else:
-        lines.append('  constructor() { registerClear(() => this.clear()); }')
+        map_key_store = f'{schema_name}/{table_name}'
+        lines.append(f"  constructor() {{")
+        lines.append(f"    registerClear(() => this.clear());")
+        lines.append(f"    registerClearForKey('{map_key_store}', () => this.clear());")
+        lines.append(f"  }}")
     lines.append('')
     lines.append('  private get headers(): HttpHeaders {')
     lines.append('    const t = this.auth.token();')
@@ -206,11 +211,11 @@ def _store(
         lines.append(f'    this.items.set(this.items().filter(i => ({pk_extractor})(i) !== id));')
         lines.append('  }')
         lines.append('')
-        lines.append('  clear(): void { this.items.set([]); this.byPk.set(new Map()); }')
+        lines.append('  clear(): void { this.items.set([]); this.byPk.set(new Map()); this.loadedFilters.clear(); this.hasMore.set(true); this.currentOffset.set(0); }')
     else:
         lines.append(f'  setItems(data: {iname}Out[]): void {{ this.items.set(data); }}')
         lines.append(f'  mergeItems(data: {iname}Out[]): void {{ this.items.set([...this.items(), ...data]); }}')
-        lines.append('  clear(): void { this.items.set([]); }')
+        lines.append('  clear(): void { this.items.set([]); this.loadedFilters.clear(); this.hasMore.set(true); this.currentOffset.set(0); }')
 
     lines.append('}')
     lines.append('')

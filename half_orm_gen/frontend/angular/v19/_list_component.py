@@ -289,6 +289,8 @@ export class {iname}ListComponent {{
 
     effect(() => {{
       const _token = this.auth.token();
+      const _v    = this.auth.accessVersion();
+      const _rv   = this.auth.resourceAccessVersion()['{map_key}'];
       this.silo.list(this.filters);
     }});{ws_effect}
 

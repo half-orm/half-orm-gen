@@ -32,6 +32,10 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
             role    = acc['role_name']
             acc_id  = acc['id']
 
+            if verb == 'DELETE':
+                verb_dict[role] = 'allowed'
+                continue
+
             out_rows = await api.field_access_out()(access_id=acc_id).ho_aselect('field_name')
             in_rows  = await api.field_access_in()(access_id=acc_id).ho_aselect('field_name')
 
@@ -42,19 +46,19 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
                 if f:
                     filter_names.append(f[0]['name'])
 
-            # all_fields_* = TRUE  → None (all fields, CRUD_ACCESS semantics)
-            # all_fields_* = FALSE → explicit list (may be empty = no fields)
-            out    = None if acc['all_fields_out'] else [r['field_name'] for r in out_rows]
-            in_val = None if acc['all_fields_in']  else [r['field_name'] for r in in_rows]
+            out_list = [r['field_name'] for r in out_rows]
+            in_list  = [r['field_name'] for r in in_rows]
 
             entry: dict = {}
-            if out is not None:
-                entry['out'] = out
-            if in_val is not None:
-                entry['in'] = in_val
+            # GET always has 'out'; POST/PUT include 'out' only when explicitly set
+            # (absent 'out' triggers fallback to GET out in _resolved_out)
+            if verb == 'GET' or out_list:
+                entry['out'] = out_list
+            if verb in ('POST', 'PUT') and in_list:
+                entry['in'] = in_list
             if filter_names:
                 entry['filters'] = filter_names
-            verb_dict[role] = entry or None
+            verb_dict[role] = entry
 
         crud_access[verb] = verb_dict
 
@@ -62,9 +66,9 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
 
 
 _SYSTEM_ROLES = [
-    ('anonymous', False),
-    ('connected', False),
-    ('admin',     False),
+    ('anonymous', False, None),
+    ('connected', False, 'anonymous'),
+    ('admin',     False, 'connected'),
 ]
 
 
@@ -72,9 +76,16 @@ async def ensure_system_roles(model) -> None:
     """Insert each system role individually if not already present."""
     api = HoApiModels(model)
     Role = api.role()
-    for name, deletable in _SYSTEM_ROLES:
+    for name, deletable, parent_name in _SYSTEM_ROLES:
         if not await Role(name=name).ho_aselect('name'):
-            await Role(name=name, deletable=deletable).ho_ainsert()
+            await Role(name=name, deletable=deletable, parent_name=parent_name).ho_ainsert()
+
+
+async def load_role_parents(model) -> dict[str, str | None]:
+    """Return {role_name: parent_name} for all roles."""
+    api = HoApiModels(model)
+    rows = await api.role()().ho_aselect('name', 'parent_name')
+    return {r['name']: r['parent_name'] for r in rows}
 
 
 async def reconcile_catalog(model) -> None:

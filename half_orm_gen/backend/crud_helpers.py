@@ -60,23 +60,11 @@ def _effective_out_fields(
 ) -> list | None:
     """Return the list of fields the caller may read for this verb.
 
-    Resolution order (first match wins across all authorized roles):
-      - role entry is None          → all non-excluded fields  (DB: all_fields_out=True,
-                                       all_fields_in=True simultaneously)
-      - role entry has 'out': None  → all non-excluded fields  (DB: all_fields_out=True)
-      - role entry has 'out': [..] → those fields minus api_excluded
-      - no 'out' key on non-GET verb → falls back to GET out fields for that role
-
-    After merging contributions from all matching roles:
-      - non-empty list → caller may read exactly those fields
-      - None           → not authorized (no role matched) OR config error (verb granted
-                         but no out fields selected); caller must raise 403
-
-    Never returns []: the empty-list path is collapsed to None so callers only
-    need a single ``if not authorized`` check.
+    For non-GET verbs without an explicit 'out', falls back to the GET out
+    fields for that role. Returns None when no role matched (→ 403).
+    Never returns [].
     """
     api_excluded = api_excluded or []
-    _all = [f for f in (all_field_names or []) if f not in api_excluded]
     role_map = crud_access.get(verb, {})
     get_map  = crud_access.get('GET', {})
     fields: list[str] = []
@@ -87,19 +75,18 @@ def _effective_out_fields(
         matched = True
         rv = role_map[role]
         if isinstance(rv, dict):
-            out = rv.get('out') if 'out' in rv else (
-                get_map.get(role) if not isinstance(get_map.get(role), dict)
-                else get_map.get(role, {}).get('out')
-            )
+            if 'out' in rv:
+                out = rv['out'] or []
+            else:
+                get_rv = get_map.get(role)
+                out = get_rv.get('out') or [] if isinstance(get_rv, dict) else []
         else:
-            out = rv
-        if out is None:  # all_fields_out=True
-            return _all
+            out = []
         fields.extend(f for f in out if f not in api_excluded)
     if not matched:
-        return None  # not authorized
+        return None
     result = list(dict.fromkeys(fields))
-    return result if result else None  # empty = config error → 403
+    return result if result else None
 
 
 def _effective_in_fields(
@@ -111,65 +98,41 @@ def _effective_in_fields(
 ) -> list:
     """Return the list of fields the caller may write for this verb.
 
-    Mirrors _effective_out_fields but for writable fields. Resolution order
-    (first match wins across all authorized roles):
-      - role entry is None         → all non-excluded fields  (all_fields_in + all_fields_out)
-      - role entry has 'in': None  → all non-excluded fields  (all_fields_in=True)
-      - role entry has 'in': [..] → those fields minus api_excluded
-
-    Returns [] (empty list) when no role matched OR verb was granted with no 'in'
-    fields selected — caller must raise 403 in both cases.
-    Unlike _effective_out_fields, returns [] rather than None so callers can do
-    ``if not in_fields`` without needing to distinguish the two failure modes.
+    Returns [] when no role matched or no 'in' fields configured → caller raises 403.
     """
     api_excluded = api_excluded or []
-    _all = [f for f in (all_field_names or []) if f not in api_excluded]
     role_map = crud_access.get(verb, {})
     fields: list[str] = []
     for role in authorized_roles:
         if role not in role_map:
             continue
         rv = role_map[role]
-        if rv is None:  # all_fields_in=True AND all_fields_out=True
-            return _all
         if not isinstance(rv, dict):
             continue
-        in_val = rv.get('in')
-        if in_val is None:  # all_fields_in=True
-            return _all
-        fields.extend(f for f in in_val if f not in api_excluded)
-    return list(dict.fromkeys(fields))  # [] = config error → caller raises 403
+        fields.extend(f for f in (rv.get('in') or []) if f not in api_excluded)
+    return list(dict.fromkeys(fields))
 
 
-def _resolved_out(crud_access: dict, verb: str, role: str):
-    """Resolve the raw 'out' value for a single (verb, role) pair.
+def _resolved_out(crud_access: dict, verb: str, role: str) -> list:
+    """Resolve the 'out' field list for a single (verb, role) pair.
 
-    For GET/DELETE: returns the entry value directly (no fallback needed).
-    For POST/PUT: reads the 'out' key if present; otherwise falls back to the
-    GET entry for the same role (same logic as _effective_out_fields). Returns
-    None when no out value is configured.
+    For POST/PUT without explicit 'out', falls back to GET out for that role.
     """
     rv = crud_access.get(verb, {}).get(role)
-    if verb in ('GET', 'DELETE'):
-        return rv
     if not isinstance(rv, dict):
-        return None
+        return []
     if 'out' in rv:
         return rv['out']
     get_rv = crud_access.get('GET', {}).get(role)
-    return get_rv if not isinstance(get_rv, dict) else get_rv.get('out')
+    return get_rv.get('out', []) if isinstance(get_rv, dict) else []
 
 
-def _resolved_in(crud_access: dict, verb: str, role: str):
-    """Resolve the raw 'in' value for a single (verb, role) pair.
-
-    Returns the 'in' key from the role's dict entry, or None if the entry is
-    not a dict or has no 'in' key.
-    """
+def _resolved_in(crud_access: dict, verb: str, role: str) -> list:
+    """Resolve the 'in' field list for a single (verb, role) pair."""
     rv = crud_access.get(verb, {}).get(role)
     if not isinstance(rv, dict):
-        return None
-    return rv.get('in')
+        return []
+    return rv.get('in', [])
 
 
 # ---------------------------------------------------------------------------
@@ -193,29 +156,43 @@ def _build_access_entry(crud_access: dict, api_excluded: list, all_field_names: 
         verb_entry: dict = {}
         for role, rv in roles.items():
             if verb == 'GET':
-                out = rv if not isinstance(rv, dict) else rv.get('out')
+                rv = roles[role]
+                out = rv.get('out', []) if isinstance(rv, dict) else []
                 verb_entry[role] = {
-                    'out': (
-                        [f for f in all_field_names if f not in api_excluded]
-                        if out is None else [f for f in out if f not in api_excluded]
-                    )
+                    'out': [f for f in out if f not in api_excluded]
                 }
             elif verb == 'DELETE':
                 verb_entry[role] = 'allowed'
             else:
-                in_val = _resolved_in(crud_access, verb, role)
+                in_val  = _resolved_in(crud_access, verb, role)
                 out_val = _resolved_out(crud_access, verb, role)
-                all_f = [f for f in all_field_names if f not in api_excluded]
                 verb_entry[role] = {
-                    'in':  all_f if in_val is None else [f for f in in_val if f not in api_excluded],
-                    'out': all_f if out_val is None else [f for f in out_val if f not in api_excluded],
+                    'in':  [f for f in in_val  if f not in api_excluded],
+                    'out': [f for f in out_val if f not in api_excluded],
                 }
         if verb_entry:
             entry[verb] = verb_entry
     return entry
 
 
-def _filter_access_for_roles(access_map: dict, authorized_roles: list[str]) -> dict:
+def _expand_roles(roles: list[str], parent_map: dict[str, str | None]) -> list[str]:
+    """Return roles + all ancestors (child before parent), without duplicates."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for role in roles:
+        current: str | None = role
+        while current and current not in seen:
+            seen.add(current)
+            result.append(current)
+            current = parent_map.get(current)
+    return result
+
+
+def _filter_access_for_roles(
+    access_map: dict,
+    authorized_roles: list[str],
+    parent_map: dict[str, str | None] | None = None,
+) -> dict:
     """Filter the full access map down to what the caller's roles can see.
 
     Used by the /ho_access endpoint to expose only the relevant subset of
@@ -223,6 +200,8 @@ def _filter_access_for_roles(access_map: dict, authorized_roles: list[str]) -> d
     roles (union). DELETE is collapsed to a boolean. Resources/verbs with no
     matching role are omitted entirely.
     """
+    if parent_map:
+        authorized_roles = _expand_roles(authorized_roles, parent_map)
     result: dict = {}
     for resource, verbs in access_map.items():
         resource_entry: dict = {}

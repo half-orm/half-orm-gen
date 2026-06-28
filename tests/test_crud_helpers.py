@@ -106,20 +106,20 @@ class TestEffectiveOutFields:
         result = _effective_out_fields({}, 'GET', ['anonymous'], [], ALL_FIELDS)
         assert result is None
 
-    # --- all_fields_out (rv=None → all fields both in+out) ---
+    # --- rv=None (role matched but no fields configured) ---
 
-    def test_rv_none_returns_all_non_excluded(self):
-        # rv=None means all_fields_in=True AND all_fields_out=True
+    def test_rv_none_role_matched_no_fields(self):
+        # rv=None: role is present but has no out fields → no access
         ca = {'GET': {'reader': None}}
         result = _effective_out_fields(ca, 'GET', ['reader'], EXCLUDED, ALL_FIELDS)
-        assert result == NON_EXCL
+        assert result is None
 
-    # --- all_fields_out=True encoded as 'out': None in dict ---
+    # --- 'out': None treated defensively as empty list ---
 
-    def test_out_none_in_dict_returns_all_non_excluded(self):
+    def test_out_none_in_dict_treated_as_empty(self):
         ca = {'GET': {'reader': {'out': None}}}
         result = _effective_out_fields(ca, 'GET', ['reader'], EXCLUDED, ALL_FIELDS)
-        assert result == NON_EXCL
+        assert result is None
 
     # --- specific fields ---
 
@@ -151,13 +151,13 @@ class TestEffectiveOutFields:
         result = _effective_out_fields(ca, 'GET', ['r1', 'r2'], [], ALL_FIELDS)
         assert set(result) == {'id', 'title', 'author_id'}
 
-    def test_any_role_with_all_fields_short_circuits(self):
+    def test_role_with_none_rv_contributes_no_fields(self):
         ca = {'GET': {
             'r1': {'out': ['id']},
-            'r2': None,  # all fields
+            'r2': None,
         }}
         result = _effective_out_fields(ca, 'GET', ['r1', 'r2'], EXCLUDED, ALL_FIELDS)
-        assert result == NON_EXCL
+        assert result == ['id']
 
     # --- fallback to GET out for non-GET verb without 'out' key ---
 
@@ -186,19 +186,19 @@ class TestEffectiveOutFields:
 
 class TestEffectiveInFields:
 
-    # --- all fields (rv=None) ---
+    # --- rv=None (not a dict → no in fields) ---
 
-    def test_rv_none_returns_all_non_excluded(self):
+    def test_rv_none_returns_empty_list(self):
         ca = {'POST': {'editor': None}}
         result = _effective_in_fields(ca, 'POST', ['editor'], EXCLUDED, ALL_FIELDS)
-        assert result == NON_EXCL
+        assert result == []
 
-    # --- all_fields_in=True (in_val=None) ---
+    # --- 'in': None treated defensively as empty list ---
 
-    def test_in_val_none_returns_all_non_excluded(self):
+    def test_in_val_none_treated_as_empty(self):
         ca = {'POST': {'editor': {'in': None}}}
         result = _effective_in_fields(ca, 'POST', ['editor'], EXCLUDED, ALL_FIELDS)
-        assert result == NON_EXCL
+        assert result == []
 
     # --- specific fields ---
 
@@ -240,13 +240,14 @@ class TestEffectiveInFields:
 # ---------------------------------------------------------------------------
 
 class TestResolved:
-    def test_resolved_out_get_returns_rv_directly(self):
-        ca = {'GET': {'r': ['id', 'title']}}
+    def test_resolved_out_get_reads_out_key(self):
+        ca = {'GET': {'r': {'out': ['id', 'title']}}}
         assert _resolved_out(ca, 'GET', 'r') == ['id', 'title']
 
-    def test_resolved_out_delete_returns_rv(self):
+    def test_resolved_out_delete_non_dict_returns_empty(self):
+        # DELETE has no out fields; non-dict rv → []
         ca = {'DELETE': {'r': 'allowed'}}
-        assert _resolved_out(ca, 'DELETE', 'r') == 'allowed'
+        assert _resolved_out(ca, 'DELETE', 'r') == []
 
     def test_resolved_out_put_reads_out_key(self):
         ca = {'PUT': {'r': {'in': ['title'], 'out': ['id', 'title']}}}
@@ -263,9 +264,9 @@ class TestResolved:
         ca = {'POST': {'r': {'in': ['title', 'content']}}}
         assert _resolved_in(ca, 'POST', 'r') == ['title', 'content']
 
-    def test_resolved_in_non_dict_rv_returns_none(self):
+    def test_resolved_in_non_dict_rv_returns_empty(self):
         ca = {'POST': {'r': 'allowed'}}
-        assert _resolved_in(ca, 'POST', 'r') is None
+        assert _resolved_in(ca, 'POST', 'r') == []
 
 
 # ---------------------------------------------------------------------------
@@ -307,10 +308,11 @@ class TestParseQ:
 # ---------------------------------------------------------------------------
 
 class TestBuildAccessEntry:
-    def test_get_all_fields(self):
+    def test_get_rv_none_produces_empty_out(self):
+        # rv=None → no fields configured → empty out list
         ca = {'GET': {'reader': None}}
         entry = _build_access_entry(ca, EXCLUDED, ALL_FIELDS)
-        assert entry['GET']['reader']['out'] == NON_EXCL
+        assert entry['GET']['reader']['out'] == []
 
     def test_get_specific_fields(self):
         ca = {'GET': {'reader': {'out': ['id', 'title']}}}
@@ -322,11 +324,11 @@ class TestBuildAccessEntry:
         entry = _build_access_entry(ca, [], ALL_FIELDS)
         assert entry['DELETE']['admin'] == 'allowed'
 
-    def test_post_all_in_and_out(self):
+    def test_post_rv_none_produces_empty_in_and_out(self):
         ca = {'POST': {'editor': None}}
         entry = _build_access_entry(ca, EXCLUDED, ALL_FIELDS)
-        assert entry['POST']['editor']['in']  == NON_EXCL
-        assert entry['POST']['editor']['out'] == NON_EXCL
+        assert entry['POST']['editor']['in']  == []
+        assert entry['POST']['editor']['out'] == []
 
     def test_empty_crud_access_returns_empty_entry(self):
         entry = _build_access_entry({}, [], ALL_FIELDS)

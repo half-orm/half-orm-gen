@@ -1,5 +1,5 @@
 import { auth } from '$lib/auth.svelte.ts';
-import { registerClear } from '$lib/stateRegistry';
+import { registerClear, registerClearForKey } from '$lib/stateRegistry';
 import type { ResourceSchema } from './schema.types';
 import type { PermMatrix } from './schema.types';
 
@@ -71,6 +71,7 @@ export class ResourceSilo {
       this.pkExtractor = null;
     }
     registerClear(() => this.clear());
+    registerClearForKey(key, () => this.clear());
     $effect.root(() => {
       $effect(() => {
         const ev = auth.lastEvent;
