@@ -71,8 +71,9 @@ half_orm dev patch create 1-blog-schema
 
 cat > "Patches/1-blog-schema/01_blog.sql" << 'SQL'
 CREATE SCHEMA blog;
+create schema actor;
 
-CREATE TABLE blog.author (
+CREATE TABLE actor.user (
     id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name  TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE
@@ -83,7 +84,7 @@ CREATE TABLE blog.post (
     title     TEXT NOT NULL,
     content   TEXT,
     published BOOLEAN NOT NULL DEFAULT FALSE,
-    author_id UUID REFERENCES blog.author(id) on delete cascade
+    author_id UUID REFERENCES actor.user(id) on delete cascade
 );
 
 CREATE TABLE blog.comment_type (
@@ -94,7 +95,7 @@ CREATE TABLE blog.comment (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content      TEXT NOT NULL,
     post_id      UUID REFERENCES blog.post(id) on delete cascade,
-    author_id    UUID REFERENCES blog.author(id) on delete cascade,
+    author_id    UUID REFERENCES actor.user(id) on delete cascade,
     comment_type TEXT REFERENCES blog.comment_type(name)
 );
 SQL

@@ -12,7 +12,7 @@ ON CONFLICT DO NOTHING;
 
 -- ── authors ──────────────────────────────────────────────────────────────────
 
-INSERT INTO blog.author (id, name, email) VALUES
+INSERT INTO actor."user" (id, name, email) VALUES
     ('a1000000-0000-0000-0000-000000000001', 'Alice Martin',   'alice@example.com'),
     ('a1000000-0000-0000-0000-000000000002', 'Bob Dupont',     'bob@example.com'),
     ('a1000000-0000-0000-0000-000000000003', 'Clara Nguyen',   'clara@example.com'),
