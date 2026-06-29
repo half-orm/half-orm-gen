@@ -35,3 +35,6 @@ class HoApiModels:
 
     def access_filter(self):
         return self._rel('access_filter')
+
+    def user_role(self):
+        return self._rel('user_role')

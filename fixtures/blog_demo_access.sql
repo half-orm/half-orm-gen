@@ -148,4 +148,14 @@ WHERE a.role_name = 'anonymous'
   AND a.schema_name = 'blog' AND a.table_name = 'comment_type' AND a.verb = 'GET'
 ON CONFLICT DO NOTHING;
 
+-- ── user_role FK → actor.user ─────────────────────────────────────────────────
+-- actor.user already exists (created by the schema patch before gen api).
+-- user_role was created by half_orm gen api (ddl.py).
+
+ALTER TABLE "half_orm_meta.api".user_role
+  DROP CONSTRAINT IF EXISTS user_role_user_id_fk;
+ALTER TABLE "half_orm_meta.api".user_role
+  ADD CONSTRAINT user_role_user_id_fk
+  FOREIGN KEY (user_id) REFERENCES actor."user"(id) ON DELETE CASCADE;
+
 COMMIT;

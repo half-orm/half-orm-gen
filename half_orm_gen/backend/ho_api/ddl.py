@@ -191,6 +191,12 @@ CREATE TABLE IF NOT EXISTS "half_orm_meta.api".access_filter (
   PRIMARY KEY (access_id, filter_id)
 );
 
+CREATE TABLE IF NOT EXISTS "half_orm_meta.api".user_role (
+  user_id   uuid NOT NULL,
+  role_name text NOT NULL REFERENCES "half_orm_meta.api".role(name) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, role_name)
+);
+
 CREATE OR REPLACE FUNCTION "half_orm_meta.api".check_filter_relation()
 RETURNS TRIGGER AS $$
 DECLARE

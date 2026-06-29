@@ -12,6 +12,7 @@ from typing import Any
 from litestar import Request, get, post, put, delete
 from litestar.exceptions import HTTPException
 
+from half_orm_gen.backend.crud_helpers import _get_roles
 from half_orm_gen.backend.ho_api.loader import load_crud_access, load_role_parents
 from half_orm_gen.backend.ho_api.models import HoApiModels
 from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
@@ -19,10 +20,12 @@ from half_orm_gen.backend.litestar.v2.runtime import _manager
 
 
 def _check_admin(request: Request) -> list[str]:
-    token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
-    roles = [token, 'anonymous'] if token else ['anonymous']
+    roles = _get_roles(request)
     if 'admin' not in roles:
-        raise HTTPException(status_code=403, detail='Admin access required')
+        raise HTTPException(
+            status_code=403,
+            detail=f'Admin access required (current roles: {roles})',
+        )
     return roles
 
 

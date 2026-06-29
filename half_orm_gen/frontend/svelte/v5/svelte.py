@@ -174,6 +174,7 @@ import {{ goto }} from '$app/navigation';
 import {{ clearAllStates, clearStateForKey }} from '$lib/stateRegistry';
 
 export type WsEvent = {{ event: 'create' | 'update' | 'delete' | 'access_reload'; resource: string; id: unknown }};
+export type HoUser = {{ id: string; name: string; is_admin: boolean }};
 
 class AuthState {{
     token         = $state<string | null>(
@@ -181,10 +182,20 @@ class AuthState {{
     );
     access                = $state<Record<string, any>>({{}});
     roles                 = $state<string[]>([]);
+    users                 = $state<HoUser[]>([]);
     lastEvent             = $state<WsEvent | null>(null);
     accessVersion         = $state(0);
     resourceAccessVersion = $state<Record<string, number>>({{}});
     fetchedRoutes         = new Set<string>();
+
+    displayName = $derived(
+        this.token
+            ? (this.users.find(u => u.id === this.token)?.name ?? this.token)
+            : 'anonymous'
+    );
+    isAdmin = $derived(
+        this.token === 'admin' || this.users.some(u => u.id === this.token && u.is_admin)
+    );
 
     login(t: string) {{
         sessionStorage.setItem('ho_token', t);
@@ -220,6 +231,13 @@ class AuthState {{
         try {{
             const res = await fetch('{version_prefix}/ho_roles');
             if (res.ok) this.roles = await res.json();
+        }} catch {{}}
+    }}
+
+    async _fetchUsers() {{
+        try {{
+            const res = await fetch('{version_prefix}/ho_users');
+            if (res.ok) this.users = await res.json();
         }} catch {{}}
     }}
 
@@ -263,6 +281,7 @@ export const auth = new AuthState();
 if (typeof window !== 'undefined') {{
     auth._fetchAccess();
     auth._fetchRoles();
+    auth._fetchUsers();
     auth._connectWs();
 }}
 """
@@ -563,6 +582,11 @@ def _layout(resources: list, version_prefix: str = '') -> str:
     menuOpen = false;
   }}
 
+  function selectUser(user: {{ id: string; name: string }}) {{
+    auth.login(user.id);
+    menuOpen = false;
+  }}
+
   function logout() {{
     auth.logout();
     menuOpen = true;
@@ -590,19 +614,19 @@ def _layout(resources: list, version_prefix: str = '') -> str:
               class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border
                      {{auth.token ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}}
                      transition-colors">
-        {{auth.token ?? 'anonymous'}}
+        {{auth.displayName}}
         <span class="opacity-60">{{menuOpen ? '▲' : '▼'}}</span>
       </button>
       {{#if menuOpen}}
         <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-44 py-1">
-          {{#if auth.roles.length === 0}}
+          {{#if auth.users.length === 0}}
             <p class="px-4 py-2 text-xs text-gray-400">Loading…</p>
           {{:else}}
-            {{#each auth.roles as role}}
-              <button onclick={{() => selectRole(role)}}
+            {{#each auth.users as user}}
+              <button onclick={{() => selectUser(user)}}
                       class="w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition-colors
-                             {{auth.token === role ? 'font-semibold text-blue-600' : 'text-gray-700'}}">
-                {{role}}
+                             {{auth.token === user.id ? 'font-semibold text-blue-600' : 'text-gray-700'}}">
+                {{user.name}}
               </button>
             {{/each}}
           {{/if}}

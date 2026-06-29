@@ -13,11 +13,12 @@ ON CONFLICT DO NOTHING;
 -- ── authors ──────────────────────────────────────────────────────────────────
 
 INSERT INTO actor."user" (id, name, email) VALUES
-    ('a1000000-0000-0000-0000-000000000001', 'Alice Martin',   'alice@example.com'),
-    ('a1000000-0000-0000-0000-000000000002', 'Bob Dupont',     'bob@example.com'),
-    ('a1000000-0000-0000-0000-000000000003', 'Clara Nguyen',   'clara@example.com'),
-    ('a1000000-0000-0000-0000-000000000004', 'David Leclerc',  'david@example.com'),
-    ('a1000000-0000-0000-0000-000000000005', 'Eva Rossi',      'eva@example.com');
+    ('a0000000-0000-0000-0000-000000000000', 'Admin',          'admin@half-orm.org'),
+    ('a1000000-0000-0000-0000-000000000001', 'Alice Martin',   'alice@half-orm.org'),
+    ('a1000000-0000-0000-0000-000000000002', 'Bob Dupont',     'bob@half-orm.org'),
+    ('a1000000-0000-0000-0000-000000000003', 'Clara Nguyen',   'clara@half-orm.org'),
+    ('a1000000-0000-0000-0000-000000000004', 'David Leclerc',  'david@half-orm.org'),
+    ('a1000000-0000-0000-0000-000000000005', 'Eva Rossi',      'eva@half-orm.org');
 
 -- ── posts ────────────────────────────────────────────────────────────────────
 
@@ -165,10 +166,17 @@ INSERT INTO blog.comment (id, content, post_id, author_id, comment_type) VALUES
      'noUncheckedIndexedAccess est douloureux au départ mais sauve de nombreux bugs à l''exécution.',
      'b2000000-0000-0000-0000-000000000010', 'a1000000-0000-0000-0000-000000000001', 'comment');
 
+-- ── user → role assignments ───────────────────────────────────────────────────
+-- FK user_role.user_id → actor.user(id) was added in blog_demo_access.sql.
+
+INSERT INTO "half_orm_meta.api".user_role (user_id, role_name) VALUES
+    ('a0000000-0000-0000-0000-000000000000', 'admin')
+ON CONFLICT DO NOTHING;
+
 COMMIT;
 
 -- Vérification rapide
-SELECT 'authors' AS table_name, COUNT(*) FROM blog.author
+SELECT 'authors' AS table_name, COUNT(*) FROM actor."user"
 UNION ALL
 SELECT 'posts',    COUNT(*) FROM blog.post
 UNION ALL

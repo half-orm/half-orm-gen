@@ -10,7 +10,7 @@ import re
 import sys
 from typing import Optional, List, Any
 
-from litestar import Litestar, get, post, put, delete, websocket, Request, WebSocket
+from litestar import Litestar, Router, get, post, put, delete, websocket, Request, WebSocket
 from litestar.exceptions import HTTPException
 from litestar.logging import LoggingConfig
 
@@ -488,8 +488,14 @@ def build_crud_app(
         parent_map_holder[0] = await load_role_parents(model)
         roles_holder[0] = sorted(k for k in parent_map_holder[0] if k != 'anonymous')
 
+    all_handlers = special_handlers + relation_handlers
+    if route_handlers and prefix:
+        all_handlers += [Router(path=prefix, route_handlers=route_handlers)]
+    elif route_handlers:
+        all_handlers += route_handlers
+
     return Litestar(
-        route_handlers=special_handlers + relation_handlers + (route_handlers or []),
+        route_handlers=all_handlers,
         middleware=middleware or [],
         logging_config=logging_config,
         on_startup=[_startup],

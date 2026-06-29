@@ -320,9 +320,11 @@ export class HoAdminComponent implements OnInit {{
     return p ? this.catalog()[p.resource] : undefined;
   }});
 
-  ngOnInit(): void {{
-    const token = this.auth.token();
-    if (token !== 'admin') {{
+  async ngOnInit(): Promise<void> {{
+    if (this.auth.token() && this.auth.users().length === 0) {{
+      await this.auth._fetchUsers();
+    }}
+    if (!this.auth.isAdmin()) {{
       void this.router.navigate(['/ho_bo']);
       return;
     }}
