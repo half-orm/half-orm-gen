@@ -22,6 +22,7 @@ from half_orm_gen.backend.crud_helpers import (
     _parse_q, _build_access_entry, _filter_access_for_roles,
     _ws_broadcast_cascade,
 )
+from half_orm_gen.backend.ho_api.loader import ensure_system_roles
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +410,7 @@ def build_crud_app(
         if not _HO_WARN_SHOWN:
             print(_HO_WARN, file=sys.stderr, flush=True)
             _HO_WARN_SHOWN = True
+        await ensure_system_roles(model)
         yield
 
     app = FastAPI(lifespan=lifespan, **fastapi_kwargs)

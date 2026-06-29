@@ -127,6 +127,7 @@ def _make_list_handler(
     parent_map_holder: list, pk_names: list | None = None,
 ):
     slug = resource.replace('/', '_')
+    schema_name, table_name = resource.split('/')
 
     async def handler(
         request: Request,
@@ -135,6 +136,7 @@ def _make_list_handler(
         offset: Optional[int] = 0,
         q: Optional[str] = None,
     ) -> dict:
+        from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
         roles = _expand_roles(_get_roles(request), parent_map_holder[0])
@@ -167,7 +169,18 @@ def _make_list_handler(
         for col in search_cols:
             getattr(inst, col).unaccent = True
         data = await inst.ho_aselect(*(projection or []), limit=limit, offset=offset)
-        return {'data': data, 'meta': {'offset': offset, 'limit': limit, 'has_more': len(data) == limit}}
+        dynamic_roles: dict = {}
+        dyn_methods = [(rn, fn) for (s, t, rn), fn in _ROLE_REGISTRY.items()
+                       if s == schema_name and t == table_name]
+        if dyn_methods and data and getattr(request.state, 'user', None):
+            resolver_inst = cls()
+            for role_name, fn in dyn_methods:
+                pk_set = fn(resolver_inst, request, data)
+                if pk_set:
+                    dynamic_roles[role_name] = [str(pk) for pk in pk_set]
+        meta: dict = {'offset': offset, 'limit': limit, 'has_more': len(data) == limit,
+                      'dynamic_roles': dynamic_roles}
+        return {'data': data, 'meta': meta}
 
     handler.__name__ = handler.__qualname__ = f'list_{slug}'
     return get(path)(handler)
@@ -243,12 +256,27 @@ def _make_put_handler(
     pk_name = pk_info[0][0]
     slug = resource.replace('/', '_')
 
+    put_schema, put_table = resource.split('/')
+
     async def handler(request: Request, id: str, data: dict[str, Any]) -> dict:
+        from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
         roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         if not crud_access.get('PUT'):
             raise HTTPException(status_code=403)
+        pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
+        dyn_methods = [(rn, fn) for (s, t, rn), fn in _ROLE_REGISTRY.items()
+                       if s == put_schema and t == put_table]
+        if dyn_methods and getattr(request.state, 'user', None):
+            rows = await cls(**pk_filter).ho_aselect()
+            if not rows:
+                raise HTTPException(status_code=404)
+            resolver_inst = cls()
+            for role_name, fn in dyn_methods:
+                pk_set = fn(resolver_inst, request, rows)
+                if str(id) in {str(pk) for pk in pk_set}:
+                    roles = list(dict.fromkeys(roles + [role_name]))
         in_fields = _effective_in_fields(crud_access, 'PUT', roles, api_excluded, all_fields_by_res.get(resource, []))
         authorized = _effective_out_fields(crud_access, 'PUT', roles, api_excluded, all_fields_by_res.get(resource, []))
         if not in_fields:
@@ -257,7 +285,6 @@ def _make_put_handler(
             k: v for k, v in data.items()
             if v is not None and k in in_fields
         }
-        pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
         cols = authorized if authorized else ['*']
         result = await cls(**pk_filter).ho_aupdate(*cols, **payload)
         if not result:
@@ -324,6 +351,17 @@ def _make_ho_access(access_map_holder: list, parent_map_holder: list, model, pre
         roles = _get_roles(request)
         return _filter_access_for_roles(access_map_holder[0], roles, parent_map_holder[0])
     return ho_access
+
+
+def _make_ho_setup(model, prefix: str):
+    """Return {has_admin: bool} — used by the frontend to detect first-run state."""
+    @get(f'{prefix}/ho_setup')
+    async def ho_setup() -> dict:
+        from half_orm_gen.backend.ho_api.models import HoApiModels
+        api = HoApiModels(model)
+        rows = await api.user_role()(role_name='admin').ho_aselect('user_id')
+        return {'has_admin': bool(rows)}
+    return ho_setup
 
 
 def _make_ws_handler(version_prefix: str):
@@ -430,6 +468,7 @@ def build_crud_app(
         _make_ho_meta(model, prefix),
         _make_ho_roles(roles_holder, prefix),
         _make_ho_access(access_map_holder, parent_map_holder, model, prefix),
+        _make_ho_setup(model, prefix),
         _make_ws_handler(prefix),
         *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
     ]

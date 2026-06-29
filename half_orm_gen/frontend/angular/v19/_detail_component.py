@@ -78,7 +78,7 @@ def _detail_component(
         )
         form_class = f'  form: any = {{ {form_init} }};'
         edit_btn_tmpl = (
-            '\n        @if (silo.canEdit()) {\n'
+            '\n        @if (silo.canEdit() || silo.canUpdateRow(id)) {\n'
             '          <button (click)="editing.set(!editing()); error.set(\'\')"'
             '\n                  class="text-sm px-3 py-1 border rounded hover:bg-gray-50">\n'
             '            {{ editing() ? \'Cancel\' : \'Edit\' }}\n'

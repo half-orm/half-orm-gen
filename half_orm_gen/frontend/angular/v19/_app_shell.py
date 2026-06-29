@@ -23,36 +23,52 @@ export interface HoUser {{
 @Injectable({{ providedIn: 'root' }})
 export class AuthService {{
   private router = inject(Router);
-  readonly token                = signal<string | null>(
+
+  readonly token    = signal<string | null>(
     typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
   );
   readonly access               = signal<Record<string, any>>({{}});
   readonly roles                = signal<string[]>([]);
   readonly users                = signal<HoUser[]>([]);
+  readonly hasAdmin             = signal<boolean | null>(null);
   readonly accessVersion        = signal<number>(0);
   readonly resourceAccessVersion = signal<Record<string, number>>({{}});
-  readonly activeRoles          = computed<string[]>(() =>
-    this.token() ? [this.token()!] : ['anonymous']
-  );
-  readonly displayName = computed(() => {{
-    const t = this.token();
-    if (!t) return 'anonymous';
-    const u = this.users().find(u => u.id === t);
-    return u ? u.name : t;
-  }});
-  readonly isAdmin = computed(() =>
-    this.token() === 'admin' || this.users().some(u => u.id === this.token() && u.is_admin)
-  );
-  readonly wsEvent$    = new Subject<WsEvent>();
-  readonly fetchedRoutes = new Set<string>();
+  readonly wsEvent$             = new Subject<WsEvent>();
+  readonly fetchedRoutes        = new Set<string>();
 
-  login(t: string): void {{
-    sessionStorage.setItem('ho_token', t);
-    this.token.set(t);
+  readonly userId = computed<string | null>(() => {{
+    const t = this.token();
+    if (!t) return null;
+    try {{ return (JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))) as any)['sub'] ?? null; }}
+    catch {{ return null; }}
+  }});
+
+  readonly displayName = computed(() => {{
+    const id = this.userId();
+    if (!id) return 'anonymous';
+    return this.users().find(u => u.id === id)?.name ?? 'anonymous';
+  }});
+
+  readonly isAdmin = computed(() => {{
+    const id = this.userId();
+    return !!id && this.users().some(u => u.id === id && u.is_admin);
+  }});
+
+  readonly userRoles = computed<string[]>(() => {{
+    const t = this.token();
+    if (!t) return [];
+    try {{ return (JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))) as any)['roles'] ?? []; }}
+    catch {{ return []; }}
+  }});
+
+  setToken(jwt: string): void {{
+    sessionStorage.setItem('ho_token', jwt);
+    this.token.set(jwt);
     this.fetchedRoutes.clear();
     clearAllStates();
     void this._fetchAccess();
     void this._fetchRoles();
+    void this._fetchUsers();
   }}
 
   logout(): void {{
@@ -60,15 +76,31 @@ export class AuthService {{
     this.token.set(null);
     this.fetchedRoutes.clear();
     clearAllStates();
-
-    // Clear filter query params on logout
     if (this.router.url.includes('f_')) {{
-      const currentUrl = this.router.url.split('?')[0];
-      void this.router.navigate([currentUrl], {{ queryParams: {{}} }});
+      void this.router.navigate([this.router.url.split('?')[0]], {{ queryParams: {{}} }});
     }}
-
     void this._fetchAccess();
     void this._fetchRoles();
+  }}
+
+  async loginWithEmail(email: string): Promise<void> {{
+    const res = await fetch('{version_prefix}/auth/login', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ email }}),
+    }});
+    if (!res.ok) throw new Error((await res.json() as any).detail ?? 'Login failed');
+    this.setToken(((await res.json()) as any).token);
+  }}
+
+  async signupUser(name: string, email: string): Promise<void> {{
+    const res = await fetch('{version_prefix}/auth/signup', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ name, email }}),
+    }});
+    if (!res.ok) throw new Error((await res.json() as any).detail ?? 'Signup failed');
+    this.setToken(((await res.json()) as any).token);
   }}
 
   async _fetchAccess(): Promise<void> {{
@@ -78,9 +110,7 @@ export class AuthService {{
     try {{
       const res = await fetch('{version_prefix}/ho_access', {{ headers: hdrs }});
       this.access.set(res.ok ? await res.json() : {{}});
-    }} catch {{
-      this.access.set({{}});
-    }}
+    }} catch {{ this.access.set({{}}); }}
   }}
 
   async _fetchRoles(): Promise<void> {{
@@ -94,6 +124,13 @@ export class AuthService {{
     try {{
       const res = await fetch('{version_prefix}/ho_users');
       if (res.ok) this.users.set(await res.json());
+    }} catch {{}}
+  }}
+
+  async _fetchSetupStatus(): Promise<void> {{
+    try {{
+      const res = await fetch('{version_prefix}/ho_setup');
+      if (res.ok) this.hasAdmin.set(((await res.json()) as any).has_admin);
     }} catch {{}}
   }}
 
@@ -161,24 +198,67 @@ const API_BASE = '{api_base}';
               <span class="opacity-60">{{{{ menuOpen ? '▲' : '▼' }}}}</span>
             </button>
             @if (menuOpen) {{
-              <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-44 py-1">
-                @if (users().length === 0) {{
-                  <p class="px-4 py-2 text-xs text-gray-400">Loading…</p>
-                }} @else {{
-                  @for (user of users(); track user.id) {{
-                    <button (click)="selectUser(user)"
-                            [class]="'w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition-colors ' +
-                                     (auth.token() === user.id ? 'font-semibold text-blue-600' : 'text-gray-700')">
-                      {{{{ user.name }}}}
-                    </button>
-                  }}
-                }}
+              <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 w-64 p-3"
+                   (click)="$event.stopPropagation()">
                 @if (auth.token()) {{
-                  <div class="mx-3 my-1 border-t border-gray-100"></div>
+                  <p class="text-xs text-gray-500 mb-2">Signed in as <strong>{{{{ auth.displayName() }}}}</strong></p>
                   <button (click)="logout()"
-                          class="w-full text-left px-4 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors">
+                          class="w-full text-left px-2 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded transition-colors">
                     Sign out
                   </button>
+                }} @else if (auth.hasAdmin() === false) {{
+                  <p class="text-xs font-semibold text-gray-700 mb-3">Create admin account</p>
+                  <input (input)="signupName.set($any($event).target.value)"
+                         [value]="signupName()" placeholder="Name"
+                         class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                  <input (input)="signupEmail.set($any($event).target.value)"
+                         [value]="signupEmail()" placeholder="Email" type="email"
+                         class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                  @if (authError()) {{
+                    <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
+                  }}
+                  <button (click)="doSignup()"
+                          class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
+                    Create account
+                  </button>
+                }} @else {{
+                  @if (!showSignup()) {{
+                    <p class="text-xs font-semibold text-gray-700 mb-3">Sign in</p>
+                    <input (input)="loginEmail.set($any($event).target.value)"
+                           [value]="loginEmail()" placeholder="Email" type="email"
+                           (keydown.enter)="doLogin()"
+                           class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                    @if (authError()) {{
+                      <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
+                    }}
+                    <button (click)="doLogin()"
+                            class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+                      Sign in
+                    </button>
+                    <button (click)="showSignup.set(true); authError.set('')"
+                            class="w-full text-xs text-blue-500 hover:underline">
+                      Create account
+                    </button>
+                  }} @else {{
+                    <p class="text-xs font-semibold text-gray-700 mb-3">Create account</p>
+                    <input (input)="signupName.set($any($event).target.value)"
+                           [value]="signupName()" placeholder="Name"
+                           class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                    <input (input)="signupEmail.set($any($event).target.value)"
+                           [value]="signupEmail()" placeholder="Email" type="email"
+                           class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                    @if (authError()) {{
+                      <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
+                    }}
+                    <button (click)="doSignup()"
+                            class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+                      Create account
+                    </button>
+                    <button (click)="showSignup.set(false); authError.set('')"
+                            class="w-full text-xs text-gray-400 hover:underline">
+                      Back to sign in
+                    </button>
+                  }}
                 }}
               </div>
             }}
@@ -232,11 +312,14 @@ export class AppComponent implements OnInit {{
   protected registry = inject(SiloRegistry);
   private   router   = inject(Router);
 
-  readonly isHome   = signal(this.router.url === '/');
-  navFilter = signal('');
-  menuOpen  = false;
-  readonly roles = this.auth.roles;
-  readonly users = this.auth.users;
+  readonly isHome = signal(this.router.url === '/');
+  navFilter  = signal('');
+  menuOpen   = false;
+  showSignup = signal(false);
+  loginEmail = signal('');
+  signupName = signal('');
+  signupEmail = signal('');
+  authError  = signal('');
 
   readonly navItems = computed(() =>
     Object.keys(this.registry.meta())
@@ -246,9 +329,7 @@ export class AppComponent implements OnInit {{
 
   readonly filteredNav = computed(() => {{
     const q = this.navFilter().toLowerCase();
-    return q
-      ? this.navItems().filter(i => i.label.toLowerCase().includes(q))
-      : this.navItems();
+    return q ? this.navItems().filter(i => i.label.toLowerCase().includes(q)) : this.navItems();
   }});
 
   constructor() {{
@@ -264,22 +345,36 @@ export class AppComponent implements OnInit {{
     void this.auth._fetchAccess();
     void this.auth._fetchRoles();
     void this.auth._fetchUsers();
+    void this.auth._fetchSetupStatus();
     this.auth.connectWs();
   }}
 
-  selectRole(role: string): void {{
-    this.auth.login(role);
-    this.menuOpen = false;
+  async doLogin(): Promise<void> {{
+    this.authError.set('');
+    try {{
+      await this.auth.loginWithEmail(this.loginEmail());
+      this.menuOpen = false;
+      this.loginEmail.set('');
+    }} catch (e: any) {{
+      this.authError.set(e.message ?? 'Login failed');
+    }}
   }}
 
-  selectUser(user: {{ id: string; name: string; is_admin: boolean }}): void {{
-    this.auth.login(user.id);
-    this.menuOpen = false;
+  async doSignup(): Promise<void> {{
+    this.authError.set('');
+    try {{
+      await this.auth.signupUser(this.signupName(), this.signupEmail());
+      this.menuOpen = false;
+      this.signupName.set(''); this.signupEmail.set('');
+    }} catch (e: any) {{
+      this.authError.set(e.message ?? 'Signup failed');
+    }}
   }}
 
   logout(): void {{
     this.auth.logout();
     this.menuOpen = true;
+    this.showSignup.set(false);
     void this.router.navigate(['/']);
   }}
 
@@ -376,10 +471,10 @@ import { AuthService } from '../../core/auth.service';
   template: `
     <div class="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
       @if (auth.token()) {
-        <p>Logged in as <span class="font-semibold text-gray-700">{{ auth.token() }}</span></p>
+        <p>Logged in as <span class="font-semibold text-gray-700">{{ auth.displayName() }}</span></p>
         <p>Select a resource from the sidebar.</p>
       } @else {
-        <p>Select a role using the button in the top right corner.</p>
+        <p>Sign in using the button in the top right corner.</p>
       }
     </div>
   `
@@ -414,13 +509,12 @@ const VERB_COLOR: Record<string, string> = {{
         }} @else {{
           <div class="space-y-1">
             @for (role of roles(); track role) {{
-              <button (click)="selectRole(role)"
-                      class="w-full text-left px-3 py-2 rounded text-sm transition-colors"
-                      [class]="activeRole() === role
-                        ? 'bg-blue-600 text-white font-semibold'
-                        : 'text-gray-700 hover:bg-gray-100'">
+              <div class="w-full text-left px-3 py-2 rounded text-sm"
+                   [class]="auth.userRoles().includes(role)
+                     ? 'bg-blue-100 text-blue-700 font-semibold'
+                     : 'text-gray-700'">
                 {{{{ role }}}}
-              </button>
+              </div>
             }}
           </div>
         }}
@@ -473,13 +567,8 @@ export class AccessComponent {{
 
   readonly roles         = this.auth.roles;
   readonly rolesLoading  = computed(() => this.auth.roles().length === 0);
-  readonly activeRole    = computed(() => this.auth.token() ?? 'anonymous');
+  readonly activeRole    = computed(() => this.auth.userRoles()[0] ?? 'anonymous');
   readonly accessEntries = computed(() => Object.entries(this.auth.access()));
-
-  selectRole(role: string): void {{
-    if (role === 'anonymous') this.auth.logout();
-    else this.auth.login(role);
-  }}
 
   objectEntries(obj: any): [string, any][] {{ return Object.entries(obj ?? {{}}); }}
   verbColor(verb: string): string {{ return VERB_COLOR[verb] ?? 'bg-gray-100 text-gray-600'; }}

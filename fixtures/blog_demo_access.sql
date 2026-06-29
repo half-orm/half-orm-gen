@@ -3,16 +3,16 @@
 
 BEGIN;
 
--- ── blog.author ───────────────────────────────────────────────────────────────
+-- ── actor.user ────────────────────────────────────────────────────────────────
 
 INSERT INTO "half_orm_meta.api".access
     (role_name, schema_name, table_name, verb)
 VALUES
-    ('anonymous', 'blog', 'author', 'GET'),
-    ('connected', 'blog', 'author', 'GET'),
-    ('connected', 'blog', 'author', 'POST'),
-    ('connected', 'blog', 'author', 'PUT'),
-    ('admin',     'blog', 'author', 'DELETE')
+    ('anonymous', 'actor', 'user', 'GET'),
+    ('connected', 'actor', 'user', 'GET'),
+    ('connected', 'actor', 'user', 'POST'),
+    ('connected', 'actor', 'user', 'PUT'),
+    ('admin',     'actor', 'user', 'DELETE')
 ON CONFLICT (role_name, schema_name, table_name, verb) DO NOTHING;
 
 -- anonymous/GET: out = [id, name]
@@ -21,7 +21,7 @@ SELECT a.id, f.field_name
 FROM "half_orm_meta.api".access a
 CROSS JOIN (VALUES ('id'), ('name')) AS f(field_name)
 WHERE a.role_name = 'anonymous'
-  AND a.schema_name = 'blog' AND a.table_name = 'author' AND a.verb = 'GET'
+  AND a.schema_name = 'actor' AND a.table_name = 'user' AND a.verb = 'GET'
 ON CONFLICT DO NOTHING;
 
 -- connected/GET: out = [id, name, email]
@@ -30,7 +30,7 @@ SELECT a.id, f.field_name
 FROM "half_orm_meta.api".access a
 CROSS JOIN (VALUES ('id'), ('name'), ('email')) AS f(field_name)
 WHERE a.role_name = 'connected'
-  AND a.schema_name = 'blog' AND a.table_name = 'author' AND a.verb = 'GET'
+  AND a.schema_name = 'actor' AND a.table_name = 'user' AND a.verb = 'GET'
 ON CONFLICT DO NOTHING;
 
 -- connected/POST: in = [name, email]  (out falls back to connected/GET out)
@@ -39,7 +39,7 @@ SELECT a.id, f.field_name
 FROM "half_orm_meta.api".access a
 CROSS JOIN (VALUES ('name'), ('email')) AS f(field_name)
 WHERE a.role_name = 'connected'
-  AND a.schema_name = 'blog' AND a.table_name = 'author' AND a.verb = 'POST'
+  AND a.schema_name = 'actor' AND a.table_name = 'user' AND a.verb = 'POST'
 ON CONFLICT DO NOTHING;
 
 -- connected/PUT: in = [name, email]  (out falls back to connected/GET out)
@@ -48,7 +48,7 @@ SELECT a.id, f.field_name
 FROM "half_orm_meta.api".access a
 CROSS JOIN (VALUES ('name'), ('email')) AS f(field_name)
 WHERE a.role_name = 'connected'
-  AND a.schema_name = 'blog' AND a.table_name = 'author' AND a.verb = 'PUT'
+  AND a.schema_name = 'actor' AND a.table_name = 'user' AND a.verb = 'PUT'
 ON CONFLICT DO NOTHING;
 
 

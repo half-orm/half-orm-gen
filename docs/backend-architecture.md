@@ -2,7 +2,8 @@
 
 > Frontend consumption of this API: [frontend-architecture.md](frontend-architecture.md)  
 > Svelte silo details: [svelte-silo-architecture.md](svelte-silo-architecture.md)  
-> Angular silo details: [angular-silo-architecture.md](angular-silo-architecture.md)
+> Angular silo details: [angular-silo-architecture.md](angular-silo-architecture.md)  
+> Authorization setup: [authorization.md](authorization.md)
 
 Two API frameworks are supported, selected at generation time:
 
@@ -86,8 +87,7 @@ All endpoints are versioned under `/v{api_version}` (e.g. `/v0`).
 | `DELETE` | `/{schema}/{table}/{id}` | Delete a row + WS cascade. |
 
 Routes are only registered for verbs declared in `CRUD_ACCESS` (see below). In dev mode,
-all verbs are registered for every relation even without `CRUD_ACCESS` so the `ho_dev`
-super-role can inspect any relation.
+all verbs are registered for every relation even without `CRUD_ACCESS`.
 
 ### Special endpoints
 
@@ -95,7 +95,7 @@ super-role can inspect any relation.
 |---|---|
 | `GET /ho_meta` | Full schema metadata for all relations (fields, PKs, FKs). Sourced from `model.ho_meta()`. |
 | `GET /ho_access` | CRUD access map filtered for the caller's roles. |
-| `GET /ho_roles` | List of all declared roles (excludes `ho_dev` and `anonymous`). |
+| `GET /ho_roles` | List of all declared roles (excludes `anonymous`). |
 | `WS /ws` | WebSocket endpoint for live mutation events. |
 
 ---
@@ -146,12 +146,6 @@ Every request resolves a list of authorized roles via `_get_roles(request)`:
 This fallback (token = role name) is intentional for development and **must be replaced**
 by a real JWT middleware before production deployment. `build_crud_app` raises `RuntimeError`
 at startup if the model is in production mode while the dev helpers are still active.
-
-### `ho_dev` super-role
-
-Sending `Authorization: Bearer ho_dev` grants full access to all registered routes
-(all fields, all verbs) regardless of `CRUD_ACCESS`. `ho_dev` is excluded from
-`/ho_roles` output and from `ACCESS_CHECK` guards. It is only active in dev mode.
 
 ### Role-based field filtering
 
@@ -259,7 +253,6 @@ assemble Litestar(
 | Behaviour | Dev | Production |
 |---|---|---|
 | Routes without `CRUD_ACCESS` | Registered (all verbs) | Not registered |
-| `ho_dev` super-role | Active | Startup raises `RuntimeError` |
 | Bearer token = role name | Active | Must be replaced by JWT middleware |
 | `ho_roles`, `ho_access` | Available | Available (but access map may be empty) |
 

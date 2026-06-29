@@ -9,6 +9,7 @@ dependencies = [
     "half-orm>=1.0.0rc16,<1.1.0",
     "half-orm-dev>=1.0.0a32,<1.1.0",
     "litestar>=2.0.0",
+    "PyJWT>=2.0.0",
 ]
 description = "API and frontend backoffice generation for halfORM projects."
 readme = "README.md"

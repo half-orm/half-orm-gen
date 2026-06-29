@@ -166,8 +166,16 @@ INSERT INTO blog.comment (id, content, post_id, author_id, comment_type) VALUES
      'noUncheckedIndexedAccess est douloureux au départ mais sauve de nombreux bugs à l''exécution.',
      'b2000000-0000-0000-0000-000000000010', 'a1000000-0000-0000-0000-000000000001', 'comment');
 
+-- ── user_role FK → actor.user ────────────────────────────────────────────────
+-- user_role was created by half_orm gen api (ddl.py); actor.user exists from the patch.
+
+ALTER TABLE "half_orm_meta.api".user_role
+  DROP CONSTRAINT IF EXISTS user_role_user_id_fk;
+ALTER TABLE "half_orm_meta.api".user_role
+  ADD CONSTRAINT user_role_user_id_fk
+  FOREIGN KEY (user_id) REFERENCES actor."user"(id) ON DELETE CASCADE;
+
 -- ── user → role assignments ───────────────────────────────────────────────────
--- FK user_role.user_id → actor.user(id) was added in blog_demo_access.sql.
 
 INSERT INTO "half_orm_meta.api".user_role (user_id, role_name) VALUES
     ('a0000000-0000-0000-0000-000000000000', 'admin')

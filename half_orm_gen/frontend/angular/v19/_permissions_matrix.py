@@ -129,9 +129,9 @@ import type { Verb, VerbAccess, PermMatrix } from './schema.types';
             </thead>
             <tbody>
               @for (role of roles(); track role) {
-                <tr class="border-t" [class.bg-gray-100]="auth.activeRoles().includes(role)">
+                <tr class="border-t" [class.bg-gray-100]="auth.userRoles().includes(role)">
                   <td class="px-4 py-2 font-mono border-r"
-                      [class]="auth.activeRoles().includes(role) ? 'font-bold text-gray-900' : 'text-gray-700'">{{ role }}</td>
+                      [class]="auth.userRoles().includes(role) ? 'font-bold text-gray-900' : 'text-gray-700'">{{ role }}</td>
                   @for (verb of verbs; track verb) {
                     <td class="px-4 py-2 text-center">
                       @if (permissions()[role]?.[verb]) {

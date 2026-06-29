@@ -19,6 +19,7 @@ export class ResourceSilo {
   readonly selectedId = signal<string | null>(null);
   readonly sortField  = signal<string | null>(null);
   readonly sortAsc    = signal(true);
+  readonly dynamicRoles = signal<Record<string, string[]>>({});
 
   // Per-resource access signals — derived from AuthService at runtime
   readonly canCreate:             Signal<boolean>;
@@ -104,6 +105,11 @@ export class ResourceSilo {
     return this.pkExtractor ? this.pkExtractor(item) : null;
   }
 
+  canUpdateRow(id: string): boolean {
+    const dr = this.dynamicRoles();
+    return Object.values(dr).some(ids => ids.includes(id));
+  }
+
   listUrl(params: Row = {}): string {
     const filtered = Object.fromEntries(
       Object.entries(params)
@@ -135,16 +141,17 @@ export class ResourceSilo {
     this.auth.fetchedRoutes.add(url);
 
     this.isLoading.set(true);
-    this.http.get<{ data: Row[]; meta: { offset: number; limit: number; has_more: boolean } }>(
+    this.http.get<{ data: Row[]; meta: { offset: number; limit: number; has_more: boolean; dynamic_roles?: Record<string, string[]> } }>(
       url, { headers: this.headers }
     ).pipe(
-      catchError(() => of({ data: [], meta: { offset, limit: 100, has_more: false } }))
+      catchError(() => of({ data: [], meta: { offset, limit: 100, has_more: false, dynamic_roles: undefined } }))
     ).subscribe(response => {
       if (offset === 0 && !searchQ && Object.keys(params).length === 0) this.setItems(response.data);
       else this.mergeItems(response.data, otherParams);
       this.hasMore.set(response.meta.has_more);
       this.currentOffset.set(offset + response.data.length);
       this.isLoading.set(false);
+      this.dynamicRoles.set(response.meta.dynamic_roles ?? {});
       if (!response.meta.has_more) this.loadedFilters.set(filterKey, true);
     });
   }
@@ -178,6 +185,21 @@ export class ResourceSilo {
   }
 
   refresh(id: string) {
+    // For single-PK resources, use the list endpoint so meta.dynamic_roles is populated
+    if (this.pkFields.length === 1) {
+      const pk = this.pkFields[0];
+      const url = this.listUrl({ [pk]: id });
+      return this.http.get<{ data: Row[]; meta: { dynamic_roles?: Record<string, string[]> } }>(
+        url, { headers: this.headers }
+      ).pipe(
+        tap(resp => {
+          if (resp.data[0]) this.setItem(resp.data[0]);
+          this.dynamicRoles.set(resp.meta?.dynamic_roles ?? {});
+        }),
+        map(resp => resp.data[0] ?? null),
+        catchError(() => of(null as Row | null))
+      );
+    }
     const url = this.getUrl(id);
     this.auth.fetchedRoutes.add(url);
     return this.http.get<Row>(url, { headers: this.headers }).pipe(
