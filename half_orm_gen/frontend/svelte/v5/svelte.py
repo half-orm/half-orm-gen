@@ -1498,6 +1498,7 @@ def _detail_page(
 {fk_states}
   $effect(() => {{
     void auth.token;
+    void (auth.resourceAccessVersion as any)['{map_key}'];
     if (!item) untrack(() => void silo.get(id));
   }});
 

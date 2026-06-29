@@ -271,6 +271,7 @@ export class {iname}DetailComponent {{
   constructor() {{
     effect(() => {{
       void this.auth.token();
+      void this.auth.resourceAccessVersion()['{map_key}'];
       if (!this.item()) untracked(() => this.silo.get(this.id as any).subscribe());
     }});{form_effect}{ws_effect}{fk_fetch_effects}
   }}
