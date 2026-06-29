@@ -63,9 +63,11 @@ export class ResourceSilo {
     this.canDelete = computed(() => !!(auth.access() as any)[key]?.DELETE);
     this.canEdit   = computed(() => !!(auth.access() as any)[key]?.PUT);
     this.inaccessibleFields = computed(() => {
-      const out: string[] | undefined = (auth.access() as any)[key]?.GET?.out;
-      if (!out || out.length === 0) return new Set<string>();
       const allFields = schema.fields.map(f => f.name);
+      const getAccess = (auth.access() as any)[key]?.GET;
+      if (!getAccess) return new Set<string>(allFields);
+      const out: string[] | undefined = getAccess.out;
+      if (!out || out.length === 0) return new Set<string>(allFields);
       return new Set(allFields.filter(f => !out.includes(f)));
     });
     this.inaccessiblePostFields = computed(() => {

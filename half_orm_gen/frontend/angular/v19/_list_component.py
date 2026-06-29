@@ -15,23 +15,24 @@ def _list_component(
 
     # Table headers (sortable)
     th_cols = '\n            '.join(
+        f'@if (!silo.inaccessibleFields().has(\'{f}\')) {{'
         f'<th (click)="sortBy(\'{f}\')"'
-        f' class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200"'
-        f' [class.text-gray-600]="!silo.inaccessibleFields().has(\'{f}\')"'
-        f' [class.text-gray-300]="silo.inaccessibleFields().has(\'{f}\')"'
-        f' [class.line-through]="silo.inaccessibleFields().has(\'{f}\')">'
+        f' class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200 text-gray-600">'
         f'{f} {{{{ silo.sortField() === \'{f}\' ? (silo.sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
+        f'}}'
         for f in out_names
     )
     action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
 
     # Filter row (one input per column, hidden when embedded)
     filter_inputs = '\n              '.join(
+        f'@if (!silo.inaccessibleFields().has(\'{f}\')) {{'
         f'<th class="px-2 py-1">'
         f'<input [value]="localFilters()[\'{f}\'] || \'\'"'
         f' (input)="setFilter(\'{f}\', $any($event).target.value)"'
         f' placeholder="…"'
         f' class="w-full text-xs border rounded px-2 py-1" /></th>'
+        f'}}'
         for f in out_names
     )
     action_filter_th = (
@@ -52,28 +53,27 @@ def _list_component(
     )
 
     def _td(f: str) -> str:
-        inaccessible_guard = f'@if (silo.inaccessibleFields().has(\'{f}\')) {{\n                <span class="line-through text-gray-300 text-xs select-none">—</span>\n              }} @else {{'
-        inaccessible_end = '\n              }'
+        inacc = f'silo.inaccessibleFields().has(\'{f}\')'
         if f in fk_map:
             rs, rt = fk_map[f]
             return (
+                f'@if (!{inacc}) {{'
                 f'<td class="px-4 py-2 text-sm">'
-                f'{inaccessible_guard}'
                 f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item[\'{f}\'])]" (click)="$event.stopPropagation()"'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block" [class.max-w-xs]="!embedded()"'
                 f' [title]="cellTitle(item[\'{f}\'])">{{{{ fmtCell(item[\'{f}\']) }}}}</a>'
-                f'{inaccessible_end}'
                 f'</td>'
+                f'}}'
             )
         return (
+            f'@if (!{inacc}) {{'
             f'<td class="px-4 py-2 text-sm" (click)="cellClick($event, $any(item)[\'{f}\'])">'
-            f'{inaccessible_guard}'
             f'<div class="truncate" [class.max-w-xs]="!embedded()" [title]="cellTitle(item[\'{f}\'])"'
             f' [class.text-blue-600]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'"'
             f' [class.cursor-pointer]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'">'
             f'{{{{ fmtCell(item[\'{f}\']) }}}}</div>'
-            f'{inaccessible_end}'
             f'</td>'
+            f'}}'
         )
 
     td_cols = '\n              '.join(_td(f) for f in out_names)

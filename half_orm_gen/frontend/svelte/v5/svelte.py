@@ -681,22 +681,23 @@ def _list_component(
         )
         indicator = f"{{#if silo.sortField === '{f}'}}{{silo.sortAsc ? '↑' : '↓'}}{{/if}}"
         return (
+            f'{{#if !silo.inaccessibleFields.has(\'{f}\')}}'
             f'<th onclick={{{toggle}}}'
-            f' class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200"'
-            f' class:text-gray-600={{!silo.inaccessibleFields.has(\'{f}\')}}'
-            f' class:text-gray-300={{silo.inaccessibleFields.has(\'{f}\')}}'
-            f' class:line-through={{silo.inaccessibleFields.has(\'{f}\')}}'
-            f'>{f} {indicator}</th>'
+            f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600 cursor-pointer select-none hover:bg-gray-200">'
+            f'{f} {indicator}</th>'
+            f'{{/if}}'
         )
 
     action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
     th_cols   = (action_th + '\n        ' if action_th else '') + '\n        '.join(_sort_th(f) for f in out_names)
 
     filter_inputs = '\n        '.join(
+        f'{{#if !silo.inaccessibleFields.has(\'{f}\')}}'
         f'<th class="px-2 py-1">'
         f'<input value={{localFilters[\'{f}\'] ?? \'\'}} '
         f'oninput={{(e) => localFilters = {{...localFilters, \'{f}\': e.currentTarget.value}}}} '
         f'placeholder="…" class="w-full text-xs border rounded px-2 py-1 font-normal" /></th>'
+        f'{{/if}}'
         for f in out_names
     )
     action_filter_th = (
@@ -721,32 +722,28 @@ def _list_component(
         if f in fk_map:
             rs, rt = fk_map[f]
             return (
+                f'{{#if !{inacc}}}'
                 f'<td class="px-4 py-2 text-sm">'
-                f'{{#if {inacc}}}'
-                f'<span class="line-through text-gray-300 text-xs select-none">—</span>'
-                f'{{:else}}'
                 f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
                 f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/ho_bo/{rs}/{rt}/${{item.{f}}}`); }}}}'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block" class:max-w-xs={{!embedded}}'
                 f' title="{{cellTitle(item.{f})}}">{{fmtCell(item.{f})}}</a>'
-                f'{{/if}}'
                 f'</td>'
+                f'{{/if}}'
             )
         cell_click = (
             f"(e) => {{ const _j = (item as any).{f}; "
             f"if (_j != null && typeof _j === 'object') {{ e.stopPropagation(); showJson(_j); }} }}"
         )
         return (
+            f'{{#if !{inacc}}}'
             f'<td class="px-4 py-2 text-sm" onclick={{{cell_click}}}>'
-            f'{{#if {inacc}}}'
-            f'<span class="line-through text-gray-300 text-xs select-none">—</span>'
-            f'{{:else}}'
             f'<div class="truncate" class:max-w-xs={{!embedded}} title="{{cellTitle(item.{f})}}"'
             f' class:text-blue-600={{typeof (item as any).{f} === \'object\' && (item as any).{f} != null}}'
             f' class:cursor-pointer={{typeof (item as any).{f} === \'object\' && (item as any).{f} != null}}>'
             f'{{fmtCell(item.{f})}}</div>'
-            f'{{/if}}'
             f'</td>'
+            f'{{/if}}'
         )
 
     td_cols = '\n          '.join(_td(f) for f in out_names)
@@ -1265,13 +1262,16 @@ def _fields_component_svelte(
             f'<span class="text-sm break-all">{{item.{f}}}</span></div>'
         )
 
-    rows = '\n  '.join(_ro_row(f) for f in out_names)
+    rows = '\n  '.join(
+        f'{{#if !inaccessibleFields.has(\'{f}\')}}\n  {_ro_row(f)}\n  {{/if}}'
+        for f in out_names
+    )
 
     return f"""\
 <script lang="ts">{latex_import}
   import type {{ Row }} from '$lib/generated/stores/resource.silo.svelte.ts';
 
-  let {{ item, hidePk = false }}: {{ item: Row; hidePk?: boolean }} = $props();
+  let {{ item, hidePk = false, inaccessibleFields = new Set<string>() }}: {{ item: Row; hidePk?: boolean; inaccessibleFields?: Set<string> }} = $props();
 </script>
 
 <div class="space-y-2">
@@ -1305,7 +1305,7 @@ def _detail_page(
     # Form state + edit toggle — populated reactively from item once loaded
     extra_script = ''
     edit_btn     = ''
-    edit_section = '\n  <Fields {item} />'
+    edit_section = '\n  <Fields {item} inaccessibleFields={silo.inaccessibleFields} />'
 
     if has_put and visible_put:
         empty_init  = ', '.join(
@@ -1357,7 +1357,7 @@ def _detail_page(
         edit_section = f"""
 
   {{#if !editing}}
-  <Fields {{item}} />
+  <Fields {{item}} inaccessibleFields={{silo.inaccessibleFields}} />
   {{:else}}
   {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
   <form onsubmit={{handleUpdate}} class="space-y-4">

@@ -136,7 +136,8 @@ def _fields_component(
     iname: str, pk_field: str, pk_info: list,
     out_names: list, fk_deps: list, all_fields: dict,
 ) -> tuple[str, str, str]:
-    fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
+    fk_map  = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
+    map_key = f'{schema_name}/{table_name}'
 
     if pk_field and len(pk_info) > 1:
         _pk_id_expr = " + '::' + ".join(
@@ -180,7 +181,10 @@ def _fields_component(
             f'<span class="text-sm break-all">{{{{ item()[\'{f}\'] }}}}</span></div>'
         )
 
-    rows = '\n      '.join(_ro_row(f) for f in out_names)
+    rows = '\n      '.join(
+        f'@if (!inaccessibleFields().has(\'{f}\')) {{\n      {_ro_row(f)}\n      }}'
+        for f in out_names
+    )
     latex_import = "\nimport { LatexPipe } from '../../../core/latex.pipe';" if has_latex else ''
     all_imports = ', '.join(filter(None, [
         'RouterLink',
@@ -194,9 +198,10 @@ def _fields_component(
 """
 
     ts = f"""\
-import {{ Component, input }} from '@angular/core';
+import {{ Component, computed, inject, input }} from '@angular/core';
 import {{ RouterLink }} from '@angular/router';{latex_import}
 import type {{ Row }} from '../../resource.silo';
+import {{ SiloRegistry }} from '../../silo-registry.service';
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'fields')}',
@@ -209,6 +214,8 @@ export class {iname}FieldsComponent {{
   readonly item    = input.required<Row>();
   readonly hidePk  = input<boolean>(false);
   protected String = String;
+  private readonly silo = inject(SiloRegistry).tryGet('{map_key}');
+  readonly inaccessibleFields = computed(() => this.silo?.inaccessibleFields() ?? new Set<string>());
 }}
 """
     return ts, html, ''

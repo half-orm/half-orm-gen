@@ -26,9 +26,11 @@ export class ResourceSilo {
   canDelete          = $derived(!!(auth.access as any)[this.key]?.DELETE);
   canEdit            = $derived(!!(auth.access as any)[this.key]?.PUT);
   inaccessibleFields = $derived.by(() => {
-    const out = (auth.access as any)[this.key]?.GET?.out;
-    if (!out || !Array.isArray(out) || out.length === 0) return new Set<string>();
     const allFields = this.schema.fields.map((f: any) => f.name as string);
+    const getAccess = (auth.access as any)[this.key]?.GET;
+    if (!getAccess) return new Set<string>(allFields);
+    const out = getAccess.out;
+    if (!out || !Array.isArray(out) || out.length === 0) return new Set<string>(allFields);
     return new Set(allFields.filter(f => !(out as string[]).includes(f)));
   });
   inaccessiblePostFields = $derived.by(() => {
