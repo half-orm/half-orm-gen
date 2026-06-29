@@ -272,7 +272,7 @@ export class HoAdminComponent implements OnInit {{
 
   readonly verbs = ['GET', 'POST', 'PUT', 'DELETE'] as const;
 
-  readonly catalogEntries = computed(() => Object.entries(this.catalog()));
+  readonly catalogEntries = computed(() => Object.entries(this.catalog()).sort((a, b) => a[0].localeCompare(b[0])));
 
   readonly parentMap = computed(() =>
     Object.fromEntries(this.roles().map(r => [r.name, r.parent_name ?? null]))

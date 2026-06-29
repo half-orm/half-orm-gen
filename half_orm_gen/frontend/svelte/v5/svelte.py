@@ -354,7 +354,7 @@ def _access_page(version_prefix: str) -> str:
       <p class="text-gray-500 text-sm">No access granted for this role.</p>
     {{:else}}
       <div class="space-y-4">
-        {{#each Object.entries(auth.access) as [resource, verbs]}}
+        {{#each Object.entries(auth.access).sort(([a], [b]) => a.localeCompare(b)) as [resource, verbs]}}
           <div class="bg-white rounded-lg shadow-sm overflow-hidden">
             <div class="px-4 py-2 bg-gray-100 font-semibold text-gray-700 text-sm">{{resource}}</div>
             <div class="divide-y">
