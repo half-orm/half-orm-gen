@@ -40,7 +40,6 @@ from ._detail_component import _detail_component
 from ._permissions_matrix import (
     _permissions_matrix_component_ts,
     _permissions_fields_component_ts,
-    _build_perm_data,
 )
 
 
@@ -74,33 +73,6 @@ class _Resource:
     crud_access: dict
     api_excluded: list
 
-
-# ---------------------------------------------------------------------------
-# Static permissions-data.ts generator
-# ---------------------------------------------------------------------------
-
-def _permissions_data_ts(resources: list) -> str:
-    entries = []
-    for r in resources:
-        roles_ts, matrix_ts = _build_perm_data(
-            r.crud_access, list(r.all_fields.keys()), r.api_excluded)
-        entries.append(
-            f"  '{r.map_key}': {{\n"
-            f"    roles: {roles_ts},\n"
-            f"    matrix: {matrix_ts},\n"
-            f"  }}"
-        )
-    body = ',\n'.join(entries)
-    return (
-        "import type { PermMatrix } from './schema.types';\n\n"
-        "export interface ResourcePermissions {\n"
-        "  roles: string[];\n"
-        "  matrix: PermMatrix;\n"
-        "}\n\n"
-        "export const PERMISSIONS: Record<string, ResourcePermissions> = {\n"
-        f"{body}\n"
-        "};\n"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -281,8 +253,6 @@ class AngularAppGenerator(StoreGenerator):
                     _permissions_fields_component_ts())
         self._write(generated_dir / 'permissions-matrix.component.ts',
                     _permissions_matrix_component_ts())
-        self._write(generated_dir / 'permissions-data.ts',
-                    _permissions_data_ts(resources))
 
         # --- static assets (served from public/ per angular.json) ---
         assets_src = Path(__file__).parents[3] / 'assets'

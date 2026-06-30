@@ -46,7 +46,6 @@ def _detail_component(
 
     all_imports = ', '.join(filter(None, [
         'RouterLink',
-        'PermissionsMatrixComponent',
         f'{iname}FieldsComponent',
         fk_fields_in_imports,
         'FormsModule' if has_put and put_in_names else '',
@@ -211,9 +210,6 @@ def _detail_component(
     pk_id_line = f'\n  protected getPkId = {typed_extractor};'
 
     html = f"""\
-<div class="px-4 mt-4">
-  <app-permissions-matrix [permissions]="silo.permMatrix" [roles]="silo.permRoles" />
-</div>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
   <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
     @if (item()) {{
@@ -243,7 +239,7 @@ import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
 import type {{ Row }} from '../../../generated/resource.silo';
 import {{ AuthService }} from '../../../core/auth.service';
-import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';{own_fields_import}{fk_fields_imports}{rev_list_imports}
+import {{ {iname}FieldsComponent }} from './fields.component';{fk_fields_imports}{rev_list_imports}
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'detail')}',

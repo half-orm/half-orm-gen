@@ -1,8 +1,6 @@
 import { auth } from '$lib/auth.svelte.ts';
 import { registerClear, registerClearForKey } from '$lib/stateRegistry';
 import type { ResourceSchema } from './schema.types';
-import type { PermMatrix } from './schema.types';
-
 export type Row = Record<string, unknown>;
 
 export class ResourceSilo {
@@ -17,10 +15,6 @@ export class ResourceSilo {
   sortField    = $state<string | null>(null);
   sortAsc      = $state(true);
   dynamicRoles = $state<Record<string, string[]>>({});
-
-  // Static permissions from CRUD_ACCESS (all roles)
-  readonly permRoles: string[];
-  readonly permMatrix: PermMatrix;
 
   // Per-resource access signals — derived from auth at runtime
   canCreate          = $derived(!!(auth.access as any)[this.key]?.POST);
@@ -57,12 +51,7 @@ export class ResourceSilo {
     readonly key: string,
     readonly schema: ResourceSchema,
     private baseUrl: string,
-    permRoles: string[] = [],
-    permMatrix: PermMatrix = {},
   ) {
-    this.permRoles  = permRoles;
-    this.permMatrix = permMatrix;
-
     this.pkFields = schema.pk_fields;
     if (schema.pk_fields.length === 1) {
       const pk = schema.pk_fields[0];

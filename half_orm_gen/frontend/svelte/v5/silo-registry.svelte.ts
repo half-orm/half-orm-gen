@@ -1,7 +1,6 @@
 import { auth } from '$lib/auth.svelte.ts';
 import { ResourceSilo } from './resource.silo.svelte.ts';
 import type { HoMeta } from './schema.types';
-import { PERMISSIONS } from './permissions-data';
 
 class SiloRegistry {
   meta  = $state<HoMeta>({});
@@ -17,12 +16,7 @@ class SiloRegistry {
     this.meta = m;
     for (const [key, schema] of Object.entries(m)) {
       if (!this.silos.has(key)) {
-        const perms = PERMISSIONS[key] ?? {};
-        this.silos.set(key, new ResourceSilo(
-          key, schema, `${apiBase}/${key}`,
-          perms.roles ?? [],
-          perms.matrix ?? {},
-        ));
+        this.silos.set(key, new ResourceSilo(key, schema, `${apiBase}/${key}`));
       }
     }
     this._ready = true;

@@ -25,8 +25,6 @@ from half_orm_gen.frontend.base import (
     _is_bool_field, _is_text_field, _is_textarea_field,
     _is_required, _is_server_generated, _input_type, _text_fields,
 )
-from half_orm_gen.frontend.angular.v19._permissions_matrix import _build_perm_data
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -452,8 +450,6 @@ def _schema_page_svelte() -> str:
 <script lang="ts">
   import { registry } from '$lib/generated/stores/silo-registry.svelte.ts';
   import type { FieldSchema, FkDep } from '$lib/generated/stores/schema.types';
-  import PermissionsMatrix from '$lib/generated/PermissionsMatrix.svelte';
-
   interface ResourceView {
     key: string;
     table: string;
@@ -583,14 +579,6 @@ def _schema_page_svelte() -> str:
                 {/if}
               </tbody>
             </table>
-            {#if registry.tryGet(res.key)}
-              <div class="px-4 py-2 border-t bg-gray-50">
-                <PermissionsMatrix
-                  permissions={registry.tryGet(res.key)!.permMatrix}
-                  roles={registry.tryGet(res.key)!.permRoles}
-                  defaultOpen={true} />
-              </div>
-            {/if}
           </div>
         {/each}
       </div>
@@ -941,8 +929,6 @@ def _list_component(
   import type {{ Row }} from '$lib/generated/stores/resource.silo.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ goto }} from '$app/navigation';
-  import PermissionsMatrix from '$lib/generated/PermissionsMatrix.svelte';
-
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
   const silo = registry.get('{map_key}');
@@ -1129,7 +1115,6 @@ def _list_component(
 <div class="flex justify-between items-center mb-4">
   <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
 </div>
-<PermissionsMatrix permissions={{silo.permMatrix}} roles={{silo.permRoles}} />
 {{/if}}
 
 <div class="{{embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'}}">
@@ -1600,7 +1585,7 @@ def _detail_page(
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ untrack }} from 'svelte';
   import Fields from '$lib/generated/components/{stem}/Fields.svelte';
-  import PermissionsMatrix from '$lib/generated/PermissionsMatrix.svelte';{fk_imports}{rev_imports}
+  {fk_imports}{rev_imports}
 
   const silo = registry.get('{map_key}');
   let {{ id }}: {{ id: string }} = $props();
@@ -1620,9 +1605,6 @@ def _detail_page(
 {fk_effects}{extra_script}
 </script>
 
-<div class="px-4 mt-4">
-  <PermissionsMatrix permissions={{silo.permMatrix}} roles={{silo.permRoles}} />
-</div>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
   <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
     {{#if item}}
@@ -1780,33 +1762,6 @@ class SvelteAppGenerator(StoreGenerator):
                 post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
                 optional_post_fields, api_excluded,
             ))
-
-        # --- permissions-data.ts (static perm data for all resources) ---
-        perm_entries = []
-        for (sn, tn, _stem, _rn, _in,
-             _on, _pki, _pkf, a_fields,
-             _hp, _hpu, _hd,
-             _pin, _pun, mk, ca, _fk, _rfk,
-             _opf, ae) in resources:
-            roles_ts, matrix_ts = _build_perm_data(ca, list(a_fields.keys()), ae)
-            perm_entries.append(
-                f"  '{mk}': {{\n"
-                f"    roles: {roles_ts},\n"
-                f"    matrix: {matrix_ts},\n"
-                f"  }}"
-            )
-        perm_body = ',\n'.join(perm_entries)
-        perm_data_ts = (
-            "import type { PermMatrix } from './schema.types';\n\n"
-            "export interface ResourcePermissions {\n"
-            "  roles: string[];\n"
-            "  matrix: PermMatrix;\n"
-            "}\n\n"
-            "export const PERMISSIONS: Record<string, ResourcePermissions> = {\n"
-            f"{perm_body}\n"
-            "};\n"
-        )
-        self._write(stores_dir / 'permissions-data.ts', perm_data_ts)
 
         # --- static assets ---
         assets_src = Path(__file__).parents[3] / 'assets'

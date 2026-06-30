@@ -4,8 +4,6 @@ import { catchError, filter, map, of, tap } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { registerClear, registerClearForKey } from '../core/state-registry';
 import { ResourceSchema } from './schema.types';
-import type { PermMatrix } from './schema.types';
-
 export type Row = Record<string, unknown>;
 
 export class ResourceSilo {
@@ -29,10 +27,6 @@ export class ResourceSilo {
   readonly inaccessiblePostFields: Signal<Set<string>>;
   readonly inaccessiblePutFields:  Signal<Set<string>>;
 
-  // Static permissions from CRUD_ACCESS (all roles)
-  readonly permRoles: string[];
-  readonly permMatrix: PermMatrix;
-
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
   private pkFields: string[];
@@ -43,12 +37,7 @@ export class ResourceSilo {
     private baseUrl: string,
     private http: HttpClient,
     private auth: AuthService,
-    permRoles: string[] = [],
-    permMatrix: PermMatrix = {},
   ) {
-    this.permRoles  = permRoles;
-    this.permMatrix = permMatrix;
-
     this.pkFields = schema.pk_fields;
     if (schema.pk_fields.length === 1) {
       const pk = schema.pk_fields[0];

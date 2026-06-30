@@ -12,9 +12,30 @@ Terminé :
 
 Piste : une annotation dans le module Python (ex. `@ho_api_auto`) ou une déclaration dans `CRUD_ACCESS` qui marque ces champs comme « auto-resolved » côté backend et les exclut du formulaire généré côté frontend.
 
-## 4. Matrice des permissions — rien ne s'affiche
+## 4. Matrice des permissions — refonte
 
-`PermissionsMatrixComponent` n'affiche aucune ligne. À investiguer : les inputs `roles` et `permissions` sont-ils bien transmis, le composant est-il monté dans le bon contexte, ou y a-t-il une régression liée au changement `activeRoles` → `userRoles` ?
+**Diagnostic** : la matrice est toujours vide car :
+- Svelte : lit `mod.CRUD_ACCESS` (jamais défini, tout est en DB) → fallback vide
+- Angular : lit la DB au moment de `gen frontend`, mais le snapshot est figé
+
+**Décision** :
+- Supprimer `<PermissionsMatrix>` des pages list/detail pour les non-admins (redondant avec l'UI)
+- Supprimer `permMatrix`, `permRoles` des silos et `permissions-data.ts`
+- Réserver la matrice à la vue admin uniquement, alimentée par `/ho_admin/catalog`
+- La matrice admin permet de **simuler un rôle** : l'admin clique sur un rôle, `auth.access` est surchargé temporairement, toute l'UI se recalcule (colonnes, boutons, champs) comme si l'utilisateur avait ce rôle — sans que l'API l'honore (JWT admin inchangé). Une bannière indique le mode simulation.
+
+## 5. Rôles dynamiques — résolution systématique pour tous les verbes
+
+Le mécanisme de résolution dynamique des rôles n'est actuellement implémenté que pour GET (liste, affichage `meta.dynamic_roles`) et PUT (handler backend + bouton Edit frontend). Il faut l'étendre à tous les verbes de façon cohérente.
+
+**Cas concret** : si `post_author` a DELETE → pas de bouton Delete pour Alice. Si on voulait n'autoriser POST sur `blog/comment` qu'au propriétaire du post → le bouton Create n'apparaîtrait pas et le handler POST ne validerait pas le rôle dynamique.
+
+**Ce qui manque par verbe :**
+- DELETE : `canDeleteRow(id)` côté silo + condition dans les templates list + handler DELETE backend
+- POST : `canCreateInContext(parentId?)` côté silo + condition sur le bouton Create + handler POST backend
+- GET (filtre) : envisager de filtrer les lignes retournées selon le rôle dynamique (ex. n'afficher que ses propres posts)
+
+**Approche** : généraliser le pattern `canUpdateRow` → `canActionRow(verb, id)`, et côté backend appliquer la résolution dynamique dans tous les handlers (POST, PUT, DELETE) avant le contrôle d'accès.
 
 ## 3. Admin — droits d'accès hérités par le parent
 

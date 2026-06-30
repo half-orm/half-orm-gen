@@ -4,8 +4,6 @@ import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { HoMeta } from './schema.types';
 import { ResourceSilo } from './resource.silo';
-import { PERMISSIONS } from './permissions-data';
-
 @Injectable({ providedIn: 'root' })
 export class SiloRegistry {
   private http = inject(HttpClient);
@@ -20,14 +18,9 @@ export class SiloRegistry {
     this.meta.set(m);
     this.silos.clear();
     for (const [key, schema] of Object.entries(m)) {
-      const perms = PERMISSIONS[key] ?? {};
       this.silos.set(
         key,
-        new ResourceSilo(
-          key, schema, `${apiBase}/${key}`, this.http, this.auth,
-          perms.roles ?? [],
-          perms.matrix ?? {},
-        )
+        new ResourceSilo(key, schema, `${apiBase}/${key}`, this.http, this.auth)
       );
     }
     this._ready = true;

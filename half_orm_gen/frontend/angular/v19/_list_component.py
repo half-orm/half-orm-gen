@@ -176,7 +176,7 @@ def _list_component(
   }});"""
 
     router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
-    _comp_imports = ['PermissionsMatrixComponent']
+    _comp_imports = []
     if needs_router_link:
         _comp_imports.insert(0, 'RouterLink')
     imports_str = ', '.join(_comp_imports)
@@ -198,7 +198,6 @@ def _list_component(
   <div class="flex justify-between items-center mb-4">
     <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
   </div>
-  <app-permissions-matrix [permissions]="silo.permMatrix" [roles]="silo.permRoles" />
 }}
 <div [class]="embedded() ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
   <table class="w-full border-collapse">
@@ -248,8 +247,6 @@ import type {{ Row }} from '../../../generated/resource.silo';
 import {{ AuthService }} from '../../../core/auth.service';
 import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
 import type {{ FieldType }} from '../../../generated/stores/filters';
-import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
-
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
   standalone: true,

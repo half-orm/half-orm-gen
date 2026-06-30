@@ -36,8 +36,6 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { SiloRegistry } from '../../generated/silo-registry.service';
 import { FieldSchema, FkDep } from '../../generated/schema.types';
-import { PermissionsMatrixComponent } from '../../generated/permissions-matrix.component';
-
 interface ResourceView {
   key: string;
   table: string;
@@ -49,7 +47,7 @@ interface ResourceView {
 @Component({
   selector: 'app-schema',
   standalone: true,
-  imports: [RouterLink, PermissionsMatrixComponent],
+  imports: [RouterLink],
   styles: [':host { display: flex; height: 100%; overflow: hidden; }'],
   template: `
     <aside class="w-max shrink-0 overflow-y-auto border-r bg-white flex flex-col">
@@ -127,11 +125,6 @@ interface ResourceView {
                     }
                   }
                 </table>
-                @if (registry.tryGet(res.key); as silo) {
-                  <div class="px-4 py-2 border-t bg-gray-50">
-                    <app-permissions-matrix [permissions]="silo.permMatrix" [roles]="silo.permRoles" [defaultOpen]="true" />
-                  </div>
-                }
               </div>
             }
           </div>
