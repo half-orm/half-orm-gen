@@ -786,7 +786,7 @@ def _list_component(
             f'{{/if}}'
         )
 
-    action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
+    action_th = '<th class="px-2 py-2 w-16"></th>' if pk_field else ''
     th_cols   = (action_th + '\n        ' if action_th else '') + '\n        '.join(_sort_th(f) for f in out_names)
 
     filter_inputs = '\n        '.join(
@@ -805,7 +805,7 @@ def _list_component(
         'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
         'title="Clear all filters">✕</button>'
         '</th>'
-    ) if has_del and pk_field else ''
+    ) if pk_field else ''
     filter_row = (
         f'\n      {{#if !embedded}}\n'
         f'      <tr class="bg-white border-b">\n'
@@ -859,10 +859,10 @@ def _list_component(
         tr_attrs = 'class="border-t hover:bg-gray-50"'
 
     action_td = ''
-    if has_del and pk_field:
+    if pk_field:
         action_td = (
             f'<td class="px-2 py-2">\n'
-            f'          {{#if silo.canDelete}}\n'
+            f'          {{#if silo.canDelete(String({pk_item_expr}))}}\n'
             f'            <button'
             f' onclick={{(e) => {{ e.stopPropagation(); handleDelete({pk_item_expr}); }}}}'
             f'\n                    class="text-red-600 hover:underline text-sm">Delete</button>\n'
@@ -885,7 +885,7 @@ def _list_component(
         f'      if (res.ok) silo.removeItem(String(id));\n'
         f'    }}\n'
         f'  }}'
-        if has_del and pk_field else ''
+        if pk_field else ''
     )
     goto_import = "  import { goto } from '$app/navigation';\n" if pk_field else ''
 
@@ -1122,7 +1122,6 @@ def _list_component(
     <thead class="{{embedded ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'}}">
       <tr>
       {th_cols}
-        {action_th}
       </tr>{filter_row}
     </thead>
     <tbody>
@@ -1470,7 +1469,7 @@ def _detail_page(
 
     map_key       = f'{schema_name}/{table_name}'
     edit_btn_wrap = (
-        f'\n      {{#if silo.canEdit || silo.canUpdate(id)}}{edit_btn}\n      {{/if}}'
+        f'\n      {{#if silo.canUpdate(id)}}{edit_btn}\n      {{/if}}'
         if has_put and visible_put else ''
     )
 
