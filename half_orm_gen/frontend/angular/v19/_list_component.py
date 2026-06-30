@@ -98,8 +98,9 @@ def _list_component(
     new_btn = ''
     if has_post:
         new_btn = (
-            f'\n        @if (silo.canCreate()) {{\n'
+            f'\n        @if (silo.canCreateWithFilters(filters())) {{\n'
             f'          <a [routerLink]="[\'/ho_bo/{schema_name}/{table_name}/new\']"\n'
+            f'             [queryParams]="fkNewQueryParams()"\n'
             f'             class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
             f'            New\n          </a>\n        }}'
         )
@@ -201,7 +202,9 @@ def _list_component(
   @if (auth.isAdmin()) {{
     <app-permissions-matrix [catalogEntry]="auth.catalog()['{map_key}'] ?? null" />
   }}
-}}
+}} @else {{{new_btn and f'''
+  <div class="flex justify-end py-1 pr-1">{new_btn}
+  </div>''' or ''}}}
 <div [class]="embedded() ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
   <table class="w-full border-collapse">
     <thead [class]="embedded() ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
@@ -428,6 +431,16 @@ export class {iname}ListComponent {{
   clearAllFilters(): void {{
     this.localFilters.set({{}});
     this.syncFiltersToUrl({{}});
+  }}
+
+  fkNewQueryParams(): Record<string, string> {{
+    const fkAuto = this.silo.fkAutoPostFields();
+    const f = this.filters();
+    const params: Record<string, string> = {{}};
+    for (const [field, rule] of Object.entries(fkAuto)) {{
+      if (rule === 'context' && f[field] != null) params[field] = String(f[field]);
+    }}
+    return params;
   }}{select_fn}{delete_fn}
 }}
 """

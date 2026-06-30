@@ -160,6 +160,17 @@ def make_ho_admin_handlers(
                 if getattr(obj, 'has_default_value', None) is not None
             ]
 
+            fk_deps = []
+            for fk in getattr(rel_inst, '_ho_fkeys', {}).values():
+                if fk.is_reverse:
+                    continue
+                fqtn = fk.remote['fqtn']
+                fk_deps.append({
+                    'fields':        list(fk.names),
+                    'target':        f'{fqtn[0]}/{fqtn[1]}',
+                    'target_fields': list(fk.fk_names),
+                })
+
             dynamic_roles = [name for (s, t, name) in _ROLE_REGISTRY if s == schema and t == table]
 
             filter_rows = await api.filter()(schema_name=schema, table_name=table).ho_aselect()
@@ -181,13 +192,15 @@ def make_ho_admin_handlers(
                 ).ho_aselect()
                 verb_entry: dict = {}
                 for acc in acc_rows:
-                    out_rows = await api.field_access_out()(access_id=acc['id']).ho_aselect('field_name')
-                    in_rows  = await api.field_access_in()(access_id=acc['id']).ho_aselect('field_name')
-                    af_rows  = await api.access_filter()(access_id=acc['id']).ho_aselect('filter_id')
+                    out_rows    = await api.field_access_out()(access_id=acc['id']).ho_aselect('field_name')
+                    in_rows     = await api.field_access_in()(access_id=acc['id']).ho_aselect('field_name')
+                    af_rows     = await api.access_filter()(access_id=acc['id']).ho_aselect('filter_id')
+                    fk_auto_rows = await api.field_access_fk_auto()(access_id=acc['id']).ho_aselect('field_name', 'resolve_rule')
                     verb_entry[acc['role_name']] = {
                         'id':             str(acc['id']),
                         'out':            [r['field_name'] for r in out_rows],
                         'in':             [r['field_name'] for r in in_rows],
+                        'fk_auto':        {r['field_name']: r['resolve_rule'] for r in fk_auto_rows},
                         'active_filters': [str(r['filter_id']) for r in af_rows],
                     }
                 for role, entry in verb_entry.items():
@@ -212,6 +225,7 @@ def make_ho_admin_handlers(
                 'fields':               fields,
                 'pk_fields':            pk_fields,
                 'fields_with_defaults': fields_with_defaults,
+                'fk_deps':              fk_deps,
                 'dynamic_roles':        dynamic_roles,
                 'filters':              filters,
                 'access':               access,
@@ -358,6 +372,38 @@ def make_ho_admin_handlers(
         if resource:
             await _reload(resource)
 
+    @post(f'{prefix}/ho_admin/field_access_fk_auto')
+    async def ho_admin_set_fk_auto(request: Request, data: dict[str, Any]) -> dict:
+        _check_admin(request)
+        access_id    = data.get('access_id')
+        field_name   = data.get('field_name')
+        resolve_rule = data.get('resolve_rule')
+        if not access_id or not field_name or not resolve_rule:
+            raise HTTPException(status_code=400, detail='access_id, field_name and resolve_rule required')
+        if resolve_rule not in ('connected_user', 'context', 'select'):
+            raise HTTPException(status_code=400, detail='resolve_rule must be connected_user, context or select')
+        uid = uuid.UUID(access_id)
+        existing = await api.field_access_fk_auto()(access_id=uid, field_name=field_name).ho_aselect('id')
+        if existing:
+            await api.field_access_fk_auto()(access_id=uid, field_name=field_name).ho_aupdate(resolve_rule=resolve_rule)
+        else:
+            await api.field_access_fk_auto()(access_id=uid, field_name=field_name, resolve_rule=resolve_rule).ho_ainsert()
+        resource = await _resource_for_access(api, uid)
+        if resource:
+            await _reload(resource)
+        return {'access_id': access_id, 'field_name': field_name, 'resolve_rule': resolve_rule}
+
+    @delete(f'{prefix}/ho_admin/field_access_fk_auto/{{access_id:str}}/{{field_name:str}}')
+    async def ho_admin_remove_fk_auto(request: Request, access_id: str, field_name: str) -> None:
+        _check_admin(request)
+        uid = uuid.UUID(access_id)
+        resource = await _resource_for_access(api, uid)
+        result = await api.field_access_fk_auto()(access_id=uid, field_name=field_name).ho_adelete('*')
+        if not result:
+            raise HTTPException(status_code=404)
+        if resource:
+            await _reload(resource)
+
     @get(f'{prefix}/ho_admin/simulate-access')
     async def ho_admin_simulate_access(request: Request, role: str) -> dict:
         _check_admin(request)
@@ -381,4 +427,6 @@ def make_ho_admin_handlers(
         ho_admin_remove_field_in,
         ho_admin_add_access_filter,
         ho_admin_remove_access_filter,
+        ho_admin_set_fk_auto,
+        ho_admin_remove_fk_auto,
     ]

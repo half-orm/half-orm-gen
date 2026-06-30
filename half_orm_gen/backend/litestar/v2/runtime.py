@@ -249,6 +249,23 @@ def _make_post_handler(
             k: v for k, v in data.items()
             if v is not None and k in in_fields
         }
+        fk_auto: dict = {}
+        for role in roles:
+            fa = crud_access.get('POST', {}).get(role, {})
+            if isinstance(fa, dict):
+                fk_auto.update(fa.get('fk_auto', {}))
+        for field, rule in fk_auto.items():
+            if rule == 'connected_user':
+                payload.pop(field, None)
+                user_raw = getattr(request.state, 'user', None)
+                if isinstance(user_raw, dict):
+                    user_id = user_raw.get('id')
+                elif user_raw is not None:
+                    user_id = str(user_raw)
+                else:
+                    user_id = None
+                if user_id:
+                    payload[field] = user_id
         result = await cls(**payload).ho_ainsert()
         pk_val = result.get(pk_name, '') if result else ''
         await _manager.broadcast({'event': 'create', 'resource': resource, 'id': str(pk_val)})

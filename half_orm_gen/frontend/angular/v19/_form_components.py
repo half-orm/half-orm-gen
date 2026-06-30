@@ -75,6 +75,13 @@ def _create_component(
         )
         + null_map
         + "    );\n"
+        "    const fkAuto = this.silo.fkAutoPostFields();\n"
+        "    for (const [field, rule] of Object.entries(fkAuto)) {\n"
+        "      if (rule === 'context') {\n"
+        "        const val = this.route.snapshot.queryParamMap.get(field);\n"
+        "        if (val != null) payload[field] = val;\n"
+        "      }\n"
+        "    }\n"
         "    this.silo.create(payload).subscribe({"
     )
 
@@ -99,7 +106,7 @@ def _create_component(
     ts = f"""\
 import {{ Component, inject, signal }} from '@angular/core';
 import {{ FormsModule }} from '@angular/forms';
-import {{ RouterLink, Router }} from '@angular/router';
+import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
 import type {{ Row }} from '../../../generated/resource.silo';
 
@@ -113,6 +120,7 @@ import type {{ Row }} from '../../../generated/resource.silo';
 export class {iname}CreateComponent {{
   protected silo = inject(SiloRegistry).get('{schema_name}/{table_name}');
   private router = inject(Router);
+  private route  = inject(ActivatedRoute);
 {optional_set_ts}
   form: Partial<Row> = {{ {fields_ts} }};
   readonly error = signal('');

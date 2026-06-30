@@ -179,10 +179,15 @@ def _build_access_entry(
             else:
                 in_val  = _resolved_in(crud_access, verb, role)
                 out_val = _resolved_out(crud_access, verb, role)
-                verb_entry[role] = {
+                rv_dict = crud_access.get(verb, {}).get(role, {})
+                fk_auto = rv_dict.get('fk_auto', {}) if isinstance(rv_dict, dict) else {}
+                role_entry: dict = {
                     'in':  [f for f in in_val  if f not in api_excluded],
                     'out': [f for f in out_val if f not in api_excluded],
                 }
+                if fk_auto:
+                    role_entry['fk_auto'] = fk_auto
+                verb_entry[role] = role_entry
         if verb_entry:
             entry[verb] = verb_entry
     return entry
@@ -234,13 +239,18 @@ def _filter_access_for_roles(
                 else:
                     in_f: list = []
                     out_f: list = []
+                    fk_auto_merged: dict = {}
                     for v in active.values():
                         in_f.extend(v.get('in', []))
                         out_f.extend(v.get('out', []))
-                    resource_entry[verb] = {
+                        fk_auto_merged.update(v.get('fk_auto', {}))
+                    verb_result: dict = {
                         'in':  list(dict.fromkeys(in_f)),
                         'out': list(dict.fromkeys(out_f)),
                     }
+                    if fk_auto_merged:
+                        verb_result['fk_auto'] = fk_auto_merged
+                    resource_entry[verb] = verb_result
         if resource_entry:
             result[resource] = resource_entry
     return result

@@ -38,6 +38,7 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
 
             out_rows = await api.field_access_out()(access_id=acc_id).ho_aselect('field_name')
             in_rows  = await api.field_access_in()(access_id=acc_id).ho_aselect('field_name')
+            fk_rows  = await api.field_access_fk_auto()(access_id=acc_id).ho_aselect('field_name', 'resolve_rule')
 
             filter_rows = await api.access_filter()(access_id=acc_id).ho_aselect('filter_id')
             filter_names: list[str] = []
@@ -48,6 +49,7 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
 
             out_list = [r['field_name'] for r in out_rows]
             in_list  = [r['field_name'] for r in in_rows]
+            fk_auto  = {r['field_name']: r['resolve_rule'] for r in fk_rows}
 
             entry: dict = {}
             # GET always has 'out'; POST/PUT include 'out' only when explicitly set
@@ -56,6 +58,8 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
                 entry['out'] = out_list
             if verb in ('POST', 'PUT') and in_list:
                 entry['in'] = in_list
+            if fk_auto and verb in ('POST', 'PUT'):
+                entry['fk_auto'] = fk_auto
             if filter_names:
                 entry['filters'] = filter_names
             verb_dict[role] = entry

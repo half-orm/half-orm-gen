@@ -20,10 +20,12 @@ export class ResourceSilo {
   readonly dynamicRoles = signal<Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }>>({});
 
   // Per-resource access signals — derived from AuthService at runtime
-  readonly canCreate:             Signal<boolean>;
-  readonly inaccessibleFields:    Signal<Set<string>>;
+  readonly canCreate:              Signal<boolean>;
+  readonly inaccessibleFields:     Signal<Set<string>>;
   readonly inaccessiblePostFields: Signal<Set<string>>;
   readonly inaccessiblePutFields:  Signal<Set<string>>;
+  readonly fkAutoPostFields:       Signal<Record<string, string>>;
+  readonly fkAutoPutFields:        Signal<Record<string, string>>;
 
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
@@ -48,6 +50,12 @@ export class ResourceSilo {
     }
 
     this.canCreate = computed(() => !!(auth.effectiveAccess() as any)[key]?.POST);
+    this.fkAutoPostFields = computed(() =>
+      (auth.effectiveAccess() as any)[key]?.POST?.fk_auto ?? {}
+    );
+    this.fkAutoPutFields = computed(() =>
+      (auth.effectiveAccess() as any)[key]?.PUT?.fk_auto ?? {}
+    );
     this.inaccessibleFields = computed(() => {
       const allFields = schema.fields.map(f => f.name);
       const getAccess = (auth.effectiveAccess() as any)[key]?.GET;
@@ -58,24 +66,29 @@ export class ResourceSilo {
     });
     this.inaccessiblePostFields = computed(() => {
       const inFields: string[] | undefined = (auth.effectiveAccess() as any)[key]?.POST?.in;
+      const fkAuto: Record<string, string> = (auth.effectiveAccess() as any)[key]?.POST?.fk_auto ?? {};
+      const autoHidden = new Set(['connected_user', 'context']);
       const allFields = schema.fields.map(f => f.name);
-      if (inFields === undefined) return new Set<string>();
+      if (inFields === undefined) return new Set(Object.keys(fkAuto).filter(f => autoHidden.has(fkAuto[f])));
       if (inFields.length === 0) return new Set(allFields);
-      return new Set(allFields.filter(f => !inFields.includes(f)));
+      return new Set(allFields.filter(f => !inFields.includes(f) || autoHidden.has(fkAuto[f])));
     });
     this.inaccessiblePutFields = computed(() => {
       const allFields = schema.fields.map(f => f.name);
+      const fkAuto: Record<string, string> = (auth.effectiveAccess() as any)[key]?.PUT?.fk_auto ?? {};
       const staticIn: string[] | undefined = (auth.effectiveAccess() as any)[key]?.PUT?.in;
       if (staticIn !== undefined) {
         if (staticIn.length === 0) return new Set(allFields);
-        return new Set(allFields.filter(f => !staticIn.includes(f)));
+        return new Set(allFields.filter(f => !staticIn.includes(f) || !!fkAuto[f]));
       }
       for (const rd of Object.values(this.dynamicRoles())) {
-        if (rd.put_in !== undefined) {
-          if (rd.put_in.length === 0) return new Set(allFields);
-          return new Set(allFields.filter(f => !rd.put_in!.includes(f)));
+        const typedRd = rd as { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] };
+        if (typedRd.put_in !== undefined) {
+          if (typedRd.put_in.length === 0) return new Set(allFields);
+          return new Set(allFields.filter(f => !typedRd.put_in!.includes(f) || !!fkAuto[f]));
         }
       }
+      if (Object.keys(fkAuto).length) return new Set(Object.keys(fkAuto));
       return new Set<string>();
     });
 
@@ -105,7 +118,13 @@ export class ResourceSilo {
 
   canDelete(id: string): boolean {
     if (!!(this.auth.effectiveAccess() as any)[this.key]?.DELETE) return true;
-    return Object.values(this.dynamicRoles()).some(rd => rd.verbs.includes('DELETE') && rd.ids.includes(id));
+    return Object.values(this.dynamicRoles()).some(rd => (rd as any).verbs.includes('DELETE') && (rd as any).ids.includes(id));
+  }
+
+  canCreateWithFilters(filters: Record<string, unknown>): boolean {
+    if (!this.canCreate()) return false;
+    const fkAuto = this.fkAutoPostFields();
+    return Object.entries(fkAuto).every(([field, rule]) => rule !== 'context' || !!filters[field]);
   }
 
   listUrl(params: Row = {}): string {

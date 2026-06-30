@@ -191,6 +191,14 @@ CREATE TABLE IF NOT EXISTS "half_orm_meta.api".access_filter (
   PRIMARY KEY (access_id, filter_id)
 );
 
+CREATE TABLE IF NOT EXISTS "half_orm_meta.api".field_access_fk_auto (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  access_id    uuid NOT NULL REFERENCES "half_orm_meta.api".access(id) ON DELETE CASCADE,
+  field_name   text NOT NULL,
+  resolve_rule text NOT NULL CHECK (resolve_rule IN ('connected_user', 'context', 'select')),
+  UNIQUE (access_id, field_name)
+);
+
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".user_role (
   user_id   uuid NOT NULL,
   role_name text NOT NULL REFERENCES "half_orm_meta.api".role(name) ON DELETE CASCADE,

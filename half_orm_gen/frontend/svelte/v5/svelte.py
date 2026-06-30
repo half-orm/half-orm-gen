@@ -871,8 +871,8 @@ def _list_component(
         )
 
     new_btn = (
-        f'\n  {{#if silo.canCreate}}\n'
-        f'    <a href="/ho_bo/{schema_name}/{table_name}/new"\n'
+        f'\n  {{#if silo.canCreateWithFilters(filters)}}\n'
+        f'    <a href={{fkNewUrl()}}\n'
         f'       class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
         f'      New\n    </a>\n  {{/if}}'
         if has_post else ''
@@ -1109,12 +1109,26 @@ def _list_component(
 {delete_fn}
   let jsonDialog = $state<string | null>(null);
   function showJson(v: unknown): void {{ jsonDialog = JSON.stringify(v, null, 2); }}
+
+  function fkNewUrl(): string {{
+    const base = '/ho_bo/{schema_name}/{table_name}/new';
+    const fkAuto = silo.fkAutoPostFields;
+    const params = new URLSearchParams();
+    for (const [field, rule] of Object.entries(fkAuto)) {{
+      if (rule === 'context' && filters[field] != null) params.set(field, String(filters[field]));
+    }}
+    const qs = params.toString();
+    return qs ? `${{base}}?${{qs}}` : base;
+  }}
 </script>
 
 {{#if !embedded}}
 <div class="flex justify-between items-center mb-4">
   <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
 </div>
+{{:else}}{new_btn and f'''
+<div class="flex justify-end py-1 pr-1">{new_btn}
+</div>''' or ''}
 {{/if}}
 
 <div class="{{embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'}}">
@@ -1276,6 +1290,13 @@ def _new_page(
           .filter(([k, v]) => !optionalFields.has(k) || v !== '')
           {_null_map_js()}
       );
+      const urlParams = new URLSearchParams(window.location.search);
+      for (const [field, rule] of Object.entries(silo.fkAutoPostFields)) {{
+        if (rule === 'context') {{
+          const val = urlParams.get(field);
+          if (val != null) payload[field] = val;
+        }}
+      }}
       const res = await silo.create(payload);
       if (!res.ok) throw new Error(await res.text());
       const created = await res.json();

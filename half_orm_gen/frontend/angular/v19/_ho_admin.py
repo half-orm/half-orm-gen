@@ -5,16 +5,19 @@ import {{ Router }} from '@angular/router';
 import {{ AuthService }} from '../../core/auth.service';
 
 interface FilterInfo  {{ id: string; name: string; }}
+interface FkDep {{ fields: string[]; target: string; target_fields: string[]; }}
 interface AccessEntry {{
   id: string;
   in: string[];
   out: string[];
+  fk_auto: Record<string, 'connected_user' | 'context' | 'select'>;
   active_filters: string[];
 }}
 interface ResourceInfo {{
   fields: string[];
   pk_fields: string[];
   fields_with_defaults: string[];
+  fk_deps: FkDep[];
   dynamic_roles: string[];
   filters: FilterInfo[];
   access: Record<string, Record<string, AccessEntry>>;
@@ -183,13 +186,42 @@ const VERB_COLOR: Record<string, string> = {{
                                        (change)="!panelInheritedFrom() && !isInheritedField(f, 'in') && toggleField(f, 'in', !panelAccess()!.in.includes(f))"
                                        class="rounded border-gray-300 text-blue-600 w-3 h-3">
                                 <span class="font-mono"
-                                      [class]="panelInfo()!.fields_with_defaults.includes(f) ? 'text-gray-400' : 'text-gray-700'">{{{{ f }}}}</span>
+                                      [class]="panelInfo()!.fields_with_defaults.includes(f) ? 'text-gray-400' : (panelAccess()?.fk_auto?.[f] ? 'text-purple-600' : 'text-gray-700')">{{{{ f }}}}</span>
                                 @if (panelInfo()!.fields_with_defaults.includes(f)) {{
                                   <span class="text-[9px] bg-gray-100 text-gray-400 px-1 rounded" title="Has DB default — won't appear in forms">auto</span>
+                                }} @else if (panelAccess()?.fk_auto?.[f]) {{
+                                  <span class="text-[9px] bg-purple-50 text-purple-500 px-1 rounded">{{{{ panelAccess()!.fk_auto[f] }}}}</span>
                                 }}
                               </label>
                             }}
                           </div>
+                          @if (fkGroupsInPanel().length > 0) {{
+                            <div class="mt-3 space-y-2">
+                              <div class="text-[9px] font-bold uppercase tracking-widest text-purple-400 mb-1">FK auto-resolve</div>
+                              @for (fk of fkGroupsInPanel(); track fk.target) {{
+                                <div class="border-l-2 border-purple-200 pl-2">
+                                  <div class="flex items-center gap-2 mb-0.5">
+                                    <span class="text-[9px] text-purple-500 font-semibold">→ {{{{ fk.target }}}}</span>
+                                    @if (!panelInheritedFrom()) {{
+                                      <select class="text-[9px] border rounded px-1 py-0 leading-tight"
+                                              [value]="getFkAutoRule(fk.fields)"
+                                              (change)="setFkAutoGroup(fk.fields, $any($event.target).value)">
+                                        <option value="">—</option>
+                                        <option value="connected_user">connected_user</option>
+                                        <option value="context">context</option>
+                                        <option value="select">select</option>
+                                      </select>
+                                    }} @else {{
+                                      <span class="text-[9px] text-purple-400">{{{{ getFkAutoRule(fk.fields) || '—' }}}}</span>
+                                    }}
+                                  </div>
+                                  @for (f of fk.fields; track f) {{
+                                    <span class="text-[9px] font-mono text-purple-400 mr-1">{{{{ f }}}}</span>
+                                  }}
+                                </div>
+                              }}
+                            </div>
+                          }}
                         </div>
                       }}
 
@@ -379,6 +411,7 @@ export class HoAdminComponent implements OnInit {{
     const ins  = new Set<string>();
     const outs = new Set<string>();
     const filters = new Set<string>();
+    const fk_auto: Record<string, 'connected_user' | 'context' | 'select'> = {{}};
     for (const anc of this.ancestorChain()) {{
       const e = this.catalog()[resource]?.access?.[verb]?.[anc];
       if (!e) continue;
@@ -386,9 +419,10 @@ export class HoAdminComponent implements OnInit {{
       e.in.forEach(f  => ins.add(f));
       e.out.forEach(f => outs.add(f));
       e.active_filters.forEach(f => filters.add(f));
+      Object.assign(fk_auto, e.fk_auto ?? {{}});
     }}
     if (!found) return null;
-    return {{ id: '', in: [...ins], out: [...outs], active_filters: [...filters] }};
+    return {{ id: '', in: [...ins], out: [...outs], fk_auto, active_filters: [...filters] }};
   }}
 
   isInherited(resource: string, verb: string): boolean {{
@@ -531,6 +565,39 @@ export class HoAdminComponent implements OnInit {{
       await fetch(`{version_prefix}/ho_admin/access_filter/${{acc.id}}/${{filterId}}`, {{
         method: 'DELETE', headers: this._hdrs,
       }});
+    }}
+    await this._reloadCatalog();
+  }}
+
+  readonly fkGroupsInPanel = computed<FkDep[]>(() => {{
+    const p = this.panel();
+    const info = this.panelInfo();
+    const acc = this.panelEffectiveAccess();
+    if (!p || !info || !acc || p.verb === 'GET' || p.verb === 'DELETE') return [];
+    const inSet = new Set(acc.in);
+    return (info.fk_deps ?? []).filter(fk => fk.fields.some(f => inSet.has(f)));
+  }});
+
+  getFkAutoRule(fields: string[]): string {{
+    const fkAuto = this.panelAccess()?.fk_auto ?? {{}};
+    return fkAuto[fields[0]] ?? '';
+  }}
+
+  async setFkAutoGroup(fields: string[], rule: string): Promise<void> {{
+    const acc = this.panelAccess();
+    if (!acc) return;
+    for (const field of fields) {{
+      if (!rule) {{
+        await fetch(`{version_prefix}/ho_admin/field_access_fk_auto/${{acc.id}}/${{field}}`, {{
+          method: 'DELETE', headers: this._hdrs,
+        }});
+      }} else {{
+        await fetch('{version_prefix}/ho_admin/field_access_fk_auto', {{
+          method: 'POST',
+          headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
+          body: JSON.stringify({{access_id: acc.id, field_name: field, resolve_rule: rule}}),
+        }});
+      }}
     }}
     await this._reloadCatalog();
   }}

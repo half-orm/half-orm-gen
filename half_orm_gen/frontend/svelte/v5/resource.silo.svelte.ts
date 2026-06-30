@@ -18,6 +18,8 @@ export class ResourceSilo {
 
   // Per-resource access signals — derived from auth at runtime
   canCreate          = $derived(!!(auth.access as any)[this.key]?.POST);
+  fkAutoPostFields   = $derived<Record<string, string>>((auth.access as any)[this.key]?.POST?.fk_auto ?? {});
+  fkAutoPutFields    = $derived<Record<string, string>>((auth.access as any)[this.key]?.PUT?.fk_auto ?? {});
   inaccessibleFields = $derived.by(() => {
     const allFields = this.schema.fields.map((f: any) => f.name as string);
     const getAccess = (auth.access as any)[this.key]?.GET;
@@ -28,24 +30,28 @@ export class ResourceSilo {
   });
   inaccessiblePostFields = $derived.by(() => {
     const inFields = (auth.access as any)[this.key]?.POST?.in as string[] | undefined;
+    const fkAuto: Record<string, string> = (auth.access as any)[this.key]?.POST?.fk_auto ?? {};
+    const autoHidden = new Set(['connected_user', 'context']);
     const allFields = this.schema.fields.map((f: any) => f.name as string);
-    if (inFields === undefined) return new Set<string>();
+    if (inFields === undefined) return new Set(Object.keys(fkAuto).filter(f => autoHidden.has(fkAuto[f])));
     if (inFields.length === 0) return new Set(allFields);
-    return new Set(allFields.filter(f => !inFields.includes(f)));
+    return new Set(allFields.filter(f => !inFields.includes(f) || autoHidden.has(fkAuto[f])));
   });
   inaccessiblePutFields = $derived.by(() => {
     const allFields = this.schema.fields.map((f: any) => f.name as string);
+    const fkAuto: Record<string, string> = (auth.access as any)[this.key]?.PUT?.fk_auto ?? {};
     const staticIn = (auth.access as any)[this.key]?.PUT?.in as string[] | undefined;
     if (staticIn !== undefined) {
       if (staticIn.length === 0) return new Set(allFields);
-      return new Set(allFields.filter(f => !staticIn.includes(f)));
+      return new Set(allFields.filter(f => !staticIn.includes(f) || !!fkAuto[f]));
     }
     for (const rd of Object.values(this.dynamicRoles)) {
       if (rd.put_in !== undefined) {
         if (rd.put_in.length === 0) return new Set(allFields);
-        return new Set(allFields.filter(f => !rd.put_in!.includes(f)));
+        return new Set(allFields.filter(f => !rd.put_in!.includes(f) || !!fkAuto[f]));
       }
     }
+    if (Object.keys(fkAuto).length) return new Set(Object.keys(fkAuto));
     return new Set<string>();
   });
 
@@ -96,6 +102,12 @@ export class ResourceSilo {
   canDelete(id: string): boolean {
     if (!!(auth.access as any)[this.key]?.DELETE) return true;
     return Object.values(this.dynamicRoles).some(rd => rd.verbs.includes('DELETE') && rd.ids.includes(id));
+  }
+
+  canCreateWithFilters(filters: Record<string, unknown>): boolean {
+    if (!this.canCreate) return false;
+    const fkAuto = this.fkAutoPostFields;
+    return Object.entries(fkAuto).every(([field, rule]) => rule !== 'context' || !!filters[field]);
   }
 
   listUrl(params: Row = {}): string {
