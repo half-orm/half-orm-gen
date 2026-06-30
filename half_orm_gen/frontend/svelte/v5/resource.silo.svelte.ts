@@ -12,10 +12,11 @@ export class ResourceSilo {
   hasMore       = $state(true);
   currentOffset = $state(0);
 
-  filters    = $state<Record<string, string>>({});
-  selectedId = $state<string | null>(null);
-  sortField  = $state<string | null>(null);
-  sortAsc    = $state(true);
+  filters      = $state<Record<string, string>>({});
+  selectedId   = $state<string | null>(null);
+  sortField    = $state<string | null>(null);
+  sortAsc      = $state(true);
+  dynamicRoles = $state<Record<string, string[]>>({});
 
   // Static permissions from CRUD_ACCESS (all roles)
   readonly permRoles: string[];
@@ -92,6 +93,10 @@ export class ResourceSilo {
     return this.pkExtractor ? this.pkExtractor(item) : null;
   }
 
+  canUpdateRow(id: string): boolean {
+    return Object.values(this.dynamicRoles).some(ids => ids.includes(id));
+  }
+
   listUrl(params: Row = {}): string {
     const filtered = Object.fromEntries(
       Object.entries(params)
@@ -126,11 +131,12 @@ export class ResourceSilo {
     try {
       const res = await fetch(url, { headers: this.hdrs });
       if (!res.ok) return;
-      const { data, meta } = await res.json() as { data: Row[]; meta: { offset: number; limit: number; has_more: boolean } };
+      const { data, meta } = await res.json() as { data: Row[]; meta: { offset: number; limit: number; has_more: boolean; dynamic_roles?: Record<string, string[]> } };
       if (offset === 0 && !searchQ && Object.keys(params).length === 0) this._setItems(data);
       else this._mergeItems(data, otherParams);
       this.hasMore = meta.has_more;
       this.currentOffset = offset + data.length;
+      this.dynamicRoles = meta.dynamic_roles ?? {};
       if (!meta.has_more) this.loadedFilters.set(filterKey, true);
     } finally {
       this.isLoading = false;
@@ -164,6 +170,16 @@ export class ResourceSilo {
   }
 
   async refresh(id: string): Promise<Row | null> {
+    if (this.pkFields.length === 1) {
+      const pk = this.pkFields[0];
+      const url = this.listUrl({ [pk]: id });
+      const res = await fetch(url, { headers: this.hdrs });
+      if (!res.ok) return null;
+      const { data, meta } = await res.json() as { data: Row[]; meta: { dynamic_roles?: Record<string, string[]> } };
+      if (data[0]) this.setItem(data[0]);
+      this.dynamicRoles = meta?.dynamic_roles ?? {};
+      return data[0] ?? null;
+    }
     const url = this.getUrl(id);
     auth.fetchedRoutes.add(url);
     const res = await fetch(url, { headers: this.hdrs });

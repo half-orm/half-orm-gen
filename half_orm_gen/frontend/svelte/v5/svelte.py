@@ -183,27 +183,44 @@ class AuthState {{
     access                = $state<Record<string, any>>({{}});
     roles                 = $state<string[]>([]);
     users                 = $state<HoUser[]>([]);
+    hasAdmin              = $state<boolean | null>(null);
     lastEvent             = $state<WsEvent | null>(null);
     accessVersion         = $state(0);
     resourceAccessVersion = $state<Record<string, number>>({{}});
     fetchedRoutes         = new Set<string>();
 
+    userId = $derived.by(() => {{
+        const t = this.token;
+        if (!t) return null;
+        try {{ return (JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))) as any)['sub'] ?? null; }}
+        catch {{ return null; }}
+    }});
+
+    userRoles = $derived.by(() => {{
+        const t = this.token;
+        if (!t) return [] as string[];
+        try {{ return (JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))) as any)['roles'] ?? []; }}
+        catch {{ return [] as string[]; }}
+    }});
+
     displayName = $derived(
-        this.token
-            ? (this.users.find(u => u.id === this.token)?.name ?? this.token)
+        this.userId
+            ? (this.users.find(u => u.id === this.userId)?.name ?? 'anonymous')
             : 'anonymous'
     );
+
     isAdmin = $derived(
-        this.token === 'admin' || this.users.some(u => u.id === this.token && u.is_admin)
+        !!this.userId && this.users.some(u => u.id === this.userId && u.is_admin)
     );
 
-    login(t: string) {{
-        sessionStorage.setItem('ho_token', t);
-        this.token = t;
+    setToken(jwt: string) {{
+        sessionStorage.setItem('ho_token', jwt);
+        this.token = jwt;
         this.fetchedRoutes = new Set();
         clearAllStates();
-        this._fetchAccess();
-        this._fetchRoles();
+        void this._fetchAccess();
+        void this._fetchRoles();
+        void this._fetchUsers();
     }}
 
     logout() {{
@@ -212,7 +229,28 @@ class AuthState {{
         this.fetchedRoutes = new Set();
         clearAllStates();
         if (typeof window !== 'undefined') goto('/');
-        this._fetchAccess();
+        void this._fetchAccess();
+        void this._fetchRoles();
+    }}
+
+    async loginWithEmail(email: string) {{
+        const res = await fetch('{version_prefix}/auth/login', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ email }}),
+        }});
+        if (!res.ok) throw new Error(((await res.json()) as any).detail ?? 'Login failed');
+        this.setToken(((await res.json()) as any).token);
+    }}
+
+    async signupUser(name: string, email: string) {{
+        const res = await fetch('{version_prefix}/auth/signup', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ name, email }}),
+        }});
+        if (!res.ok) throw new Error(((await res.json()) as any).detail ?? 'Signup failed');
+        this.setToken(((await res.json()) as any).token);
     }}
 
     async _fetchAccess() {{
@@ -238,6 +276,13 @@ class AuthState {{
         try {{
             const res = await fetch('{version_prefix}/ho_users');
             if (res.ok) this.users = await res.json();
+        }} catch {{}}
+    }}
+
+    async _fetchSetupStatus() {{
+        try {{
+            const res = await fetch('{version_prefix}/ho_setup');
+            if (res.ok) this.hasAdmin = ((await res.json()) as any).has_admin;
         }} catch {{}}
     }}
 
@@ -279,9 +324,10 @@ class AuthState {{
 export const auth = new AuthState();
 
 if (typeof window !== 'undefined') {{
-    auth._fetchAccess();
-    auth._fetchRoles();
-    auth._fetchUsers();
+    void auth._fetchAccess();
+    void auth._fetchRoles();
+    void auth._fetchUsers();
+    void auth._fetchSetupStatus();
     auth._connectWs();
 }}
 """
@@ -329,12 +375,7 @@ def _access_page(version_prefix: str) -> str:
 <script lang="ts">
   import {{ auth }} from '$lib/auth.svelte.ts';
 
-  const activeRole = $derived(auth.token ?? 'anonymous');
-
-  function selectRole(role: string) {{
-    if (role === 'anonymous') auth.logout();
-    else auth.login(role);
-  }}
+  const activeRole = $derived(auth.userRoles[0] ?? 'anonymous');
 
   const VERB_COLOR: Record<string, string> = {{
     GET:    'bg-blue-100 text-blue-700',
@@ -352,12 +393,10 @@ def _access_page(version_prefix: str) -> str:
     {{:else}}
       <div class="space-y-1">
         {{#each auth.roles as role}}
-          <button
-            onclick={{() => selectRole(role)}}
-            class="w-full text-left px-3 py-2 rounded text-sm transition-colors
-                   {{activeRole === role ? 'bg-blue-600 text-white font-semibold' : 'text-gray-700 hover:bg-gray-100'}}">
+          <div class="w-full text-left px-3 py-2 rounded text-sm
+                      {{auth.userRoles.includes(role) ? 'bg-blue-100 text-blue-700 font-semibold' : 'text-gray-700'}}">
             {{role}}
-          </button>
+          </div>
         {{/each}}
       </div>
     {{/if}}
@@ -576,20 +615,36 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   let {{ children }} = $props();
   let navFilter  = $state('');
   let menuOpen   = $state(!auth.token);
-
-  function selectRole(role: string) {{
-    auth.login(role);
-    menuOpen = false;
-  }}
-
-  function selectUser(user: {{ id: string; name: string }}) {{
-    auth.login(user.id);
-    menuOpen = false;
-  }}
+  let showSignup = $state(false);
+  let loginEmail = $state('');
+  let signupName = $state('');
+  let signupEmail = $state('');
+  let authError  = $state('');
 
   function logout() {{
     auth.logout();
     menuOpen = true;
+    showSignup = false;
+    loginEmail = '';
+    authError = '';
+  }}
+
+  async function doLogin() {{
+    try {{
+      authError = '';
+      await auth.loginWithEmail(loginEmail);
+      menuOpen = false;
+      loginEmail = '';
+    }} catch (e: any) {{ authError = e.message; }}
+  }}
+
+  async function doSignup() {{
+    try {{
+      authError = '';
+      await auth.signupUser(signupName, signupEmail);
+      menuOpen = false;
+      signupName = ''; signupEmail = '';
+    }} catch (e: any) {{ authError = e.message; }}
   }}
 
   const navItems = [
@@ -604,12 +659,12 @@ def _layout(resources: list, version_prefix: str = '') -> str:
 
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
 <div class="h-screen flex flex-col bg-gray-50 overflow-hidden"
-     onclick={{(e) => {{ if (menuOpen && !(e.target as HTMLElement).closest('.role-menu')) menuOpen = false; }}}}
+     onclick={{(e) => {{ if (menuOpen && !(e.target as HTMLElement).closest('.auth-menu')) menuOpen = false; }}}}
      onkeydown={{(e) => {{ if (e.key === 'Escape') menuOpen = false; }}}}
      role="presentation">
   <header class="shrink-0 bg-white border-b h-11 flex items-center justify-between px-4">
     <span class="font-bold text-gray-800">halfORM Backoffice</span>
-    <div class="relative role-menu">
+    <div class="relative auth-menu">
       <button onclick={{(e) => {{ e.stopPropagation(); menuOpen = !menuOpen; }}}}
               class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border
                      {{auth.token ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}}
@@ -618,23 +673,54 @@ def _layout(resources: list, version_prefix: str = '') -> str:
         <span class="opacity-60">{{menuOpen ? '▲' : '▼'}}</span>
       </button>
       {{#if menuOpen}}
-        <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-44 py-1">
-          {{#if auth.users.length === 0}}
-            <p class="px-4 py-2 text-xs text-gray-400">Loading…</p>
-          {{:else}}
-            {{#each auth.users as user}}
-              <button onclick={{() => selectUser(user)}}
-                      class="w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition-colors
-                             {{auth.token === user.id ? 'font-semibold text-blue-600' : 'text-gray-700'}}">
-                {{user.name}}
-              </button>
-            {{/each}}
-          {{/if}}
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 w-64 p-3"
+             onclick={{(e) => e.stopPropagation()}}>
           {{#if auth.token}}
-            <div class="mx-3 my-1 border-t border-gray-100"></div>
+            <p class="text-xs text-gray-500 mb-2">Signed in as <strong>{{auth.displayName}}</strong></p>
             <button onclick={{logout}}
-                    class="w-full text-left px-4 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors">
+                    class="w-full text-left px-2 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded transition-colors">
               Sign out
+            </button>
+          {{:else if auth.hasAdmin === false}}
+            <p class="text-xs font-semibold text-gray-700 mb-3">Create admin account</p>
+            <input bind:value={{signupName}} placeholder="Name"
+                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <input bind:value={{signupEmail}} placeholder="Email" type="email"
+                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
+            <button onclick={{doSignup}}
+                    class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
+              Create account
+            </button>
+          {{:else if !showSignup}}
+            <p class="text-xs font-semibold text-gray-700 mb-3">Sign in</p>
+            <input bind:value={{loginEmail}} placeholder="Email" type="email"
+                   onkeydown={{(e) => {{ if (e.key === 'Enter') doLogin(); }}}}
+                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
+            <button onclick={{doLogin}}
+                    class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+              Sign in
+            </button>
+            <button onclick={{() => {{ showSignup = true; authError = ''; }}}}
+                    class="w-full text-xs text-blue-500 hover:underline">
+              Create account
+            </button>
+          {{:else}}
+            <p class="text-xs font-semibold text-gray-700 mb-3">Create account</p>
+            <input bind:value={{signupName}} placeholder="Name"
+                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <input bind:value={{signupEmail}} placeholder="Email" type="email"
+                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
+            <button onclick={{doSignup}}
+                    class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+              Create account
+            </button>
+            <button onclick={{() => {{ showSignup = false; authError = ''; }}}}
+                    class="w-full text-xs text-gray-400 hover:underline">
+              Back to sign in
             </button>
           {{/if}}
         </div>
@@ -1399,7 +1485,7 @@ def _detail_page(
 
     map_key       = f'{schema_name}/{table_name}'
     edit_btn_wrap = (
-        f'\n      {{#if silo.canEdit}}{edit_btn}\n      {{/if}}'
+        f'\n      {{#if silo.canEdit || silo.canUpdateRow(id)}}{edit_btn}\n      {{/if}}'
         if has_put and visible_put else ''
     )
 
