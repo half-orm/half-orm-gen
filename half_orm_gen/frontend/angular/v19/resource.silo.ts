@@ -26,6 +26,7 @@ export class ResourceSilo {
   readonly inaccessiblePutFields:  Signal<Set<string>>;
   readonly fkAutoPostFields:       Signal<Record<string, string>>;
   readonly fkAutoPutFields:        Signal<Record<string, string>>;
+  readonly searchableFields:       Signal<string[]>;
 
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
@@ -55,6 +56,9 @@ export class ResourceSilo {
     );
     this.fkAutoPutFields = computed(() =>
       (auth.effectiveAccess() as any)[key]?.PUT?.fk_auto ?? {}
+    );
+    this.searchableFields = computed(() =>
+      (auth.effectiveAccess() as any)[key]?.GET?.searchable ?? []
     );
     this.inaccessibleFields = computed(() => {
       const allFields = schema.fields.map(f => f.name);

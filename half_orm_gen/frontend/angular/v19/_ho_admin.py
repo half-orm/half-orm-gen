@@ -12,6 +12,7 @@ interface AccessEntry {{
   out: string[];
   fk_auto: Record<string, 'connected_user' | 'context' | 'select'>;
   active_filters: string[];
+  searchable: string[];
 }}
 interface ResourceInfo {{
   fields: string[];
@@ -249,6 +250,27 @@ const VERB_COLOR: Record<string, string> = {{
                         </div>
                       </div>
 
+                      <!-- Searchable fields (GET only) -->
+                      @if (panel()!.verb === 'GET') {{
+                        <div class="min-w-[140px]">
+                          <div class="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-2">Searchable</div>
+                          <div class="space-y-1">
+                            @for (f of panelInfo()!.fields; track f) {{
+                              @if (!panelInfo()!.pk_fields.includes(f) && panelEffectiveAccess()!.out.includes(f)) {{
+                                <label class="flex items-center gap-2 text-xs" [class]="panelInheritedFrom() ? 'cursor-default' : 'cursor-pointer'">
+                                  <input type="checkbox"
+                                         [checked]="panelAccess()!.searchable.includes(f)"
+                                         [disabled]="!!panelInheritedFrom()"
+                                         (change)="!panelInheritedFrom() && toggleSearchable(f, !panelAccess()!.searchable.includes(f))"
+                                         class="rounded border-gray-300 text-teal-600 w-3 h-3">
+                                  <span class="font-mono text-gray-700">{{{{ f }}}}</span>
+                                </label>
+                              }}
+                            }}
+                          </div>
+                        </div>
+                      }}
+
                       <!-- Filters (GET only) -->
                       @if (panel()!.verb === 'GET' && panelInfo()!.filters.length > 0) {{
                         <div class="min-w-[140px]">
@@ -405,6 +427,7 @@ export class HoAdminComponent implements OnInit {{
     const ins  = new Set<string>();
     const outs = new Set<string>();
     const filters = new Set<string>();
+    const searchable = new Set<string>();
     const fk_auto: Record<string, 'connected_user' | 'context' | 'select'> = {{}};
     for (const anc of this.ancestorChain()) {{
       const e = this.catalog()[resource]?.access?.[verb]?.[anc];
@@ -413,10 +436,11 @@ export class HoAdminComponent implements OnInit {{
       e.in.forEach(f  => ins.add(f));
       e.out.forEach(f => outs.add(f));
       e.active_filters.forEach(f => filters.add(f));
+      (e.searchable ?? []).forEach(f => searchable.add(f));
       Object.assign(fk_auto, e.fk_auto ?? {{}});
     }}
     if (!found) return null;
-    return {{ id: '', in: [...ins], out: [...outs], fk_auto, active_filters: [...filters] }};
+    return {{ id: '', in: [...ins], out: [...outs], fk_auto, active_filters: [...filters], searchable: [...searchable] }};
   }}
 
   isInherited(resource: string, verb: string): boolean {{
@@ -569,6 +593,23 @@ export class HoAdminComponent implements OnInit {{
       }});
     }} else {{
       await fetch(`{version_prefix}/ho_admin/access_filter/${{acc.id}}/${{filterId}}`, {{
+        method: 'DELETE', headers: this._hdrs,
+      }});
+    }}
+    await this._reloadCatalog();
+  }}
+
+  async toggleSearchable(fieldName: string, add: boolean): Promise<void> {{
+    const acc = this.panelAccess();
+    if (!acc) return;
+    if (add) {{
+      await fetch('{version_prefix}/ho_admin/field_access_searchable', {{
+        method: 'POST',
+        headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
+        body: JSON.stringify({{access_id: acc.id, field_name: fieldName}}),
+      }});
+    }} else {{
+      await fetch(`{version_prefix}/ho_admin/field_access_searchable/${{acc.id}}/${{fieldName}}`, {{
         method: 'DELETE', headers: this._hdrs,
       }});
     }}

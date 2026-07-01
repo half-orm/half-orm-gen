@@ -140,11 +140,21 @@ def _make_list_handler(
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
         roles = _expand_roles(_get_roles(request), parent_map_holder[0])
+        searchable_cols: set[str] = set()
+        for role in roles:
+            rv = crud_access.get('GET', {}).get(role, {})
+            if isinstance(rv, dict):
+                searchable_cols.update(rv.get('searchable', []))
         filter_kwargs: dict = {}
         search_cols: list[str] = []
         range_filters: list = []
+        if q and not searchable_cols:
+            return {'data': [], 'meta': {'offset': offset, 'limit': limit, 'has_more': False, 'dynamic_roles': {}}}
         if q:
             filter_kwargs, search_cols, range_filters = _parse_q(q, api_excluded)
+            filter_kwargs  = {k: v for k, v in filter_kwargs.items()  if k in searchable_cols}
+            search_cols    = [c for c in search_cols    if c in searchable_cols]
+            range_filters  = [r for r in range_filters  if r[0] in searchable_cols]
         col_filters: dict = {
             k[7:]: v
             for k, v in request.query_params.items()

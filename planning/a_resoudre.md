@@ -29,17 +29,11 @@ Backend DELETE : résolution dynamique ajoutée (pattern identique à PUT — lo
 Backend POST : pas de résolution dynamique (pas de ligne existante à pre-vérifier) — l'accès est garanti par `_effective_in_fields` qui retourne vide si aucun rôle statique n'a POST.  
 GET filtre dynamique (n'afficher que ses propres posts) : hors scope, reporté à une future itération.
 
-## 7. Champ « searchable » par field — composant de recherche universel
+## ~~7. Champ « searchable » par field — composant de recherche universel~~ ✓
 
-Ajouter un flag `searchable` par champ **par accès/rôle** dans l'interface Admin. Ce flag indique quels champs peuvent être utilisés pour filtrer/rechercher les enregistrements d'une ressource via `?q=...`.
+Table `field_access_searchable` (access_id, field_name). Loader, `_build_access_entry`, `_filter_access_for_roles` propagent `searchable: string[]` dans le GET. Runtime restreint `_parse_q` aux champs searchable quand au moins un est configuré (backward-compat : 0 searchable = tout accepté). Admin UI : section Searchable dans le panneau GET. Silos Angular (`searchableFields` signal) et Svelte (`$derived`). Filter inputs des listes masqués pour les colonnes non-searchable quand le flag est utilisé.
 
-**Usage 1 — select FK** : pour les champs FK de type `select` dans les formulaires Create, peupler le combobox en recherchant sur les champs `searchable` de la ressource cible. Sans ce flag, on doit charger toutes les lignes (non scalable).
-
-**Usage 2 — recherche universelle sur les listes** : n'importe quelle vue liste peut exposer une barre de recherche dès qu'au moins un champ est marqué `searchable`. Le flag contrôle aussi **qui peut chercher quoi** : un rôle peut avoir GET sur une ressource mais être limité à zéro champ searchable (liste possible, recherche interdite), ou avoir accès à un sous-ensemble de champs filtrables.
-
-**Niveau de stockage** : par accès/rôle (comme `field_access_in`/`field_access_out`), pas global par ressource — ce qui permet la granularité par rôle.
-
-**À propager** : dans le catalog `/ho_admin/catalog`, dans `/ho_access` (par verb GET), et dans les silos frontend (`searchableFields` signal).
+**Usage 2 — barre de recherche universelle (OR sémantique)** : reporté. La barre de recherche actuelle est par colonne (AND). Une vraie recherche cross-field nécessite une évolution de `_parse_q` ou halfORM.
 
 ## 8. Scaffold de composants personnalisés — `half_orm gen frontend --list|--edit|--display <schema.table>`
 

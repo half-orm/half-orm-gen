@@ -33,6 +33,9 @@ class HoApiModels:
     def field_access_fk_auto(self):
         return self._rel('field_access_fk_auto')
 
+    def field_access_searchable(self):
+        return self._rel('field_access_searchable')
+
     def filter(self):
         return self._rel('filter')
 

@@ -36,9 +36,10 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
                 verb_dict[role] = 'allowed'
                 continue
 
-            out_rows = await api.field_access_out()(access_id=acc_id).ho_aselect('field_name')
-            in_rows  = await api.field_access_in()(access_id=acc_id).ho_aselect('field_name')
-            fk_rows  = await api.field_access_fk_auto()(access_id=acc_id).ho_aselect('field_name', 'resolve_rule')
+            out_rows    = await api.field_access_out()(access_id=acc_id).ho_aselect('field_name')
+            in_rows     = await api.field_access_in()(access_id=acc_id).ho_aselect('field_name')
+            fk_rows     = await api.field_access_fk_auto()(access_id=acc_id).ho_aselect('field_name', 'resolve_rule')
+            srch_rows   = await api.field_access_searchable()(access_id=acc_id).ho_aselect('field_name')
 
             filter_rows = await api.access_filter()(access_id=acc_id).ho_aselect('filter_id')
             filter_names: list[str] = []
@@ -47,15 +48,18 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
                 if f:
                     filter_names.append(f[0]['name'])
 
-            out_list = [r['field_name'] for r in out_rows]
-            in_list  = [r['field_name'] for r in in_rows]
-            fk_auto  = {r['field_name']: r['resolve_rule'] for r in fk_rows}
+            out_list        = [r['field_name'] for r in out_rows]
+            in_list         = [r['field_name'] for r in in_rows]
+            fk_auto         = {r['field_name']: r['resolve_rule'] for r in fk_rows}
+            searchable_list = [r['field_name'] for r in srch_rows]
 
             entry: dict = {}
             # GET always has 'out'; POST/PUT include 'out' only when explicitly set
             # (absent 'out' triggers fallback to GET out in _resolved_out)
             if verb == 'GET' or out_list:
                 entry['out'] = out_list
+            if verb == 'GET' and searchable_list:
+                entry['searchable'] = searchable_list
             if verb in ('POST', 'PUT') and in_list:
                 entry['in'] = in_list
             if fk_auto and verb in ('POST', 'PUT'):

@@ -20,6 +20,7 @@ export class ResourceSilo {
   canCreate          = $derived(!!(auth.access as any)[this.key]?.POST);
   fkAutoPostFields   = $derived<Record<string, string>>((auth.access as any)[this.key]?.POST?.fk_auto ?? {});
   fkAutoPutFields    = $derived<Record<string, string>>((auth.access as any)[this.key]?.PUT?.fk_auto ?? {});
+  searchableFields   = $derived<string[]>((auth.access as any)[this.key]?.GET?.searchable ?? []);
   inaccessibleFields = $derived.by(() => {
     const allFields = this.schema.fields.map((f: any) => f.name as string);
     const getAccess = (auth.access as any)[this.key]?.GET;

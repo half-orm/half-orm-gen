@@ -173,7 +173,11 @@ def _build_access_entry(
                     for pk in reversed(pk_fields):
                         if pk not in out_fields and pk not in api_excluded:
                             out_fields.insert(0, pk)
-                verb_entry[role] = {'out': out_fields}
+                role_entry: dict = {'out': out_fields}
+                searchable = rv.get('searchable', []) if isinstance(rv, dict) else []
+                if searchable:
+                    role_entry['searchable'] = [f for f in searchable if f not in api_excluded]
+                verb_entry[role] = role_entry
             elif verb == 'DELETE':
                 verb_entry[role] = 'allowed'
             else:
@@ -233,9 +237,14 @@ def _filter_access_for_roles(
                     continue
                 if verb == 'GET':
                     out: list = []
+                    searchable: list = []
                     for v in active.values():
                         out.extend(v.get('out', []))
-                    resource_entry[verb] = {'out': list(dict.fromkeys(out))}
+                        searchable.extend(v.get('searchable', []))
+                    get_entry: dict = {'out': list(dict.fromkeys(out))}
+                    if searchable:
+                        get_entry['searchable'] = list(dict.fromkeys(searchable))
+                    resource_entry[verb] = get_entry
                 else:
                     in_f: list = []
                     out_f: list = []

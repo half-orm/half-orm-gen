@@ -199,16 +199,18 @@ def make_ho_admin_handlers(
                 ).ho_aselect()
                 verb_entry: dict = {}
                 for acc in acc_rows:
-                    out_rows    = await api.field_access_out()(access_id=acc['id']).ho_aselect('field_name')
-                    in_rows     = await api.field_access_in()(access_id=acc['id']).ho_aselect('field_name')
-                    af_rows     = await api.access_filter()(access_id=acc['id']).ho_aselect('filter_id')
-                    fk_auto_rows = await api.field_access_fk_auto()(access_id=acc['id']).ho_aselect('field_name', 'resolve_rule')
+                    out_rows         = await api.field_access_out()(access_id=acc['id']).ho_aselect('field_name')
+                    in_rows          = await api.field_access_in()(access_id=acc['id']).ho_aselect('field_name')
+                    af_rows          = await api.access_filter()(access_id=acc['id']).ho_aselect('filter_id')
+                    fk_auto_rows     = await api.field_access_fk_auto()(access_id=acc['id']).ho_aselect('field_name', 'resolve_rule')
+                    searchable_rows  = await api.field_access_searchable()(access_id=acc['id']).ho_aselect('field_name')
                     verb_entry[acc['role_name']] = {
                         'id':             str(acc['id']),
                         'out':            [r['field_name'] for r in out_rows],
                         'in':             [r['field_name'] for r in in_rows],
                         'fk_auto':        {r['field_name']: r['resolve_rule'] for r in fk_auto_rows},
                         'active_filters': [str(r['filter_id']) for r in af_rows],
+                        'searchable':     [r['field_name'] for r in searchable_rows],
                     }
                 for role, entry in verb_entry.items():
                     direct_out = set(entry['out'])
@@ -411,6 +413,46 @@ def make_ho_admin_handlers(
         if resource:
             await _reload(resource)
 
+    @post(f'{prefix}/ho_admin/field_access_searchable')
+    async def ho_admin_add_searchable(request: Request, data: dict[str, Any]) -> dict:
+        _check_admin(request)
+        access_id  = data.get('access_id')
+        field_name = data.get('field_name')
+        if not access_id or not field_name:
+            raise HTTPException(status_code=400, detail='access_id and field_name required')
+        uid = uuid.UUID(access_id)
+        await api.field_access_searchable()(access_id=uid, field_name=field_name).ho_ainsert()
+        resource = await _resource_for_access(api, uid)
+        if resource:
+            await _reload(resource)
+        return {'access_id': access_id, 'field_name': field_name}
+
+    @post(f'{prefix}/ho_admin/field_access_searchable/batch')
+    async def ho_admin_add_searchable_batch(request: Request, data: dict[str, Any]) -> dict:
+        _check_admin(request)
+        access_id   = data.get('access_id')
+        field_names = data.get('field_names', [])
+        if not access_id or not field_names:
+            raise HTTPException(status_code=400, detail='access_id and field_names required')
+        uid = uuid.UUID(access_id)
+        for field_name in field_names:
+            await api.field_access_searchable()(access_id=uid, field_name=field_name).ho_ainsert()
+        resource = await _resource_for_access(api, uid)
+        if resource:
+            await _reload(resource)
+        return {'access_id': access_id, 'field_names': field_names}
+
+    @delete(f'{prefix}/ho_admin/field_access_searchable/{{access_id:str}}/{{field_name:str}}')
+    async def ho_admin_remove_searchable(request: Request, access_id: str, field_name: str) -> None:
+        _check_admin(request)
+        uid = uuid.UUID(access_id)
+        resource = await _resource_for_access(api, uid)
+        result = await api.field_access_searchable()(access_id=uid, field_name=field_name).ho_adelete('*')
+        if not result:
+            raise HTTPException(status_code=404)
+        if resource:
+            await _reload(resource)
+
     @get(f'{prefix}/ho_admin/simulate-access')
     async def ho_admin_simulate_access(request: Request, role: str) -> dict:
         _check_admin(request)
@@ -436,4 +478,7 @@ def make_ho_admin_handlers(
         ho_admin_remove_access_filter,
         ho_admin_set_fk_auto,
         ho_admin_remove_fk_auto,
+        ho_admin_add_searchable,
+        ho_admin_add_searchable_batch,
+        ho_admin_remove_searchable,
     ]

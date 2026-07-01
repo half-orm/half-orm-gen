@@ -1,6 +1,8 @@
 """DDL for the "half_orm_meta.api" schema."""
 
 HO_API_DDL = """\
+CREATE EXTENSION IF NOT EXISTS unaccent;
+
 CREATE SCHEMA IF NOT EXISTS "half_orm_meta.api";
 
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".role (
@@ -197,6 +199,12 @@ CREATE TABLE IF NOT EXISTS "half_orm_meta.api".field_access_fk_auto (
   field_name   text NOT NULL,
   resolve_rule text NOT NULL CHECK (resolve_rule IN ('connected_user', 'context', 'select')),
   UNIQUE (access_id, field_name)
+);
+
+CREATE TABLE IF NOT EXISTS "half_orm_meta.api".field_access_searchable (
+  access_id  uuid NOT NULL REFERENCES "half_orm_meta.api".access(id) ON DELETE CASCADE,
+  field_name text NOT NULL,
+  PRIMARY KEY (access_id, field_name)
 );
 
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".user_role (

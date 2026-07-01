@@ -790,11 +790,13 @@ def _list_component(
     th_cols   = (action_th + '\n        ' if action_th else '') + '\n        '.join(_sort_th(f) for f in out_names)
 
     filter_inputs = '\n        '.join(
-        f'{{#if !silo.inaccessibleFields.has(\'{f}\')}}'
+        f'{{#if !silo.inaccessibleFields.has(\'{f}\') && silo.searchableFields.includes(\'{f}\')}}'
         f'<th class="px-2 py-1">'
         f'<input value={{localFilters[\'{f}\'] ?? \'\'}} '
         f'oninput={{(e) => localFilters = {{...localFilters, \'{f}\': e.currentTarget.value}}}} '
         f'placeholder="…" class="w-full text-xs border rounded px-2 py-1 font-normal" /></th>'
+        f'{{:else if !silo.inaccessibleFields.has(\'{f}\')}}'
+        f'<th class="px-2 py-1"></th>'
         f'{{/if}}'
         for f in out_names
     )

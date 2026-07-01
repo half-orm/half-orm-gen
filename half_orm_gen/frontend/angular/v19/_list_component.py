@@ -26,12 +26,14 @@ def _list_component(
 
     # Filter row (one input per column, hidden when embedded)
     filter_inputs = '\n              '.join(
-        f'@if (!silo.inaccessibleFields().has(\'{f}\')) {{'
+        f'@if (!silo.inaccessibleFields().has(\'{f}\') && silo.searchableFields().includes(\'{f}\')) {{'
         f'<th class="px-2 py-1">'
         f'<input [value]="localFilters()[\'{f}\'] || \'\'"'
         f' (input)="setFilter(\'{f}\', $any($event).target.value)"'
         f' placeholder="…"'
         f' class="w-full text-xs border rounded px-2 py-1" /></th>'
+        f'}} @else if (!silo.inaccessibleFields().has(\'{f}\')) {{'
+        f'<th class="px-2 py-1"></th>'
         f'}}'
         for f in out_names
     )
