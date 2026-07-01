@@ -750,6 +750,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
            onkeydown={{(e) => {{ if (e.key === 'Escape') searchOpen = false; }}}}>
         <div class="flex items-center border rounded text-xs bg-white overflow-hidden focus-within:ring-1 focus-within:ring-blue-300">
           <input value={{searchTerm}} oninput={{(e) => onSearchInput((e.target as HTMLInputElement).value)}}
+                 onfocus={{() => {{ if (Object.keys(searchResults).length > 0) searchOpen = true; }}}}
                  placeholder="Search…"
                  class="flex-1 px-3 py-1.5 outline-none min-w-0"/>
           <select value={{searchResource}} onchange={{(e) => {{ searchResource = (e.target as HTMLSelectElement).value; }}}}
@@ -1077,22 +1078,34 @@ def _list_component(
 
   // Initialize localFilters from URL or silo on mount (using a closure to run once)
   (() => {{
-    if (!embedded) {{
-      const urlFilters = initFiltersFromUrl(new URLSearchParams(window.location.search));
-      if (Object.keys(urlFilters).length > 0) {{
-        // URL has priority
-        localFilters = urlFilters;
-        silo.filters = urlFilters;
-      }} else {{
-        // Try to restore from silo
-        const siloFilters = silo.filters;
-        if (Object.keys(siloFilters).length > 0) {{
-          localFilters = siloFilters;
-          // Update URL to reflect silo filters
-          const newUrl = buildUrlWithFilters(window.location.pathname, siloFilters);
-          if (newUrl !== window.location.pathname + window.location.search) {{
-            goto(newUrl, {{ replaceState: true, keepFocus: true }});
-          }}
+    if (embedded) return;
+    const sp = new URLSearchParams(window.location.search);
+    // 'q' param comes from the global search bar "see all →" link (q=field:term,...)
+    const rawQ = sp.get('q');
+    if (rawQ) {{
+      const qFilters: Record<string, string> = {{}};
+      rawQ.split(',').forEach((pair: string) => {{
+        const idx = pair.indexOf(':');
+        if (idx > 0) qFilters[pair.substring(0, idx)] = pair.substring(idx + 1);
+      }});
+      if (Object.keys(qFilters).length > 0) localFilters = qFilters;
+      // $effect on localFilters will call silo.list({{q: rawQ}}) after debounce
+      return;
+    }}
+    const urlFilters = initFiltersFromUrl(sp);
+    if (Object.keys(urlFilters).length > 0) {{
+      // URL has priority
+      localFilters = urlFilters;
+      silo.filters = urlFilters;
+    }} else {{
+      // Try to restore from silo
+      const siloFilters = silo.filters;
+      if (Object.keys(siloFilters).length > 0) {{
+        localFilters = siloFilters;
+        // Update URL to reflect silo filters
+        const newUrl = buildUrlWithFilters(window.location.pathname, siloFilters);
+        if (newUrl !== window.location.pathname + window.location.search) {{
+          goto(newUrl, {{ replaceState: true, keepFocus: true }});
         }}
       }}
     }}

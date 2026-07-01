@@ -384,6 +384,23 @@ export class {iname}ListComponent {{
     if (this.embedded()) return; // Don't sync URL for embedded components
 
     const params = this.route.snapshot.queryParams;
+
+    // 'q' param comes from the global search bar "see all →" link (q=field:term,...)
+    const rawQ = typeof params['q'] === 'string' ? params['q'] : null;
+    if (rawQ) {{
+      const qFilters: Record<string, string> = {{}};
+      rawQ.split(',').forEach((pair: string) => {{
+        const idx = pair.indexOf(':');
+        if (idx > 0) qFilters[pair.substring(0, idx)] = pair.substring(idx + 1);
+      }});
+      if (Object.keys(qFilters).length > 0) {{
+        this.localFilters.set(qFilters);
+        this.silo.resetFilterState();
+        this.silo.list({{q: rawQ}} as any, 0);
+      }}
+      return;
+    }}
+
     const urlFilters = parseFiltersFromUrl(params, this.fieldTypes);
 
     // If URL has filters, use them (priority)

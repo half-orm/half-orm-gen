@@ -78,7 +78,7 @@ def _detail_component(
         )
         form_class = f'  form: any = {{ {form_init} }};'
         edit_btn_tmpl = (
-            '\n        @if (silo.canAccess(\'PUT\', id)) {\n'
+            '\n        @if (silo.canAccess(\'PUT\', id())) {\n'
             '          <button (click)="editing.set(!editing()); error.set(\'\')"'
             '\n                  class="text-sm px-3 py-1 border rounded hover:bg-gray-50">\n'
             '            {{ editing() ? \'Cancel\' : \'Edit\' }}\n'
@@ -173,7 +173,7 @@ def _detail_component(
             f'        .filter(([k]) => !this.silo.inaccessiblePutFields().has(k))\n'
             f'        .map(([k, v]): [string, unknown] => [k, !textFields.has(k) && v === \'\' ? null : v])\n'
             f'    );\n'
-            f'    this.silo.update(this.id, putPayload).subscribe({{\n'
+            f'    this.silo.update(this.id(), putPayload).subscribe({{\n'
             f'      next: (updated) => {{\n'
             f'        this.silo.setItem(updated); this.editing.set(false);\n'
             f'        document.querySelector(\'main\')?.scrollTo({{ top: 0, behavior: \'smooth\' }});\n'
@@ -185,7 +185,7 @@ def _detail_component(
 
     ws_effect = (
         f'\n    this.auth.wsEvent$.pipe(\n'
-        f"      filter(ev => ev.resource === '{map_key}' && String(ev.id) === this.id && ev.event === 'delete'),\n"
+        f"      filter(ev => ev.resource === '{map_key}' && String(ev.id) === this.id() && ev.event === 'delete'),\n"
         f'      takeUntilDestroyed(),\n'
         f'    ).subscribe(() => void this.router.navigate([\'/ho_bo/{schema_name}/{table_name}\']));'
     )
@@ -237,9 +237,9 @@ def _detail_component(
 
     ts = f"""\
 import {{ Component, computed, effect, inject, signal, untracked }} from '@angular/core';
-import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
+import {{ takeUntilDestroyed, toSignal }} from '@angular/core/rxjs-interop';
 import {{ Location }} from '@angular/common';
-import {{ filter }} from 'rxjs';
+import {{ filter, map }} from 'rxjs';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
@@ -264,8 +264,8 @@ export class {iname}DetailComponent {{
   private route      = inject(ActivatedRoute);
   protected String = String;  // For template use{pk_id_line}
 
-  readonly id   = this.route.snapshot.params['id'] as string;
-  readonly item = computed<Row | null>(() => this.silo.byPk().get(this.id) ?? null);
+  readonly id   = toSignal(this.route.paramMap.pipe(map(p => p.get('id') ?? '')), {{ initialValue: this.route.snapshot.params['id'] as string }});
+  readonly item = computed<Row | null>(() => this.silo.byPk().get(this.id()) ?? null);
 
   readonly editing = signal(false);
   readonly error   = signal('');
@@ -276,7 +276,7 @@ export class {iname}DetailComponent {{
       void this.auth.token();
       void this.auth.resourceAccessVersion()['{map_key}'];
       void this.auth.simulatedRole();
-      if (!this.item()) untracked(() => this.silo.get(this.id as any).subscribe());
+      if (!this.item()) untracked(() => this.silo.get(this.id() as any).subscribe());
     }});{form_effect}{ws_effect}{fk_fetch_effects}
   }}
 

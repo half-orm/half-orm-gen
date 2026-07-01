@@ -260,6 +260,7 @@ const API_BASE = '{api_base}';
             <div class="relative flex-1 mx-6 max-w-lg" (click)="$event.stopPropagation()">
               <div class="flex items-center border rounded text-xs bg-white overflow-hidden focus-within:ring-1 focus-within:ring-blue-300">
                 <input [value]="searchTerm()" (input)="onSearchInput($any($event).target.value)"
+                       (focus)="reopenSearch()"
                        placeholder="Search…"
                        class="flex-1 px-3 py-1.5 outline-none min-w-0"/>
                 <select [value]="searchResource()" (change)="searchResource.set($any($event).target.value)"
@@ -590,6 +591,10 @@ export class AppComponent implements OnInit {{
 
   closeSearch(): void {{
     this.searchOpen.set(false);
+  }}
+
+  reopenSearch(): void {{
+    if (Object.keys(this.searchResults()).length > 0) this.searchOpen.set(true);
   }}
 
   private _buildSeeAllParams(fields: string[], term: string): Record<string, string> {{
