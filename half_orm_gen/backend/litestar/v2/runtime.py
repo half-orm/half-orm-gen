@@ -337,13 +337,28 @@ def _make_delete_handler(
     is_simple = len(pk_names) == 1
     pk_name = pk_info[0][0]
     slug = resource.replace('/', '_')
+    del_schema, del_table = resource.split('/')
 
     async def handler(request: Request, id: str) -> None:
+        from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
         crud_access = crud_access_by_res.get(resource, {})
         roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         if not crud_access.get('DELETE'):
             raise HTTPException(status_code=403)
         pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
+        dyn_methods = [(rn, fn) for (s, t, rn), fn in _ROLE_REGISTRY.items()
+                       if s == del_schema and t == del_table]
+        if dyn_methods and getattr(request.state, 'user', None):
+            rows = await cls(**pk_filter).ho_aselect()
+            if not rows:
+                raise HTTPException(status_code=404)
+            resolver_inst = cls()
+            for role_name, fn in dyn_methods:
+                pk_set = fn(resolver_inst, request, rows)
+                if str(id) in {str(pk) for pk in pk_set}:
+                    roles = list(dict.fromkeys(roles + [role_name]))
+        if not any(r in crud_access.get('DELETE', {}) for r in roles):
+            raise HTTPException(status_code=403)
         inst = cls(**pk_filter)
         await _ws_broadcast_cascade(inst, resource, id, ws_rmap, _manager.broadcast)
         result = await inst.ho_adelete('*')

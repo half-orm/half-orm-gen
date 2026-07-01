@@ -22,18 +22,12 @@ Réalisé : `<PermissionsMatrix>` supprimée des pages list/detail, matrice rés
 
 `openPanel` auto-crée l'own entry si hérité, `hasAncestorVerb` verrouille la checkbox même après création, warning supprimé sur verbe couvert par un ancêtre.
 
-## 6. Rôles dynamiques — résolution systématique pour tous les verbes
+## ~~6. Rôles dynamiques — résolution systématique pour tous les verbes~~ ✓
 
-Le mécanisme de résolution dynamique des rôles n'est actuellement implémenté que pour GET (liste, affichage `meta.dynamic_roles`) et PUT (handler backend + bouton Edit frontend). Il faut l'étendre à tous les verbes de façon cohérente.
-
-**Cas concret** : si `post_author` a DELETE → pas de bouton Delete pour Alice. Si on voulait n'autoriser POST sur `blog/comment` qu'au propriétaire du post → le bouton Create n'apparaîtrait pas et le handler POST ne validerait pas le rôle dynamique.
-
-**Ce qui manque par verbe :**
-- DELETE : `canDeleteRow(id)` côté silo + condition dans les templates list + handler DELETE backend
-- POST : `canCreateInContext(parentId?)` côté silo + condition sur le bouton Create + handler POST backend
-- GET (filtre) : envisager de filtrer les lignes retournées selon le rôle dynamique (ex. n'afficher que ses propres posts)
-
-**Approche** : généraliser le pattern `canUpdate` → `canActionRow(verb, id)`, et côté backend appliquer la résolution dynamique dans tous les handlers (POST, PUT, DELETE) avant le contrôle d'accès.
+Frontend : `canAccess(verb, id)` généralise `canUpdate`/`canDelete` dans les silos Angular et Svelte + templates list/detail.  
+Backend DELETE : résolution dynamique ajoutée (pattern identique à PUT — lookup de la ligne, appel des resolvers, ajout du rôle dynamique) + vérification post-résolution que le rôle a bien DELETE.  
+Backend POST : pas de résolution dynamique (pas de ligne existante à pre-vérifier) — l'accès est garanti par `_effective_in_fields` qui retourne vide si aucun rôle statique n'a POST.  
+GET filtre dynamique (n'afficher que ses propres posts) : hors scope, reporté à une future itération.
 
 ## 7. Champ « searchable » par field — composant de recherche universel
 
@@ -62,3 +56,19 @@ half_orm gen frontend --angular --display blog.post   # vue lecture seule
 **Ce que ça génère** : le composant Angular/Svelte correspondant (fichier `.ts` + `.html` ou `.svelte`), pré-câblé sur le silo de la ressource, avec les guards d'accès. Le fichier est placé dans un répertoire `custom/` pour ne pas être écrasé par un `gen frontend` complet.
 
 **Lien avec searchable** : le composant `--list` pourrait intégrer automatiquement la barre de recherche si des champs `searchable` sont configurés.
+
+## 9. Protection du dernier admin — backend
+
+La suppression d'un utilisateur ou d'une association `user_role` qui retire le dernier admin laisse le système dans un état irrécupérable (plus personne ne peut accéder à l'interface admin). Le backend doit refuser toute opération (DELETE sur `actor/user`, DELETE sur `half_orm_meta_api/user_role`, PUT qui retire le flag admin) qui ferait tomber à zéro le nombre d'utilisateurs ayant le rôle `admin`.
+
+**Implémentation suggérée** : hook de validation dans les handlers DELETE/PUT des ressources concernées, ou contrainte au niveau du loader qui vérifie `SELECT count(*) FROM user_role WHERE role_name = 'admin'` avant d'appliquer la modification.
+
+## 10. Gestion des erreurs frontend — Angular et Svelte
+
+Les handlers de formulaire (POST, PUT, DELETE) ne gèrent pas les erreurs retournées par le backend (4xx, 5xx). L'utilisateur ne voit rien en cas d'échec.
+
+**À couvrir** :
+- Affichage d'un message d'erreur contextuel (inline dans le formulaire ou toast) en cas de 4xx (validation, 403, 409 conflict)
+- Gestion des 5xx (message générique, pas de crash silencieux)
+- Cas particulier : 401 → redirection vers login ou refresh du token
+- Cohérence Angular / Svelte
