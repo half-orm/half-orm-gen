@@ -695,10 +695,9 @@ def _layout(resources: list, version_prefix: str = '') -> str:
     return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
   }}
 
-  function buildSeeAllHref(resource: string, fields: string[], term: string): string {{
-    if (!fields.length || !term.trim()) return `/ho_bo/${{resource}}`;
-    const q = fields.map((f: string) => `${{f}}:${{term.trim()}}`).join(',');
-    return `/ho_bo/${{resource}}?q=${{encodeURIComponent(q)}}`;
+  function buildSeeAllHref(resource: string, term: string): string {{
+    if (!term.trim()) return `/ho_bo/${{resource}}`;
+    return `/ho_bo/search?q=${{encodeURIComponent(term.trim())}}&r=${{encodeURIComponent(resource)}}`;
   }}
 
   const navItems = [
@@ -727,7 +726,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
         data: (val.data ?? []) as Record<string, any>[],
         searchable_fields: (val.searchable_fields ?? []) as string[],
         has_more: val.has_more ?? false,
-        seeAllHref: buildSeeAllHref(resource, val.searchable_fields ?? [], searchTerm),
+        seeAllHref: buildSeeAllHref(resource, searchTerm),
       }}))
       .filter((e: any) => e.data.length > 0)
   );
@@ -881,6 +880,108 @@ def _layout(resources: list, version_prefix: str = '') -> str:
       {{@render children()}}
     </main>
   </div>
+</div>
+"""
+
+
+def _search_page_svelte(version_prefix: str) -> str:
+    return f"""\
+<script lang="ts">
+  import {{ goto }} from '$app/navigation';
+  import {{ page }} from '$app/stores';
+  import {{ auth }} from '$lib/auth.svelte.ts';
+  import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
+
+  const API_BASE = '{version_prefix}';
+
+  let results  = $state<Record<string, any>>({{  }});
+  let loading  = $state(false);
+  let searched = $state(false);
+
+  const q = $derived($page.url.searchParams.get('q') ?? '');
+  const r = $derived($page.url.searchParams.get('r') ?? 'all');
+
+  $effect(() => {{
+    void q; void r;
+    if (!q.trim()) {{ results = {{  }}; searched = false; return; }}
+    void runSearch(q, r);
+  }});
+
+  async function runSearch(term: string, resource: string): Promise<void> {{
+    loading = true;
+    const headers: Record<string, string> = {{}};
+    const tok = auth.token;
+    if (tok) headers['Authorization'] = `Bearer ${{tok}}`;
+    try {{
+      const resParam = resource && resource !== 'all' ? `&resource=${{encodeURIComponent(resource)}}` : '';
+      const res = await fetch(`${{API_BASE}}/ho_search?q=${{encodeURIComponent(term)}}&limit=50${{resParam}}`, {{ headers }});
+      results = res.ok ? await res.json() : {{  }};
+    }} finally {{
+      loading = false;
+      searched = true;
+    }}
+  }}
+
+  const resultEntries = $derived(
+    Object.entries(results)
+      .map(([resource, val]: [string, any]) => ({{
+        resource,
+        data: (val.data ?? []) as Record<string, any>[],
+        searchable_fields: (val.searchable_fields ?? []) as string[],
+      }}))
+      .filter((e: any) => e.data.length > 0)
+  );
+
+  function goToDetail(resource: string, row: Record<string, any>): void {{
+    const meta = (registry.meta as any)[resource];
+    if (!meta) return;
+    const pk: string[] = meta.pk_fields ?? [];
+    const id = pk.length === 1
+      ? String(row[pk[0]])
+      : pk.map((f: string) => `${{f}}:${{row[f]}}`).join('::');
+    goto(`/ho_bo/${{resource}}/${{id}}`);
+  }}
+
+  function formatResult(row: Record<string, any>, fields: string[]): string {{
+    if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
+    return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
+  }}
+</script>
+
+<div class="px-4 py-6 max-w-3xl mx-auto">
+  <h1 class="text-xl font-bold mb-1">Search results</h1>
+  {{#if q}}
+    <p class="text-sm text-gray-500 mb-4">
+      for "<span class="font-medium text-gray-700">{{q}}</span>"
+      {{#if r !== 'all'}}
+        in <span class="font-medium text-gray-700">{{r.replace('/', '.')}}</span>
+      {{/if}}
+    </p>
+  {{/if}}
+  {{#if loading}}
+    <div class="text-gray-400 text-sm py-8 text-center">Searching…</div>
+  {{:else if searched && resultEntries.length === 0}}
+    <div class="text-gray-400 text-sm py-8 text-center">No results found.</div>
+  {{:else}}
+    {{#each resultEntries as entry}}
+      <div class="mb-6">
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+          <a href="/ho_bo/{{entry.resource}}" class="hover:underline hover:text-blue-700">
+            {{entry.resource.replace('/', '.')}}
+          </a>
+        </h2>
+        <div class="bg-white rounded-lg shadow overflow-hidden divide-y">
+          {{#each entry.data as row}}
+            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+            <div onclick={{() => goToDetail(entry.resource, row)}}
+                 class="px-4 py-3 hover:bg-blue-50 cursor-pointer text-sm text-gray-700">
+              {{formatResult(row, entry.searchable_fields)}}
+            </div>
+          {{/each}}
+        </div>
+      </div>
+    {{/each}}
+  {{/if}}
 </div>
 """
 
@@ -1080,18 +1181,6 @@ def _list_component(
   (() => {{
     if (embedded) return;
     const sp = new URLSearchParams(window.location.search);
-    // 'q' param comes from the global search bar "see all →" link (q=field:term,...)
-    const rawQ = sp.get('q');
-    if (rawQ) {{
-      const qFilters: Record<string, string> = {{}};
-      rawQ.split(',').forEach((pair: string) => {{
-        const idx = pair.indexOf(':');
-        if (idx > 0) qFilters[pair.substring(0, idx)] = pair.substring(idx + 1);
-      }});
-      if (Object.keys(qFilters).length > 0) localFilters = qFilters;
-      // $effect on localFilters will call silo.list({{q: rawQ}}) after debounce
-      return;
-    }}
     const urlFilters = initFiltersFromUrl(sp);
     if (Object.keys(urlFilters).length > 0) {{
       // URL has priority
@@ -1967,6 +2056,8 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(routes_dir / '(nav)' / 'login'  / '+page.svelte', _login_page(version_prefix))
         self._write(routes_dir / '(nav)' / 'access' / '+page.svelte', _access_page(version_prefix))
         self._write(routes_dir / '(nav)' / 'schema' / '+page.svelte', _schema_page_svelte(), once=True)
+        self._write(routes_dir / '(nav)' / 'ho_bo' / 'search' / '+page.svelte',
+                    _search_page_svelte(version_prefix))
 
         # --- per-resource components + routes ---
         for (schema_name, table_name, stem, rname, iname,

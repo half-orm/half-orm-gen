@@ -30,6 +30,7 @@ from ._static import (
 from ._app_shell import (
     _auth_service, _app_component, _auth_guard_ts, _admin_guard_ts, _app_routes,
     _login_component, _access_component,
+    _ho_search_component_ts, _ho_search_component_html,
 )
 from ._ho_admin import _ho_admin_component_ts
 from ._pages import _home_component_ts, _schema_component_ts
@@ -293,6 +294,10 @@ class AngularAppGenerator(StoreGenerator):
                     _login_component(version_prefix))
         self._write(app_dir / 'pages' / 'access' / 'access.component.ts',
                     _access_component(version_prefix))
+        self._write(app_dir / 'pages' / 'search' / 'ho-search.component.ts',
+                    _ho_search_component_ts(version_prefix))
+        self._write(app_dir / 'pages' / 'search' / 'ho-search.component.html',
+                    _ho_search_component_html())
 
         # --- per-resource generated components ---
         for r in resources:

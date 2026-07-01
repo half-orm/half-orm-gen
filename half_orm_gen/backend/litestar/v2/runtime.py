@@ -432,6 +432,7 @@ def _make_ho_search(
         request: Request,
         q: Optional[str] = None,
         limit: Optional[int] = 5,
+        resource: Optional[str] = None,
     ) -> dict:
         if not q or not q.strip():
             return {}
@@ -439,9 +440,10 @@ def _make_ho_search(
         roles = _expand_roles(_get_roles(request), parent_map_holder[0])
         result: dict = {}
 
-        for resource, cls in classes_by_res.items():
-            crud_access = crud_access_by_res.get(resource, {})
-            api_excluded = api_excluded_by_res.get(resource, [])
+        candidates = {resource: classes_by_res[resource]} if resource and resource in classes_by_res else classes_by_res
+        for res_key, cls in candidates.items():
+            crud_access = crud_access_by_res.get(res_key, {})
+            api_excluded = api_excluded_by_res.get(res_key, [])
 
             searchable_cols: list[str] = []
             for role in roles:
@@ -456,7 +458,7 @@ def _make_ho_search(
             pk_names = list(getattr(cls(), '_ho_pkey', {}).keys())
             authorized = _effective_out_fields(
                 crud_access, 'GET', roles, api_excluded,
-                all_fields_by_res.get(resource, []), pk_names or None,
+                all_fields_by_res.get(res_key, []), pk_names or None,
             )
             if not authorized:
                 continue
@@ -479,7 +481,7 @@ def _make_ho_search(
             data = list(rows)
 
             if data:
-                result[resource] = {
+                result[res_key] = {
                     'data': data,
                     'searchable_fields': searchable_cols,
                     'has_more': len(data) == limit,

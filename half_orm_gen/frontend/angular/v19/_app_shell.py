@@ -282,7 +282,7 @@ const API_BASE = '{api_base}';
                       <div class="px-3 pt-2 pb-1 border-b last:border-b-0">
                         <div class="flex items-center justify-between mb-1">
                           <span class="text-[10px] font-bold uppercase tracking-wide text-gray-400">{{{{ entry.resource.replace('/', '.') }}}}</span>
-                          <a [routerLink]="['/ho_bo/' + entry.resource]" [queryParams]="entry.seeAllParams"
+                          <a [routerLink]="['/ho_bo/search']" [queryParams]="entry.seeAllParams"
                              (click)="closeSearch()"
                              class="text-[10px] text-blue-500 hover:underline">see all →</a>
                         </div>
@@ -478,7 +478,7 @@ export class AppComponent implements OnInit {{
         data: (val.data ?? []) as Record<string, any>[],
         searchable_fields: (val.searchable_fields ?? []) as string[],
         has_more: val.has_more ?? false,
-        seeAllParams: this._buildSeeAllParams(val.searchable_fields ?? [], this.searchTerm()),
+        seeAllParams: {{ q: this.searchTerm(), r: resource }},
       }}))
       .filter(e => e.data.length > 0)
   );
@@ -597,11 +597,134 @@ export class AppComponent implements OnInit {{
     if (Object.keys(this.searchResults()).length > 0) this.searchOpen.set(true);
   }}
 
-  private _buildSeeAllParams(fields: string[], term: string): Record<string, string> {{
-    if (!fields.length || !term.trim()) return {{}};
-    return {{ q: fields.map((f: string) => `${{f}}:${{term.trim()}}`).join(',') }};
+}}
+
+"""
+
+
+def _ho_search_component_ts(version_prefix: str) -> str:
+    return f"""\
+import {{ Component, computed, effect, inject, signal }} from '@angular/core';
+import {{ toSignal }} from '@angular/core/rxjs-interop';
+import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
+import {{ map }} from 'rxjs';
+import {{ SiloRegistry }} from '../../generated/silo-registry.service';
+import {{ AuthService }} from '../../core/auth.service';
+
+const API_BASE = '{version_prefix}';
+
+@Component({{
+  selector: 'app-ho-search',
+  standalone: true,
+  imports: [RouterLink],
+  templateUrl: './ho-search.component.html',
+}})
+export class HoSearchComponent {{
+  protected auth     = inject(AuthService);
+  protected router   = inject(Router);
+  protected registry = inject(SiloRegistry);
+  private route      = inject(ActivatedRoute);
+
+  private readonly q = toSignal(this.route.queryParamMap.pipe(map(p => p.get('q') ?? '')), {{ initialValue: '' }});
+  private readonly r = toSignal(this.route.queryParamMap.pipe(map(p => p.get('r') ?? 'all')), {{ initialValue: 'all' }});
+
+  readonly results  = signal<Record<string, any>>({{  }});
+  readonly loading  = signal(false);
+  readonly searched = signal(false);
+
+  constructor() {{
+    effect(() => {{
+      const q = this.q();
+      const r = this.r();
+      void this.auth.token();
+      void this.auth.accessVersion();
+      if (!q.trim()) {{ this.results.set({{  }}); this.searched.set(false); return; }}
+      void this.runSearch(q, r);
+    }});
+  }}
+
+  async runSearch(term: string, resource: string): Promise<void> {{
+    this.loading.set(true);
+    const headers: Record<string, string> = {{}};
+    const tok = this.auth.token();
+    if (tok) headers['Authorization'] = `Bearer ${{tok}}`;
+    try {{
+      const resParam = resource && resource !== 'all' ? `&resource=${{encodeURIComponent(resource)}}` : '';
+      const res = await fetch(`${{API_BASE}}/ho_search?q=${{encodeURIComponent(term)}}&limit=50${{resParam}}`, {{ headers }});
+      this.results.set(res.ok ? await res.json() : {{  }});
+    }} finally {{
+      this.loading.set(false);
+      this.searched.set(true);
+    }}
+  }}
+
+  readonly resultEntries = computed(() =>
+    Object.entries(this.results())
+      .map(([resource, val]: [string, any]) => ({{
+        resource,
+        data: (val.data ?? []) as Record<string, any>[],
+        searchable_fields: (val.searchable_fields ?? []) as string[],
+      }}))
+      .filter(e => e.data.length > 0)
+  );
+
+  get searchTerm(): string {{ return this.q(); }}
+  get searchResource(): string {{ return this.r(); }}
+
+  goToDetail(resource: string, row: Record<string, any>): void {{
+    const meta = this.registry.meta()[resource] as any;
+    if (!meta) return;
+    const pk: string[] = meta.pk_fields ?? [];
+    const id = pk.length === 1
+      ? String(row[pk[0]])
+      : pk.map((f: string) => `${{f}}:${{row[f]}}`).join('::');
+    void this.router.navigate([`/ho_bo/${{resource}}/${{id}}`]);
+  }}
+
+  formatResult(row: Record<string, any>, fields: string[]): string {{
+    if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
+    return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
   }}
 }}
+"""
+
+
+def _ho_search_component_html() -> str:
+    return """\
+<div class="px-4 py-6 max-w-3xl mx-auto">
+  <h1 class="text-xl font-bold mb-1">Search results</h1>
+  @if (searchTerm) {
+    <p class="text-sm text-gray-500 mb-4">
+      for "<span class="font-medium text-gray-700">{{ searchTerm }}</span>"
+      @if (searchResource !== 'all') {
+        in <span class="font-medium text-gray-700">{{ searchResource.replace('/', '.') }}</span>
+      }
+    </p>
+  }
+  @if (loading()) {
+    <div class="text-gray-400 text-sm py-8 text-center">Searching…</div>
+  } @else if (searched() && resultEntries().length === 0) {
+    <div class="text-gray-400 text-sm py-8 text-center">No results found.</div>
+  } @else {
+    @for (entry of resultEntries(); track entry.resource) {
+      <div class="mb-6">
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+          <a [routerLink]="['/ho_bo/' + entry.resource]" class="hover:underline hover:text-blue-700">
+            {{ entry.resource.replace('/', '.') }}
+          </a>
+        </h2>
+        <div class="bg-white rounded-lg shadow overflow-hidden divide-y">
+          @for (row of entry.data; track $index) {
+            <div (click)="goToDetail(entry.resource, row)"
+                 class="px-4 py-3 hover:bg-blue-50 cursor-pointer text-sm text-gray-700">
+              {{ formatResult(row, entry.searchable_fields) }}
+            </div>
+          }
+        </div>
+      </div>
+    }
+  }
+</div>
 """
 
 
@@ -655,6 +778,9 @@ def _app_routes(resources: list, first_route: str, *, include_admin: bool = Fals
         "  { path: 'access', loadComponent: () => import('./pages/access/access.component').then(m => m.AccessComponent) },",
         "  { path: 'schema', loadComponent: () => import('./pages/schema/schema.component').then(m => m.SchemaComponent) },",
     ]
+    lines.append(
+        "  { path: 'ho_bo/search', loadComponent: () => import('./pages/search/ho-search.component').then(m => m.HoSearchComponent) },"
+    )
     if include_admin:
         lines.append(
             "  { path: 'ho_bo/admin', loadComponent: () => import('./generated/ho_admin/ho_admin.component').then(m => m.HoAdminComponent), canActivate: [adminGuard] },"
