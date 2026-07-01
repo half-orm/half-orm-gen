@@ -202,9 +202,13 @@ CREATE TABLE IF NOT EXISTS "half_orm_meta.api".field_access_fk_auto (
 );
 
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".field_access_searchable (
-  access_id  uuid NOT NULL REFERENCES "half_orm_meta.api".access(id) ON DELETE CASCADE,
+  access_id  uuid NOT NULL,
   field_name text NOT NULL,
-  PRIMARY KEY (access_id, field_name)
+  role_name  text REFERENCES "half_orm_meta.api".role(name) ON DELETE CASCADE,
+  PRIMARY KEY (access_id, field_name),
+  FOREIGN KEY (access_id, field_name)
+    REFERENCES "half_orm_meta.api".field_access_out(access_id, field_name)
+    ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".user_role (

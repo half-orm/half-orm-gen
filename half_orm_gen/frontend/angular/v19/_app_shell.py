@@ -255,8 +255,50 @@ const API_BASE = '{api_base}';
     <div class="h-screen flex flex-col bg-gray-50 overflow-hidden" (click)="closeMenu($event)">
       @if (!isHome()) {{
         <header class="shrink-0 bg-white border-b h-11 flex items-center justify-between px-4">
-          <span class="font-bold text-gray-800">halfORM Backoffice</span>
-          <div class="relative">
+          <span class="font-bold text-gray-800 shrink-0">halfORM Backoffice</span>
+          @if (hasGlobalSearch()) {{
+            <div class="relative flex-1 mx-6 max-w-lg" (click)="$event.stopPropagation()">
+              <div class="flex items-center border rounded text-xs bg-white overflow-hidden focus-within:ring-1 focus-within:ring-blue-300">
+                <input [value]="searchTerm()" (input)="onSearchInput($any($event).target.value)"
+                       placeholder="Search…"
+                       class="flex-1 px-3 py-1.5 outline-none min-w-0"/>
+                <select [value]="searchResource()" (change)="searchResource.set($any($event).target.value)"
+                        class="border-l px-2 py-1.5 bg-gray-50 text-gray-600 text-[11px] outline-none cursor-pointer max-w-[130px]">
+                  <option value="all">All</option>
+                  @for (r of searchableResources(); track r.key) {{
+                    <option [value]="r.key">{{{{ r.label }}}}</option>
+                  }}
+                </select>
+              </div>
+              @if (searchOpen()) {{
+                <div class="absolute top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-xl z-50 max-h-96 overflow-y-auto">
+                  @if (searchLoading()) {{
+                    <div class="px-4 py-3 text-xs text-gray-400">Searching…</div>
+                  }} @else if (searchResultEntries().length === 0) {{
+                    <div class="px-4 py-3 text-xs text-gray-400">No results</div>
+                  }} @else {{
+                    @for (entry of searchResultEntries(); track entry.resource) {{
+                      <div class="px-3 pt-2 pb-1 border-b last:border-b-0">
+                        <div class="flex items-center justify-between mb-1">
+                          <span class="text-[10px] font-bold uppercase tracking-wide text-gray-400">{{{{ entry.resource.replace('/', '.') }}}}</span>
+                          <a [routerLink]="['/ho_bo/' + entry.resource]" [queryParams]="entry.seeAllParams"
+                             (click)="closeSearch()"
+                             class="text-[10px] text-blue-500 hover:underline">see all →</a>
+                        </div>
+                        @for (row of entry.data; track $index) {{
+                          <div (click)="goToDetail(entry.resource, row)"
+                               class="px-2 py-1.5 rounded hover:bg-blue-50 cursor-pointer text-xs text-gray-700 truncate">
+                            {{{{ formatResult(row, entry.searchable_fields) }}}}
+                          </div>
+                        }}
+                      </div>
+                    }}
+                  }}
+                </div>
+              }}
+            </div>
+          }}
+          <div class="relative shrink-0">
             <button (click)="menuOpen = !menuOpen; $event.stopPropagation()"
                     [class]="'flex items-center gap-1 text-xs px-3 py-1 rounded-full border transition-colors ' +
                              (auth.token() ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
@@ -397,6 +439,13 @@ export class AppComponent implements OnInit {{
   signupEmail = signal('');
   authError  = signal('');
 
+  searchTerm     = signal('');
+  searchResource = signal('all');
+  searchOpen     = signal(false);
+  searchLoading  = signal(false);
+  searchResults  = signal<Record<string, any>>({{}});
+  private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
   readonly navItems = computed(() =>
     Object.keys(this.registry.meta())
       .map(key => ({{ href: `/ho_bo/${{key}}`, label: key.replace('/', '.') }}))
@@ -407,6 +456,31 @@ export class AppComponent implements OnInit {{
     const q = this.navFilter().toLowerCase();
     return q ? this.navItems().filter(i => i.label.toLowerCase().includes(q)) : this.navItems();
   }});
+
+  readonly searchableResources = computed(() => {{
+    const access = this.auth.effectiveAccess() as Record<string, any>;
+    return Object.keys(access)
+      .filter(key => {{
+        const srch = access[key]?.GET?.searchable;
+        return Array.isArray(srch) && srch.length > 0;
+      }})
+      .map(key => ({{ key, label: key.replace('/', '.') }}))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }});
+
+  readonly hasGlobalSearch = computed(() => this.searchableResources().length > 0);
+
+  readonly searchResultEntries = computed(() =>
+    Object.entries(this.searchResults())
+      .map(([resource, val]: [string, any]) => ({{
+        resource,
+        data: (val.data ?? []) as Record<string, any>[],
+        searchable_fields: (val.searchable_fields ?? []) as string[],
+        has_more: val.has_more ?? false,
+        seeAllParams: this._buildSeeAllParams(val.searchable_fields ?? [], this.searchTerm()),
+      }}))
+      .filter(e => e.data.length > 0)
+  );
 
   constructor() {{
     this.router.events.pipe(
@@ -458,6 +532,69 @@ export class AppComponent implements OnInit {{
     if (this.menuOpen && !(e.target as HTMLElement).closest('.relative')) {{
       this.menuOpen = false;
     }}
+    if (this.searchOpen()) this.searchOpen.set(false);
+  }}
+
+  onSearchInput(val: string): void {{
+    this.searchTerm.set(val);
+    if (this._searchDebounce) clearTimeout(this._searchDebounce);
+    if (!val.trim()) {{ this.searchOpen.set(false); this.searchResults.set({{}}); return; }}
+    this._searchDebounce = setTimeout(() => void this.runSearch(), 300);
+  }}
+
+  async runSearch(): Promise<void> {{
+    const term = this.searchTerm().trim();
+    if (!term) return;
+    const res = this.searchResource();
+    this.searchLoading.set(true);
+    this.searchOpen.set(true);
+    const headers: Record<string, string> = {{}};
+    const tok = this.auth.token();
+    if (tok) headers['Authorization'] = `Bearer ${{tok}}`;
+    try {{
+      if (res === 'all') {{
+        const r = await fetch(`${{API_BASE}}/ho_search?q=${{encodeURIComponent(term)}}&limit=5`, {{ headers }});
+        this.searchResults.set(r.ok ? await r.json() : {{}});
+      }} else {{
+        const srch: string[] = (this.auth.effectiveAccess() as any)[res]?.GET?.searchable ?? [];
+        if (!srch.length) {{ this.searchResults.set({{}}); return; }}
+        const q = srch.map((f: string) => `${{f}}:${{term}}`).join(',');
+        const r = await fetch(`${{API_BASE}}/${{res}}?q=${{encodeURIComponent(q)}}&limit=5`, {{ headers }});
+        if (r.ok) {{
+          const json = await r.json();
+          this.searchResults.set({{ [res]: {{ data: json.data ?? [], searchable_fields: srch, has_more: json.meta?.has_more ?? false }} }});
+        }} else {{
+          this.searchResults.set({{}});
+        }}
+      }}
+    }} finally {{
+      this.searchLoading.set(false);
+    }}
+  }}
+
+  goToDetail(resource: string, row: Record<string, any>): void {{
+    const meta = this.registry.meta()[resource] as any;
+    if (!meta) return;
+    const pk: string[] = meta.pk_fields ?? [];
+    const id = pk.length === 1
+      ? String(row[pk[0]])
+      : pk.map((f: string) => `${{f}}:${{row[f]}}`).join('::');
+    void this.router.navigate([`/ho_bo/${{resource}}/${{id}}`]);
+    this.searchOpen.set(false);
+  }}
+
+  formatResult(row: Record<string, any>, fields: string[]): string {{
+    if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
+    return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
+  }}
+
+  closeSearch(): void {{
+    this.searchOpen.set(false);
+  }}
+
+  private _buildSeeAllParams(fields: string[], term: string): Record<string, string> {{
+    if (!fields.length || !term.trim()) return {{}};
+    return {{ q: fields.map((f: string) => `${{f}}:${{term.trim()}}`).join(',') }};
   }}
 }}
 """

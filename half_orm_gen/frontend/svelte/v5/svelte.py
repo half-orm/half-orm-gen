@@ -599,6 +599,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
   import {{ page }} from '$app/state';
+  import {{ goto }} from '$app/navigation';
 
   let {{ children }} = $props();
   let navFilter  = $state('');
@@ -608,6 +609,13 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   let signupName = $state('');
   let signupEmail = $state('');
   let authError  = $state('');
+
+  let searchTerm     = $state('');
+  let searchResource = $state('all');
+  let searchOpen     = $state(false);
+  let searchLoading  = $state(false);
+  let searchResults  = $state<Record<string, any>>({{}});
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
   function logout() {{
     auth.logout();
@@ -635,6 +643,64 @@ def _layout(resources: list, version_prefix: str = '') -> str:
     }} catch (e: any) {{ authError = e.message; }}
   }}
 
+  function onSearchInput(val: string) {{
+    searchTerm = val;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    if (!val.trim()) {{ searchOpen = false; searchResults = {{}}; return; }}
+    searchDebounce = setTimeout(() => runSearch(), 300);
+  }}
+
+  async function runSearch() {{
+    const term = searchTerm.trim();
+    if (!term) return;
+    const res = searchResource;
+    searchLoading = true;
+    searchOpen = true;
+    const headers: Record<string, string> = {{}};
+    if (auth.token) headers['Authorization'] = `Bearer ${{auth.token}}`;
+    try {{
+      if (res === 'all') {{
+        const r = await fetch(`{version_prefix}/ho_search?q=${{encodeURIComponent(term)}}&limit=5`, {{ headers }});
+        searchResults = r.ok ? await r.json() : {{}};
+      }} else {{
+        const srch: string[] = (auth.access as any)[res]?.GET?.searchable ?? [];
+        if (!srch.length) {{ searchResults = {{}}; return; }}
+        const q = srch.map((f: string) => `${{f}}:${{term}}`).join(',');
+        const r = await fetch(`{version_prefix}/${{res}}?q=${{encodeURIComponent(q)}}&limit=5`, {{ headers }});
+        if (r.ok) {{
+          const json = await r.json();
+          searchResults = {{ [res]: {{ data: json.data ?? [], searchable_fields: srch, has_more: json.meta?.has_more ?? false }} }};
+        }} else {{
+          searchResults = {{}};
+        }}
+      }}
+    }} finally {{
+      searchLoading = false;
+    }}
+  }}
+
+  function goToDetail(resource: string, row: Record<string, any>) {{
+    const meta = (registry.meta as any)[resource];
+    if (!meta) return;
+    const pk: string[] = meta.pk_fields ?? [];
+    const id = pk.length === 1
+      ? String(row[pk[0]])
+      : pk.map((f: string) => `${{f}}:${{row[f]}}`).join('::');
+    goto(`/ho_bo/${{resource}}/${{id}}`);
+    searchOpen = false;
+  }}
+
+  function formatResult(row: Record<string, any>, fields: string[]): string {{
+    if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
+    return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
+  }}
+
+  function buildSeeAllHref(resource: string, fields: string[], term: string): string {{
+    if (!fields.length || !term.trim()) return `/ho_bo/${{resource}}`;
+    const q = fields.map((f: string) => `${{f}}:${{term.trim()}}`).join(',');
+    return `/ho_bo/${{resource}}?q=${{encodeURIComponent(q)}}`;
+  }}
+
   const navItems = [
     {nav_items_js}
   ].sort((a, b) => a.label.localeCompare(b.label));
@@ -643,16 +709,86 @@ def _layout(resources: list, version_prefix: str = '') -> str:
       ? navItems.filter(i => i.label.toLowerCase().includes(navFilter.toLowerCase()))
       : navItems
   );
+
+  const searchableResources = $derived(
+    Object.keys(auth.access as Record<string, any>)
+      .filter(key => {{
+        const srch = (auth.access as any)[key]?.GET?.searchable;
+        return Array.isArray(srch) && srch.length > 0;
+      }})
+      .map(key => ({{ key, label: key.replace('/', '.') }}))
+      .sort((a: any, b: any) => a.label.localeCompare(b.label))
+  );
+  const hasGlobalSearch = $derived(searchableResources.length > 0);
+  const searchResultEntries = $derived(
+    Object.entries(searchResults)
+      .map(([resource, val]: [string, any]) => ({{
+        resource,
+        data: (val.data ?? []) as Record<string, any>[],
+        searchable_fields: (val.searchable_fields ?? []) as string[],
+        has_more: val.has_more ?? false,
+        seeAllHref: buildSeeAllHref(resource, val.searchable_fields ?? [], searchTerm),
+      }}))
+      .filter((e: any) => e.data.length > 0)
+  );
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
 <div class="h-screen flex flex-col bg-gray-50 overflow-hidden"
-     onclick={{(e) => {{ if (menuOpen && !(e.target as HTMLElement).closest('.auth-menu')) menuOpen = false; }}}}
-     onkeydown={{(e) => {{ if (e.key === 'Escape') menuOpen = false; }}}}
+     onclick={{(e) => {{
+       if (menuOpen && !(e.target as HTMLElement).closest('.auth-menu')) menuOpen = false;
+       if (searchOpen && !(e.target as HTMLElement).closest('.search-bar')) searchOpen = false;
+     }}}}
+     onkeydown={{(e) => {{ if (e.key === 'Escape') {{ menuOpen = false; searchOpen = false; }} }}}}
      role="presentation">
   <header class="shrink-0 bg-white border-b h-11 flex items-center justify-between px-4">
-    <span class="font-bold text-gray-800">halfORM Backoffice</span>
-    <div class="relative auth-menu">
+    <span class="font-bold text-gray-800 shrink-0">halfORM Backoffice</span>
+    {{#if hasGlobalSearch}}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="relative flex-1 mx-6 max-w-lg search-bar"
+           onclick={{(e) => e.stopPropagation()}}
+           onkeydown={{(e) => {{ if (e.key === 'Escape') searchOpen = false; }}}}>
+        <div class="flex items-center border rounded text-xs bg-white overflow-hidden focus-within:ring-1 focus-within:ring-blue-300">
+          <input value={{searchTerm}} oninput={{(e) => onSearchInput((e.target as HTMLInputElement).value)}}
+                 placeholder="Search…"
+                 class="flex-1 px-3 py-1.5 outline-none min-w-0"/>
+          <select value={{searchResource}} onchange={{(e) => {{ searchResource = (e.target as HTMLSelectElement).value; }}}}
+                  class="border-l px-2 py-1.5 bg-gray-50 text-gray-600 text-[11px] outline-none cursor-pointer max-w-[130px]">
+            <option value="all">All</option>
+            {{#each searchableResources as r}}
+              <option value={{r.key}}>{{r.label}}</option>
+            {{/each}}
+          </select>
+        </div>
+        {{#if searchOpen}}
+          <div class="absolute top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-xl z-50 max-h-96 overflow-y-auto">
+            {{#if searchLoading}}
+              <div class="px-4 py-3 text-xs text-gray-400">Searching…</div>
+            {{:else if searchResultEntries.length === 0}}
+              <div class="px-4 py-3 text-xs text-gray-400">No results</div>
+            {{:else}}
+              {{#each searchResultEntries as entry}}
+                <div class="px-3 pt-2 pb-1 border-b last:border-b-0">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-[10px] font-bold uppercase tracking-wide text-gray-400">{{entry.resource.replace('/', '.')}}</span>
+                    <a href={{entry.seeAllHref}} onclick={{() => {{ searchOpen = false; }}}}
+                       class="text-[10px] text-blue-500 hover:underline">see all →</a>
+                  </div>
+                  {{#each entry.data as row}}
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                    <div onclick={{() => goToDetail(entry.resource, row)}}
+                         class="px-2 py-1.5 rounded hover:bg-blue-50 cursor-pointer text-xs text-gray-700 truncate">
+                      {{formatResult(row, entry.searchable_fields)}}
+                    </div>
+                  {{/each}}
+                </div>
+              {{/each}}
+            {{/if}}
+          </div>
+        {{/if}}
+      </div>
+    {{/if}}
+    <div class="relative auth-menu shrink-0">
       <button onclick={{(e) => {{ e.stopPropagation(); menuOpen = !menuOpen; }}}}
               class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border
                      {{auth.token ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}}

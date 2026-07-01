@@ -33,7 +33,7 @@ GET filtre dynamique (n'afficher que ses propres posts) : hors scope, reporté �
 
 Table `field_access_searchable` (access_id, field_name). Loader, `_build_access_entry`, `_filter_access_for_roles` propagent `searchable: string[]` dans le GET. Runtime restreint `_parse_q` aux champs searchable quand au moins un est configuré (backward-compat : 0 searchable = tout accepté). Admin UI : section Searchable dans le panneau GET. Silos Angular (`searchableFields` signal) et Svelte (`$derived`). Filter inputs des listes masqués pour les colonnes non-searchable quand le flag est utilisé.
 
-**Usage 2 — barre de recherche universelle (OR sémantique)** : reporté. La barre de recherche actuelle est par colonne (AND). Une vraie recherche cross-field nécessite une évolution de `_parse_q` ou halfORM.
+**Usage 2 — barre de recherche universelle (OR sémantique)** : ✓ Implémenté. Endpoint `GET /ho_search?q=term&limit=5` : itère toutes les ressources, restreint aux champs `searchable` du rôle, OR par champ (une requête ilike par champ, dédup par PK). Angular et Svelte : barre dans le header (visible si au moins une ressource a des champs searchable), dropdown de sélection de ressource (All + liste), résultats groupés par ressource, lien "see all →" avec `?q=` pré-rempli, clic sur une ligne → détail. Fermeture au clic extérieur ou Escape.
 
 ## 8. Scaffold de composants personnalisés — `half_orm gen frontend --list|--edit|--display <schema.table>`
 

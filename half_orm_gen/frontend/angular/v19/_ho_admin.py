@@ -13,6 +13,7 @@ interface AccessEntry {{
   fk_auto: Record<string, 'connected_user' | 'context' | 'select'>;
   active_filters: string[];
   searchable: string[];
+  _searchable_only?: boolean;
 }}
 interface ResourceInfo {{
   fields: string[];
@@ -256,14 +257,16 @@ const VERB_COLOR: Record<string, string> = {{
                           <div class="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-2">Searchable</div>
                           <div class="space-y-1">
                             @for (f of panelInfo()!.fields; track f) {{
-                              @if (!panelInfo()!.pk_fields.includes(f) && panelEffectiveAccess()!.out.includes(f)) {{
-                                <label class="flex items-center gap-2 text-xs" [class]="panelInheritedFrom() ? 'cursor-default' : 'cursor-pointer'">
+                              @if (!panelInfo()!.pk_fields.includes(f) && (panelEffectiveAccess()!.out.includes(f) || isInheritedField(f, 'out'))) {{
+                                @let inh = isInheritedSearchable(f);
+                                @let own = isOwnSearchable(f);
+                                <label class="flex items-center gap-2 text-xs" [class]="inh ? 'cursor-default' : 'cursor-pointer'">
                                   <input type="checkbox"
-                                         [checked]="panelAccess()!.searchable.includes(f)"
-                                         [disabled]="!!panelInheritedFrom()"
-                                         (change)="!panelInheritedFrom() && toggleSearchable(f, !panelAccess()!.searchable.includes(f))"
+                                         [checked]="own || inh"
+                                         [disabled]="inh"
+                                         (change)="!inh && toggleSearchable(f, !own)"
                                          class="rounded border-gray-300 text-teal-600 w-3 h-3">
-                                  <span class="font-mono text-gray-700">{{{{ f }}}}</span>
+                                  <span class="font-mono" [class]="inh ? 'text-gray-400' : 'text-gray-700'">{{{{ f }}}}</span>
                                 </label>
                               }}
                             }}
@@ -306,7 +309,7 @@ export class HoAdminComponent implements OnInit {{
   private auth   = inject(AuthService);
   private router = inject(Router);
 
-  readonly catalog      = signal<Catalog>({{}});
+  readonly catalog = computed<Catalog>(() => this.auth.catalog() as unknown as Catalog);
   readonly roles        = signal<RoleInfo[]>([]);
   readonly loading      = signal(true);
   readonly selectedRole = signal<string | null>(null);
@@ -346,7 +349,16 @@ export class HoAdminComponent implements OnInit {{
     const p = this.panel();
     const role = this.selectedRole();
     if (!p || !role) return undefined;
-    return this.catalog()[p.resource]?.access?.[p.verb]?.[role];
+    const e = this.catalog()[p.resource]?.access?.[p.verb]?.[role];
+    if (!e || e._searchable_only) return undefined;
+    return e;
+  }});
+
+  readonly panelOwnSearchable = computed<string[]>(() => {{
+    const p = this.panel();
+    const role = this.selectedRole();
+    if (!p || !role) return [];
+    return this.catalog()[p.resource]?.access?.[p.verb]?.[role]?.searchable ?? [];
   }});
 
   readonly panelEffectiveAccess = computed<AccessEntry | undefined>(() => {{
@@ -392,21 +404,12 @@ export class HoAdminComponent implements OnInit {{
 
   private async _load(): Promise<void> {{
     this.loading.set(true);
-    const [catRes, rolesRes] = await Promise.all([
-      fetch('{version_prefix}/ho_admin/catalog', {{headers: this._hdrs}}),
-      fetch('{version_prefix}/ho_admin/roles',   {{headers: this._hdrs}}),
+    const [, rolesRes] = await Promise.all([
+      this.auth._fetchCatalog(),
+      fetch('{version_prefix}/ho_admin/roles', {{headers: this._hdrs}}),
     ]);
-    if (catRes.ok)   this.catalog.set(await catRes.json() as Catalog);
     if (rolesRes.ok) this.roles.set(await rolesRes.json() as RoleInfo[]);
     this.loading.set(false);
-  }}
-
-  private async _reloadCatalog(): Promise<void> {{
-    const [catRes] = await Promise.all([
-      fetch('{version_prefix}/ho_admin/catalog', {{headers: this._hdrs}}),
-      this.auth._fetchAccess(),
-    ]);
-    if (catRes.ok) this.catalog.set(await catRes.json() as Catalog);
   }}
 
   getAccess(resource: string, verb: string): AccessEntry | undefined {{
@@ -427,20 +430,18 @@ export class HoAdminComponent implements OnInit {{
     const ins  = new Set<string>();
     const outs = new Set<string>();
     const filters = new Set<string>();
-    const searchable = new Set<string>();
     const fk_auto: Record<string, 'connected_user' | 'context' | 'select'> = {{}};
     for (const anc of this.ancestorChain()) {{
       const e = this.catalog()[resource]?.access?.[verb]?.[anc];
-      if (!e) continue;
+      if (!e || e._searchable_only) continue;
       found = true;
       e.in.forEach(f  => ins.add(f));
       e.out.forEach(f => outs.add(f));
       e.active_filters.forEach(f => filters.add(f));
-      (e.searchable ?? []).forEach(f => searchable.add(f));
       Object.assign(fk_auto, e.fk_auto ?? {{}});
     }}
     if (!found) return null;
-    return {{ id: '', in: [...ins], out: [...outs], fk_auto, active_filters: [...filters], searchable: [...searchable] }};
+    return {{ id: '', in: [...ins], out: [...outs], fk_auto, active_filters: [...filters], searchable: [] }};
   }}
 
   isInherited(resource: string, verb: string): boolean {{
@@ -516,6 +517,37 @@ export class HoAdminComponent implements OnInit {{
     return dir === 'out' ? inh.out.includes(field) : inh.in.includes(field);
   }}
 
+  isInheritedSearchable(f: string): boolean {{
+    const p = this.panel();
+    if (!p) return false;
+    for (const anc of this.ancestorChain()) {{
+      const e = this.catalog()[p.resource]?.access?.[p.verb]?.[anc];
+      if (e?.searchable?.includes(f)) return true;
+    }}
+    return false;
+  }}
+
+  isOwnSearchable(f: string): boolean {{
+    return this.panelOwnSearchable().includes(f);
+  }}
+
+  private _findAccAndRoleForField(fieldName: string): {{accId: string; roleName: string | null}} | null {{
+    const p = this.panel();
+    if (!p) return null;
+    const role = this.selectedRole()!;
+    const ownEntry = this.catalog()[p.resource]?.access?.[p.verb]?.[role];
+    if (ownEntry && !ownEntry._searchable_only && ownEntry.out.includes(fieldName)) {{
+      return {{accId: ownEntry.id, roleName: null}};
+    }}
+    for (const anc of this.ancestorChain()) {{
+      const e = this.catalog()[p.resource]?.access?.[p.verb]?.[anc];
+      if (e && !e._searchable_only && e.out.includes(fieldName)) {{
+        return {{accId: e.id, roleName: role}};
+      }}
+    }}
+    return null;
+  }}
+
   async overrideVerb(resource: string, verb: string): Promise<void> {{
     await this.toggleAccess(resource, verb, true);
   }}
@@ -531,7 +563,6 @@ export class HoAdminComponent implements OnInit {{
         headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
         body: JSON.stringify({{role_name: role, schema_name, table_name, verb}}),
       }});
-      await this._reloadCatalog();
       if (verb !== 'DELETE') this.panel.set({{resource, verb}});
       return;
     }} else if (acc) {{
@@ -540,7 +571,6 @@ export class HoAdminComponent implements OnInit {{
       }});
       if (this.isPanel(resource, verb)) this.panel.set(null);
     }}
-    await this._reloadCatalog();
   }}
 
   async addAllFields(dir: 'in' | 'out'): Promise<void> {{
@@ -561,7 +591,6 @@ export class HoAdminComponent implements OnInit {{
       headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
       body: JSON.stringify({{access_id: acc.id, field_names: toAdd}}),
     }});
-    await this._reloadCatalog();
   }}
 
   async toggleField(field: string, dir: 'in' | 'out', add: boolean): Promise<void> {{
@@ -579,7 +608,6 @@ export class HoAdminComponent implements OnInit {{
         method: 'DELETE', headers: this._hdrs,
       }});
     }}
-    await this._reloadCatalog();
   }}
 
   async toggleFilter(filterId: string, add: boolean): Promise<void> {{
@@ -596,24 +624,22 @@ export class HoAdminComponent implements OnInit {{
         method: 'DELETE', headers: this._hdrs,
       }});
     }}
-    await this._reloadCatalog();
   }}
 
   async toggleSearchable(fieldName: string, add: boolean): Promise<void> {{
-    const acc = this.panelAccess();
-    if (!acc) return;
+    const found = this._findAccAndRoleForField(fieldName);
+    if (!found) return;
     if (add) {{
       await fetch('{version_prefix}/ho_admin/field_access_searchable', {{
         method: 'POST',
         headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
-        body: JSON.stringify({{access_id: acc.id, field_name: fieldName}}),
+        body: JSON.stringify({{access_id: found.accId, field_name: fieldName, role_name: found.roleName}}),
       }});
     }} else {{
-      await fetch(`{version_prefix}/ho_admin/field_access_searchable/${{acc.id}}/${{fieldName}}`, {{
+      await fetch(`{version_prefix}/ho_admin/field_access_searchable/${{found.accId}}/${{fieldName}}`, {{
         method: 'DELETE', headers: this._hdrs,
       }});
     }}
-    await this._reloadCatalog();
   }}
 
   readonly fkGroupsInPanel = computed<FkDep[]>(() => {{
@@ -646,7 +672,6 @@ export class HoAdminComponent implements OnInit {{
         }});
       }}
     }}
-    await this._reloadCatalog();
   }}
 }}
 """

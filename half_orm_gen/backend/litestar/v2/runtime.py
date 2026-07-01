@@ -419,6 +419,77 @@ def _make_ho_setup(model, prefix: str):
     return ho_setup
 
 
+def _make_ho_search(
+    prefix: str,
+    classes_by_res: dict,
+    crud_access_by_res: dict,
+    api_excluded_by_res: dict,
+    all_fields_by_res: dict,
+    parent_map_holder: list,
+):
+    @get(f'{prefix}/ho_search')
+    async def ho_search(
+        request: Request,
+        q: Optional[str] = None,
+        limit: Optional[int] = 5,
+    ) -> dict:
+        if not q or not q.strip():
+            return {}
+        term = q.strip()
+        roles = _expand_roles(_get_roles(request), parent_map_holder[0])
+        result: dict = {}
+
+        for resource, cls in classes_by_res.items():
+            crud_access = crud_access_by_res.get(resource, {})
+            api_excluded = api_excluded_by_res.get(resource, [])
+
+            searchable_cols: list[str] = []
+            for role in roles:
+                rv = crud_access.get('GET', {}).get(role, {})
+                if isinstance(rv, dict):
+                    for f in rv.get('searchable', []):
+                        if f not in searchable_cols:
+                            searchable_cols.append(f)
+            if not searchable_cols:
+                continue
+
+            pk_names = list(getattr(cls(), '_ho_pkey', {}).keys())
+            authorized = _effective_out_fields(
+                crud_access, 'GET', roles, api_excluded,
+                all_fields_by_res.get(resource, []), pk_names or None,
+            )
+            if not authorized:
+                continue
+
+            role_filter = _get_role_filter(crud_access, 'GET', roles)
+
+            inst = None
+            for field in searchable_cols:
+                part = cls(**{field: ('ilike', '%' + term + '%')})
+                getattr(part, field).unaccent = True
+                if inst is None:
+                    inst = part
+                else:
+                    inst |= part
+
+            if role_filter:
+                inst &= cls(**role_filter)
+
+            rows = await inst.ho_aselect(*authorized, limit=limit)
+            data = list(rows)
+
+            if data:
+                result[resource] = {
+                    'data': data,
+                    'searchable_fields': searchable_cols,
+                    'has_more': len(data) == limit,
+                }
+
+        return result
+
+    return ho_search
+
+
 def _make_ws_handler(version_prefix: str):
     @websocket(f'{version_prefix}/ws')
     async def ws_handler(socket: WebSocket) -> None:
@@ -478,6 +549,7 @@ def build_crud_app(
     roles_holder: list       = [[]]   # roles_holder[0]       = sorted roles list
 
     ws_rmap: dict = {}
+    classes_by_res: dict[str, type] = {}
     relation_handlers: list = []
 
     for cls, _kind in model.classes():
@@ -497,6 +569,7 @@ def build_crud_app(
         pk_info  = _pk_info(cls)
 
         api_excluded_by_res[resource] = api_excluded
+        classes_by_res[resource] = cls
 
         if pk_info and len(pk_info) == 1:
             ws_rmap[resource] = (cls, pk_info[0][0])
@@ -524,6 +597,7 @@ def build_crud_app(
         _make_ho_roles(roles_holder, prefix),
         _make_ho_access(access_map_holder, parent_map_holder, model, prefix),
         _make_ho_setup(model, prefix),
+        _make_ho_search(prefix, classes_by_res, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder),
         _make_ws_handler(prefix),
         *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
     ]

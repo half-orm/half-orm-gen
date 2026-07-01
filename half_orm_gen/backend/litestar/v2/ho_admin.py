@@ -199,19 +199,42 @@ def make_ho_admin_handlers(
                 ).ho_aselect()
                 verb_entry: dict = {}
                 for acc in acc_rows:
+                    role             = acc['role_name']
                     out_rows         = await api.field_access_out()(access_id=acc['id']).ho_aselect('field_name')
                     in_rows          = await api.field_access_in()(access_id=acc['id']).ho_aselect('field_name')
                     af_rows          = await api.access_filter()(access_id=acc['id']).ho_aselect('filter_id')
                     fk_auto_rows     = await api.field_access_fk_auto()(access_id=acc['id']).ho_aselect('field_name', 'resolve_rule')
-                    searchable_rows  = await api.field_access_searchable()(access_id=acc['id']).ho_aselect('field_name')
-                    verb_entry[acc['role_name']] = {
+                    searchable_rows  = await api.field_access_searchable()(access_id=acc['id']).ho_aselect('field_name', 'role_name')
+
+                    # Preserve searchable already distributed to this role by a parent acc
+                    pre_searchable = list(verb_entry.get(role, {}).get('searchable', []))
+                    entry = {
                         'id':             str(acc['id']),
                         'out':            [r['field_name'] for r in out_rows],
                         'in':             [r['field_name'] for r in in_rows],
                         'fk_auto':        {r['field_name']: r['resolve_rule'] for r in fk_auto_rows},
                         'active_filters': [str(r['filter_id']) for r in af_rows],
-                        'searchable':     [r['field_name'] for r in searchable_rows],
+                        'searchable':     pre_searchable,
                     }
+                    verb_entry[role] = entry
+
+                    # Distribute searchable to the right role entries (role_name=None → own role)
+                    if verb == 'GET':
+                        for row in searchable_rows:
+                            target = row['role_name'] or role
+                            if target == role:
+                                if row['field_name'] not in entry['searchable']:
+                                    entry['searchable'].append(row['field_name'])
+                            else:
+                                if target not in verb_entry:
+                                    verb_entry[target] = {
+                                        'id': str(acc['id']),
+                                        'out': [], 'in': [], 'fk_auto': {},
+                                        'active_filters': [], 'searchable': [],
+                                        '_searchable_only': True,
+                                    }
+                                if row['field_name'] not in verb_entry[target]['searchable']:
+                                    verb_entry[target]['searchable'].append(row['field_name'])
                 for role, entry in verb_entry.items():
                     direct_out = set(entry['out'])
                     direct_in  = set(entry['in'])
@@ -258,8 +281,21 @@ def make_ho_admin_handlers(
         if verb != 'DELETE':
             rel_cls = model.get_relation_class(f'{schema}.{table}')
             pk_fields = list(rel_cls()._ho_pkey.keys())
+            # Collect fields already in any ancestor's field_access_out (trigger forbids duplicates)
+            inherited_out: set[str] = set()
+            pmap = parent_map_holder[0]
+            cur: str | None = pmap.get(role_name)
+            while cur:
+                anc_acc = await api.access()(
+                    role_name=cur, schema_name=schema, table_name=table, verb=verb,
+                ).ho_aselect('id')
+                if anc_acc:
+                    anc_out = await api.field_access_out()(access_id=anc_acc[0]['id']).ho_aselect('field_name')
+                    inherited_out.update(r['field_name'] for r in anc_out)
+                cur = pmap.get(cur)
             for pk in pk_fields:
-                await api.field_access_out()(access_id=access_id, field_name=pk).ho_ainsert()
+                if pk not in inherited_out:
+                    await api.field_access_out()(access_id=access_id, field_name=pk).ho_ainsert()
         await _reload(f'{schema}/{table}')
         return {'id': str(access_id), 'pk_fields': pk_fields}
 
@@ -418,29 +454,18 @@ def make_ho_admin_handlers(
         _check_admin(request)
         access_id  = data.get('access_id')
         field_name = data.get('field_name')
+        role_name  = data.get('role_name')  # None = same role as access owner
         if not access_id or not field_name:
             raise HTTPException(status_code=400, detail='access_id and field_name required')
         uid = uuid.UUID(access_id)
-        await api.field_access_searchable()(access_id=uid, field_name=field_name).ho_ainsert()
+        kwargs: dict[str, Any] = {'access_id': uid, 'field_name': field_name}
+        if role_name is not None:
+            kwargs['role_name'] = role_name
+        await api.field_access_searchable()(**kwargs).ho_ainsert()
         resource = await _resource_for_access(api, uid)
         if resource:
             await _reload(resource)
-        return {'access_id': access_id, 'field_name': field_name}
-
-    @post(f'{prefix}/ho_admin/field_access_searchable/batch')
-    async def ho_admin_add_searchable_batch(request: Request, data: dict[str, Any]) -> dict:
-        _check_admin(request)
-        access_id   = data.get('access_id')
-        field_names = data.get('field_names', [])
-        if not access_id or not field_names:
-            raise HTTPException(status_code=400, detail='access_id and field_names required')
-        uid = uuid.UUID(access_id)
-        for field_name in field_names:
-            await api.field_access_searchable()(access_id=uid, field_name=field_name).ho_ainsert()
-        resource = await _resource_for_access(api, uid)
-        if resource:
-            await _reload(resource)
-        return {'access_id': access_id, 'field_names': field_names}
+        return {'access_id': access_id, 'field_name': field_name, 'role_name': role_name}
 
     @delete(f'{prefix}/ho_admin/field_access_searchable/{{access_id:str}}/{{field_name:str}}')
     async def ho_admin_remove_searchable(request: Request, access_id: str, field_name: str) -> None:
@@ -479,6 +504,5 @@ def make_ho_admin_handlers(
         ho_admin_set_fk_auto,
         ho_admin_remove_fk_auto,
         ho_admin_add_searchable,
-        ho_admin_add_searchable_batch,
         ho_admin_remove_searchable,
     ]
