@@ -27,6 +27,9 @@ it at construction time.
 
 ## ResourceSilo access API
 
+> Full member list (this table plus data operations, state, URL builders):
+> [frontend/resource-silo-reference.md](../frontend/resource-silo-reference.md)
+
 ### Static access (role-level)
 
 These signals are computed once per silo from `auth.effectiveAccess()`.
@@ -34,9 +37,7 @@ These signals are computed once per silo from `auth.effectiveAccess()`.
 | Member | Type | Description |
 |---|---|---|
 | `canCreate` | `Signal<boolean>` | True if POST is available for this resource. |
-| `inaccessibleFields` | `Signal<Set<string>>` | Fields to hide in read views (not in GET `out`). |
-| `inaccessiblePostFields` | `Signal<Set<string>>` | Fields to hide in create forms: fields not in POST `in`, plus `fk_auto` fields of type `connected_user` or `context`. |
-| `inaccessiblePutFields` | `Signal<Set<string>>` | Fields to hide in edit forms: fields not in PUT `in`, plus **all** `fk_auto` fields. |
+| `inaccessibleFields(verb?)` | method → `Set<string>` | Fields to hide for `verb` (`'GET' \| 'POST' \| 'PUT'`, default `'GET'`). GET: not in the effective `out` list. POST: not in `in`, plus `fk_auto` fields of type `connected_user`/`context`. PUT: not in `in` (or a matching dynamic role's `put_in`), plus **all** `fk_auto` fields. |
 | `fkAutoPostFields` | `Signal<Record<string, string>>` | FK auto-resolve rules for POST: `{ field: 'connected_user' \| 'context' \| 'select' }`. |
 | `fkAutoPutFields` | `Signal<Record<string, string>>` | FK auto-resolve rules for PUT. |
 
@@ -69,7 +70,7 @@ the user authored). The backend returns `meta.dynamic_roles` alongside each list
 }
 
 <!-- Conditional field in form -->
-@if (!silo.inaccessiblePostFields().has('title')) {
+@if (!silo.inaccessibleFields('POST').has('title')) {
   <input [(ngModel)]="form['title']" name="title" />
 }
 ```

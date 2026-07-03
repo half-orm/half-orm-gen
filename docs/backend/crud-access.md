@@ -263,6 +263,81 @@ hand-written route takes precedence with its own guards and logic.
 
 ---
 
+## Named row filters (`@ho_api_filter`)
+
+`CRUD_ACCESS["filter"]` (see [Structure](#structure) above) is a *static*
+row filter — the same dict on every request. `@ho_api_filter` is for filters
+that need to look at the request itself (e.g. "published, or mine"):
+
+```python
+from half_orm_gen.tools import ho_api_filter
+
+class Post(ho_baseclasses.BC_BlogPost):
+
+    @ho_api_filter('published_posts')
+    def _is_published(self, request):
+        user = getattr(request.state, 'user', None)
+        visible = self.__class__(published=True)
+        if user:
+            visible |= self.__class__(author_id=user)   # own drafts too
+        return self & visible
+```
+
+**Signature**: `(self, request) -> Relation`. `self` already carries the
+query's other constraints (pagination, column filters, role filter) —
+narrow it with halfORM's predicate algebra (`&`, `|`) rather than replacing
+it, so those other constraints survive.
+
+**Wiring**: at startup, `discover_and_register` scans relation modules for
+`@ho_api_filter` methods, registers them by `(schema, table, filter_name)`,
+and inserts the filter name into `half_orm_meta.api.filter`. A filter only
+runs for a request when the caller's most specific matched role lists its
+name under `CRUD_ACCESS`/access-map `"filters"` for that verb — configure
+this the same way you configure roles, in the admin UI. It runs *after* the
+static `role_filter` (from `CRUD_ACCESS["filter"]`) and *before* the query
+executes, on both the list (`GET` collection) and single-row (`GET {id}`)
+handlers.
+
+See also: [relation-class-guide.md](relation-class-guide.md) for when a
+filter has outgrown "this relation's own predicate."
+
+---
+
+## Hand-written routes (`@tools.api_get`/`api_post`/`api_put`/`api_delete`/`api_patch`)
+
+For a one-off endpoint that doesn't fit the CRUD/verb model — a nonstandard
+path, a side effect, a response shape auto-CRUD can't express — decorate a
+method directly on the relation class:
+
+```python
+from half_orm_gen import tools
+
+class Comment(ho_baseclasses.BC_BlogComment):
+
+    @tools.api_post('/blog/comment/{id: uuid}/flag', guards=['connected'])
+    async def flag(self, request: "Request", id: "uuid.UUID") -> dict:
+        await self.__class__(id=id).ho_aupdate(flagged=True)
+        return {'ok': True}
+```
+
+**Signature parity**: each `@tools.api_*` decorator mirrors the signature of
+the underlying Litestar decorator it wraps (`litestar.get`/`post`/`put`/
+`delete`/`patch`) — so `guards=`, `path` parameters, and any other Litestar
+kwarg work exactly as they would on a plain `@get`/`@post`/etc. The method
+is called on a **fresh instance** of the relation class (`Comment()`, not a
+specific row) — use path/query parameters to build whatever predicate the
+method needs, as `flag` does above with `id`.
+
+**Precedence**: if a `@tools.api_*` method already covers a `(module, verb)`
+pair, auto-CRUD skips generating that verb for the relation — the
+hand-written route wins, with its own guards and return shape.
+
+See also: [relation-class-guide.md](relation-class-guide.md) for when a
+custom route has outgrown "this relation" and belongs in
+`ho_api/custom/routes.py` instead.
+
+---
+
 ## OpenAPI documentation
 
 Each generated route includes a `description` summarising the access control

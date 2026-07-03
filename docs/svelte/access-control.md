@@ -29,6 +29,9 @@ the effective access map for the current JWT. The `AuthState` singleton stores t
 
 ## ResourceSilo access API
 
+> Full member list (this table plus data operations, state, URL builders):
+> [frontend/resource-silo-reference.md](../frontend/resource-silo-reference.md)
+
 ### Static access (role-level)
 
 These are `$derived` values computed from `auth.access`.
@@ -36,9 +39,7 @@ These are `$derived` values computed from `auth.access`.
 | Member | Type | Description |
 |---|---|---|
 | `canCreate` | `boolean` (`$derived`) | True if POST is available for this resource. |
-| `inaccessibleFields` | `Set<string>` (`$derived`) | Fields to hide in read views (not in GET `out`). |
-| `inaccessiblePostFields` | `Set<string>` (`$derived`) | Fields to hide in create forms: fields not in POST `in`, plus `fk_auto` fields of type `connected_user` or `context`. |
-| `inaccessiblePutFields` | `Set<string>` (`$derived`) | Fields to hide in edit forms: fields not in PUT `in`, plus **all** `fk_auto` fields. |
+| `inaccessibleFields(verb?)` | method → `Set<string>` | Fields to hide for `verb` (`'GET' \| 'POST' \| 'PUT'`, default `'GET'`). GET: not in the effective `out` list. POST: not in `in`, plus `fk_auto` fields of type `connected_user`/`context`. PUT: not in `in` (or a matching dynamic role's `put_in`), plus **all** `fk_auto` fields. |
 | `fkAutoPostFields` | `Record<string, string>` (`$derived`) | FK auto-resolve rules for POST: `{ field: 'connected_user' \| 'context' \| 'select' }`. |
 | `fkAutoPutFields` | `Record<string, string>` (`$derived`) | FK auto-resolve rules for PUT. |
 
@@ -68,7 +69,7 @@ These are `$derived` values computed from `auth.access`.
 {/if}
 
 <!-- Conditional field in form -->
-{#if !silo.inaccessiblePostFields.has('title')}
+{#if !silo.inaccessibleFields('POST').has('title')}
   <input bind:value={form.title} name="title" />
 {/if}
 ```

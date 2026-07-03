@@ -11,6 +11,10 @@ For the generated file structure and reusable components see:
 For the backend that exposes the API consumed here see:
 - [../backend/litestar/architecture.md](../backend/litestar/architecture.md)
 
+For the full `ResourceSilo` reactive API (member-by-member reference, not
+internals) see:
+- [resource-silo-reference.md](resource-silo-reference.md)
+
 ---
 
 ## CRUD API

@@ -147,6 +147,9 @@ class Post(ho_baseclasses.BC_BlogPost):
 
 Configure access rights for dynamic roles in the admin UI exactly like static roles.
 
+See also: [relation-class-guide.md](relation-class-guide.md) — what else belongs
+on the relation class alongside `@ho_api_role`, and when it doesn't.
+
 ---
 
 ## First-run detection

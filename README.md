@@ -65,11 +65,14 @@ and the areas where help is most needed.
 **Backend**
 - [Litestar architecture](docs/backend/litestar/architecture.md) — runtime, CRUD_ACCESS, role system, WebSocket
 - [Authorization](docs/backend/authorization.md) — JWT, roles, `/ho_access`, `/ho_setup`
-- [CRUD access](docs/backend/crud-access.md) — access model, verbs, field access
+- [CRUD access](docs/backend/crud-access.md) — access model, verbs, field access, `@ho_api_filter`, `@tools.api_*`
+- [What goes in a relation class](docs/backend/relation-class-guide.md) — class vs. `ho_api/custom/`, the escape hatch
+- [FastAPI architecture](docs/backend/fastapi/architecture.md) — status/parity with Litestar
 
 **Frontend (shared)**
 - [Frontend architecture](docs/frontend/architecture.md) — silo pattern, access map, live updates
 - [Generated frontend code](docs/frontend/code-organization.md) — file layout, regenerated vs scaffolded
+- [ResourceSilo reference](docs/frontend/resource-silo-reference.md) — full reactive API, one silo per app
 
 **Angular**
 - [Silo architecture](docs/angular/silo-architecture.md) — signals, data flow, deduplication

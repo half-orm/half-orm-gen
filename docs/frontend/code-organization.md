@@ -147,6 +147,12 @@ Absent for views (relations without a PK or without `POST` in `CRUD_ACCESS`).
 
 ## Accessing a silo directly
 
+There is one generated `ResourceSilo` class per app (`resource.silo.ts` /
+`resource.silo.svelte.ts` above) — every table's silo is an instance of that
+same class, parameterized by its schema. The full reactive API it exposes
+(state, access control, data operations) is documented once, for every
+table, in [resource-silo-reference.md](resource-silo-reference.md).
+
 Custom components can read from and write to any resource silo without going through a
 generated component:
 

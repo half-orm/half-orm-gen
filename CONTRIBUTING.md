@@ -123,12 +123,15 @@ generated components.
 
 Detailed architecture documentation lives in `docs/`:
 
-- [backend-architecture.md](docs/backend-architecture.md) — runtime, CRUD_ACCESS, role system
-- [frontend-architecture.md](docs/frontend-architecture.md) — silo pattern, access map, WS
-- [frontend-code-organization.md](docs/frontend-code-organization.md) — generated file layout
-- [angular-silo-architecture.md](docs/angular-silo-architecture.md)
-- [svelte-silo-architecture.md](docs/svelte-silo-architecture.md)
-- [crud_access.md](docs/crud_access.md) — CRUD_ACCESS reference
+- [backend/litestar/architecture.md](docs/backend/litestar/architecture.md) — runtime, CRUD_ACCESS, role system
+- [backend/crud-access.md](docs/backend/crud-access.md) — CRUD_ACCESS, @ho_api_filter, @tools.api_* reference
+- [backend/authorization.md](docs/backend/authorization.md) — JWT, roles, @ho_api_role
+- [backend/relation-class-guide.md](docs/backend/relation-class-guide.md) — what goes in a relation class vs. ho_api/custom/
+- [frontend/architecture.md](docs/frontend/architecture.md) — silo pattern, access map, WS
+- [frontend/code-organization.md](docs/frontend/code-organization.md) — generated file layout
+- [frontend/resource-silo-reference.md](docs/frontend/resource-silo-reference.md) — full ResourceSilo reactive API
+- [angular/silo-architecture.md](docs/angular/silo-architecture.md)
+- [svelte/silo-architecture.md](docs/svelte/silo-architecture.md)
 
 ---
 
