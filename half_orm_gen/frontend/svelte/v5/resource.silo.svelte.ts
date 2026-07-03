@@ -186,7 +186,17 @@ export class ResourceSilo {
       if (!res.ok) return null;
       const { data, meta } = await res.json() as { data: Row[]; meta: { dynamic_roles?: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> } };
       if (data[0]) this.setItem(data[0]);
-      this.dynamicRoles = meta?.dynamic_roles ?? {};
+      const incoming = meta?.dynamic_roles ?? {};
+      const merged: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> = {};
+      for (const [role, rd] of Object.entries(this.dynamicRoles)) {
+        const ids = rd.ids.filter(x => x !== id);
+        if (ids.length) merged[role] = { ...rd, ids };
+      }
+      for (const [role, rd] of Object.entries(incoming)) {
+        const prevIds = merged[role]?.ids ?? [];
+        merged[role] = { ...rd, ids: [...new Set([...prevIds, ...rd.ids])] };
+      }
+      this.dynamicRoles = merged;
       return data[0] ?? null;
     }
     const url = this.getUrl(id);

@@ -210,7 +210,19 @@ export class ResourceSilo {
       ).pipe(
         tap(resp => {
           if (resp.data[0]) this.setItem(resp.data[0]);
-          this.dynamicRoles.set(resp.meta?.dynamic_roles ?? {});
+          const incoming = resp.meta?.dynamic_roles ?? {};
+          this.dynamicRoles.update(current => {
+            const merged: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> = {};
+            for (const [role, rd] of Object.entries(current)) {
+              const ids = rd.ids.filter(x => x !== id);
+              if (ids.length) merged[role] = { ...rd, ids };
+            }
+            for (const [role, rd] of Object.entries(incoming)) {
+              const prevIds = merged[role]?.ids ?? [];
+              merged[role] = { ...rd, ids: [...new Set([...prevIds, ...rd.ids])] };
+            }
+            return merged;
+          });
         }),
         map(resp => resp.data[0] ?? null),
         catchError(() => of(null as Row | null))
