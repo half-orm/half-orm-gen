@@ -53,7 +53,7 @@ half_orm gen frontend --angular --display blog.post   # vue lecture seule
 
 **Lien avec searchable** : le composant `--list` pourrait intégrer automatiquement la barre de recherche si des champs `searchable` sont configurés.
 
-## 9. État des filtres `@ho_api_filter` — audit et vérification
+## ~~9. État des filtres `@ho_api_filter` — audit et vérification~~ ✓
 
 Remettre à plat l'état d'avancement des filtres déclarés via `@ho_api_filter`. Points à vérifier :
 
@@ -78,3 +78,28 @@ Les handlers de formulaire (POST, PUT, DELETE) ne gèrent pas les erreurs retour
 - Gestion des 5xx (message générique, pas de crash silencieux)
 - Cas particulier : 401 → redirection vers login ou refresh du token
 - Cohérence Angular / Svelte
+
+## 11. Angular généré : `fieldTypes` ne distingue pas les champs booléens
+
+**Où** : `half_orm_gen/frontend/base.py:38-47` (`_field_type_category`), utilisé par
+`half_orm_gen/frontend/angular/v19/_list_component.py:150-152` pour générer la map
+`fieldTypes` de chaque `list.component.ts` (ex. `blog_post/list.component.ts`).
+
+**Constat** : `FieldType` (dans `stores/filters.ts`) ne connaît que
+`'date' | 'datetime' | 'number' | 'string'` — aucune catégorie `'boolean'`.
+`_field_type_category` retombe donc sur `'string'` pour tout champ booléen (ex.
+`blog.post.published`), alors qu'un helper dédié existe déjà pour détecter ces
+champs : `_is_bool_field` (`half_orm_gen/frontend/base.py:50-51`), utilisé par
+ailleurs pour générer une checkbox dans les formulaires create/edit
+(`_form_components.py`).
+
+**Conséquence** : dans l'écran liste, le filtre sur une colonne booléenne se
+comporte comme un filtre texte (`isValidFilterValue`/`matchFilter` dans
+`stores/filters.ts` appliquent un `startsWith` insensible à la casse) au lieu
+d'un contrôle booléen dédié (case à cocher / tri-state). Pas de crash, mais UX
+dégradée et incohérence avec le traitement déjà fait côté formulaire.
+
+**Piste** : ajouter une catégorie `'boolean'` à `FieldType`, la faire remonter
+dans `_field_type_category` via `_is_bool_field`, puis adapter `isValidFilterValue`
+/ `normalizeFilterValue` / le template du filtre liste pour rendre un contrôle
+booléen plutôt qu'un champ texte.
