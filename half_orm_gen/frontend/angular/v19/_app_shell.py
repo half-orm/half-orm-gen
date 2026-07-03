@@ -280,17 +280,17 @@ const API_BASE = '{api_base}';
                   }} @else {{
                     @for (entry of searchResultEntries(); track entry.resource) {{
                       <div class="px-3 pt-2 pb-1 border-b last:border-b-0">
-                        <div class="flex items-center justify-between mb-1">
-                          <span class="text-[10px] font-bold uppercase tracking-wide text-gray-400">{{{{ entry.resource.replace('/', '.') }}}}</span>
-                          <a [routerLink]="['/ho_bo/search']" [queryParams]="entry.seeAllParams"
-                             (click)="closeSearch()"
-                             class="text-[10px] text-blue-500 hover:underline">see all →</a>
-                        </div>
+                        <span class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1 block">{{{{ entry.resource.replace('/', '.') }}}}</span>
                         @for (row of entry.data; track $index) {{
                           <div (click)="goToDetail(entry.resource, row)"
                                class="px-2 py-1.5 rounded hover:bg-blue-50 cursor-pointer text-xs text-gray-700 truncate">
                             {{{{ formatResult(row, entry.searchable_fields) }}}}
                           </div>
+                        }}
+                        @if (entry.has_more) {{
+                          <a [routerLink]="['/ho_bo/search']" [queryParams]="entry.seeAllParams"
+                             (click)="closeSearch()"
+                             class="block text-[10px] text-blue-500 hover:underline mt-1">more…</a>
                         }}
                       </div>
                     }}

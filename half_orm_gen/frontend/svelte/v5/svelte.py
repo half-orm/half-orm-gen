@@ -769,11 +769,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
             {{:else}}
               {{#each searchResultEntries as entry}}
                 <div class="px-3 pt-2 pb-1 border-b last:border-b-0">
-                  <div class="flex items-center justify-between mb-1">
-                    <span class="text-[10px] font-bold uppercase tracking-wide text-gray-400">{{entry.resource.replace('/', '.')}}</span>
-                    <a href={{entry.seeAllHref}} onclick={{() => {{ searchOpen = false; }}}}
-                       class="text-[10px] text-blue-500 hover:underline">see all →</a>
-                  </div>
+                  <span class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1 block">{{entry.resource.replace('/', '.')}}</span>
                   {{#each entry.data as row}}
                     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
                     <div onclick={{() => goToDetail(entry.resource, row)}}
@@ -781,6 +777,10 @@ def _layout(resources: list, version_prefix: str = '') -> str:
                       {{formatResult(row, entry.searchable_fields)}}
                     </div>
                   {{/each}}
+                  {{#if entry.has_more}}
+                    <a href={{entry.seeAllHref}} onclick={{() => {{ searchOpen = false; }}}}
+                       class="block text-[10px] text-blue-500 hover:underline mt-1">more…</a>
+                  {{/if}}
                 </div>
               {{/each}}
             {{/if}}
