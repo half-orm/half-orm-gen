@@ -76,7 +76,7 @@ demo-blog-angular:  ## Régénère le front Angular
 .PHONY: demo-blog-angular-run
 demo-blog-angular-run:  ## Lance le front Angular en tâche de fond puis suit les logs
 	@mkdir -p $(DEMO_LOGS)
-	@setsid nohup bash -c 'cd $(DEMO_DIR)/ho_frontend/angular && npm install && exec npm start' \
+	@setsid nohup bash -c 'export NVM_DIR="$$HOME/.nvm"; source "$$NVM_DIR/nvm.sh"; nvm use 22 && cd $(DEMO_DIR)/ho_frontend/angular && npm install && exec npm start' \
 		> $(DEMO_LOGS)/angular.log 2>&1 & echo $$! > $(DEMO_LOGS)/angular.pid
 	@echo "Angular PID $$(cat $(DEMO_LOGS)/angular.pid) — logs: $(DEMO_LOGS)/angular.log"
 	@tail -f $(DEMO_LOGS)/angular.log & echo $$! > $(DEMO_LOGS)/angular.tail.pid
