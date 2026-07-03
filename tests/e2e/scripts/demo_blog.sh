@@ -179,6 +179,47 @@ PYEOF
 echo -e "${GREEN}✓ Dynamic role written${NC}"
 
 # ---------------------------------------------------------------------------
+# 11b. Custom filter: published_posts on blog.post
+# ---------------------------------------------------------------------------
+echo -e "${GREEN}=== CUSTOM FILTER: published_posts ===${NC}"
+
+python3 - << 'PYEOF'
+import re, pathlib
+
+path = pathlib.Path('blog_demo/blog/post.py')
+src  = path.read_text()
+
+imports = """\
+from half_orm_gen.tools import ho_api_filter
+"""
+
+method = """\
+
+    @ho_api_filter('published_posts')
+    def _is_published(self):
+        self.published = True
+        return self
+"""
+
+# Insert import after the first #>>> marker (top-level)
+src = re.sub(
+    r'(#>>> PLACE YOUR CODE BELOW THIS LINE\. DO NOT REMOVE THIS LINE!\n)',
+    r'\1' + imports + '\n',
+    src, count=1
+)
+# Insert method after the inner #>>> marker (inside class __init__)
+src = re.sub(
+    r'(        #>>> PLACE YOUR CODE BELOW THIS LINE\. DO NOT REMOVE THIS LINE!\n)',
+    r'\1' + method,
+    src, count=1
+)
+path.write_text(src)
+print('  patched blog_demo/blog/post.py')
+PYEOF
+
+echo -e "${GREEN}✓ Custom filter written${NC}"
+
+# ---------------------------------------------------------------------------
 # 11. Yes-auth routes (user file, not generated)
 # ---------------------------------------------------------------------------
 echo -e "${GREEN}=== YES-AUTH ROUTES ===${NC}"

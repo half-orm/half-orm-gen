@@ -22,7 +22,7 @@ from half_orm_gen.backend.ho_api.loader import (
 )
 from half_orm_gen.backend.crud_helpers import (
     _COMPOSITE_PK_PATTERN, _py_type_str,
-    _get_roles, _get_role_filter,
+    _get_roles, _get_role_filter, _get_active_filters,
     _effective_out_fields, _effective_in_fields,
     _resolved_out, _resolved_in,
     _parse_q, _build_access_entry, _filter_access_for_roles,
@@ -136,7 +136,7 @@ def _make_list_handler(
         offset: Optional[int] = 0,
         q: Optional[str] = None,
     ) -> dict:
-        from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
+        from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY, _FILTER_REGISTRY
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
         roles = _expand_roles(_get_roles(request), parent_map_holder[0])
@@ -166,6 +166,10 @@ def _make_list_handler(
             raise HTTPException(status_code=403)
         projection = [f for f in fields if f in authorized] if fields else authorized
         inst = cls(**{**filter_kwargs, **col_filters, **role_filter})
+        for filter_name in _get_active_filters(crud_access, 'GET', roles):
+            fn = _FILTER_REGISTRY.get((schema_name, table_name, filter_name))
+            if fn:
+                inst = fn(inst) or inst
         for col, op1, op1val, op2, op2val in range_filters:
             field = getattr(inst, col)
             if op1 == '>=':
@@ -219,8 +223,10 @@ def _make_get_handler(
     is_simple = len(pk_names) == 1
     pk_name = pk_info[0][0]
     slug = resource.replace('/', '_')
+    schema_name, table_name = resource.split('/')
 
     async def handler(request: Request, id: str) -> dict:
+        from half_orm_gen.backend.ho_api.registry import _FILTER_REGISTRY
         crud_access = crud_access_by_res.get(resource, {})
         api_excluded = api_excluded_by_res.get(resource, [])
         roles = _expand_roles(_get_roles(request), parent_map_holder[0])
@@ -229,7 +235,12 @@ def _make_get_handler(
         if not authorized:
             raise HTTPException(status_code=403)
         pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
-        rows = await cls(**{**pk_filter, **role_filter}).ho_aselect(*authorized)
+        inst = cls(**{**pk_filter, **role_filter})
+        for filter_name in _get_active_filters(crud_access, 'GET', roles):
+            fn = _FILTER_REGISTRY.get((schema_name, table_name, filter_name))
+            if fn:
+                inst = fn(inst) or inst
+        rows = await inst.ho_aselect(*authorized)
         if not rows:
             raise HTTPException(status_code=404)
         return rows[0]
@@ -434,6 +445,7 @@ def _make_ho_search(
         limit: Optional[int] = 5,
         resource: Optional[str] = None,
     ) -> dict:
+        from half_orm_gen.backend.ho_api.registry import _FILTER_REGISTRY
         if not q or not q.strip():
             return {}
         term = q.strip()
@@ -442,6 +454,7 @@ def _make_ho_search(
 
         candidates = {resource: classes_by_res[resource]} if resource and resource in classes_by_res else classes_by_res
         for res_key, cls in candidates.items():
+            schema_name, table_name = res_key.split('/')
             crud_access = crud_access_by_res.get(res_key, {})
             api_excluded = api_excluded_by_res.get(res_key, [])
 
@@ -476,6 +489,11 @@ def _make_ho_search(
 
             if role_filter:
                 inst &= cls(**role_filter)
+
+            for filter_name in _get_active_filters(crud_access, 'GET', roles):
+                fn = _FILTER_REGISTRY.get((schema_name, table_name, filter_name))
+                if fn:
+                    inst &= fn(cls()) or cls()
 
             rows = await inst.ho_aselect(*authorized, limit=limit)
             data = list(rows)

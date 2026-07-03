@@ -51,6 +51,18 @@ def _get_role_filter(crud_access: dict, verb: str, authorized_roles: list[str]) 
     return combined
 
 
+def _get_active_filters(crud_access: dict, verb: str, roles: list[str]) -> list[str]:
+    """Return the merged list of named @ho_api_filter filters active for a verb
+    across the caller's roles (union, in first-seen order)."""
+    role_map = crud_access.get(verb, {})
+    names: list[str] = []
+    for role in roles:
+        rv = role_map.get(role)
+        if isinstance(rv, dict):
+            names.extend(rv.get('filters', []))
+    return list(dict.fromkeys(names))
+
+
 def _effective_out_fields(
     crud_access: dict,
     verb: str,
@@ -177,6 +189,9 @@ def _build_access_entry(
                 searchable = rv.get('searchable', []) if isinstance(rv, dict) else []
                 if searchable:
                     role_entry['searchable'] = [f for f in searchable if f not in api_excluded]
+                filters = rv.get('filters', []) if isinstance(rv, dict) else []
+                if filters:
+                    role_entry['filters'] = filters
                 verb_entry[role] = role_entry
             elif verb == 'DELETE':
                 verb_entry[role] = 'allowed'
@@ -238,12 +253,16 @@ def _filter_access_for_roles(
                 if verb == 'GET':
                     out: list = []
                     searchable: list = []
+                    filters: list = []
                     for v in active.values():
                         out.extend(v.get('out', []))
                         searchable.extend(v.get('searchable', []))
+                        filters.extend(v.get('filters', []))
                     get_entry: dict = {'out': list(dict.fromkeys(out))}
                     if searchable:
                         get_entry['searchable'] = list(dict.fromkeys(searchable))
+                    if filters:
+                        get_entry['filters'] = list(dict.fromkeys(filters))
                     resource_entry[verb] = get_entry
                 else:
                     in_f: list = []
