@@ -80,7 +80,10 @@ def ho_api_role(name: str):
 def ho_api_filter(name: str):
     """Mark a method as a named row filter for CRUD queries.
 
-    The method applies conditions on self (Relation instance) and returns self.
+    The method receives (self, request) — self is the Relation instance
+    carrying the query's other constraints, request gives access to the
+    caller's identity (e.g. request.state.user). It must return the
+    (possibly narrowed) predicate, typically ``self & <extra predicate>``.
     """
     def decorator(fn):
         fn._ho_api_filter = name

@@ -169,7 +169,7 @@ def _make_list_handler(
         for filter_name in _get_active_filters(crud_access, 'GET', roles):
             fn = _FILTER_REGISTRY.get((schema_name, table_name, filter_name))
             if fn:
-                inst = fn(inst) or inst
+                inst = fn(inst, request) or inst
         for col, op1, op1val, op2, op2val in range_filters:
             field = getattr(inst, col)
             if op1 == '>=':
@@ -239,7 +239,7 @@ def _make_get_handler(
         for filter_name in _get_active_filters(crud_access, 'GET', roles):
             fn = _FILTER_REGISTRY.get((schema_name, table_name, filter_name))
             if fn:
-                inst = fn(inst) or inst
+                inst = fn(inst, request) or inst
         rows = await inst.ho_aselect(*authorized)
         if not rows:
             raise HTTPException(status_code=404)

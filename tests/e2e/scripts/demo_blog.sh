@@ -196,9 +196,12 @@ from half_orm_gen.tools import ho_api_filter
 method = """\
 
     @ho_api_filter('published_posts')
-    def _is_published(self):
-        self.published = True
-        return self
+    def _is_published(self, request):
+        user = getattr(request.state, 'user', None)
+        visible = self.__class__(published=True)
+        if user:
+            visible |= self.__class__(author_id=user)
+        return self & visible
 """
 
 # Insert import after the first #>>> marker (top-level)
