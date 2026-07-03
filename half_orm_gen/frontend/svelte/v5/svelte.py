@@ -1916,11 +1916,11 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(output_dir / 'src' / 'app.html',    _APP_HTML)
         self._write(output_dir / 'src' / 'app.css',     _APP_CSS)
 
-        # --- shared stores (schema types + resource silo + registry) ---
+        # --- shared stores (resource silo + registry) ---
         stores_dir = output_dir / 'src' / 'lib' / 'generated' / 'stores'
         stores_dir.mkdir(parents=True, exist_ok=True)
         svelte_assets = Path(__file__).parent
-        for fname in ('schema.types.ts', 'resource.silo.svelte.ts', 'silo-registry.svelte.ts'):
+        for fname in ('resource.silo.svelte.ts', 'silo-registry.svelte.ts'):
             shutil.copy2(svelte_assets / fname, stores_dir / fname)
             print(f'  {stores_dir / fname}')
 
@@ -1929,11 +1929,15 @@ class SvelteAppGenerator(StoreGenerator):
         for fname in ('PermissionsFields.svelte', 'PermissionsMatrix.svelte'):
             shutil.copy2(svelte_assets / fname, generated_dir / fname)
             print(f'  {generated_dir / fname}')
-        # Copy shared filters module
-        filters_src = Path(__file__).parents[2] / 'templates_filters.ts'
-        if filters_src.exists():
-            shutil.copy2(filters_src, stores_dir / 'filters.ts')
-            print(f'  {stores_dir / "filters.ts"}')
+
+        # --- cross-framework shared files (schema types / silo core logic / filters) ---
+        frontend_dir = Path(__file__).parents[2]
+        for fname in ('schema.types.ts', 'silo-shared.ts', 'templates_filters.ts'):
+            src = frontend_dir / fname
+            if src.exists():
+                dest_name = 'filters.ts' if fname == 'templates_filters.ts' else fname
+                shutil.copy2(src, stores_dir / dest_name)
+                print(f'  {stores_dir / dest_name}')
 
         # --- stateRegistry + auth store + WS env var ---
         self._write(output_dir / 'src' / 'lib' / 'latex.ts', _LATEX_TS)

@@ -32,7 +32,9 @@ export type HoMeta = Record<string, ResourceSchema>;
 
 export type Verb = 'GET' | 'POST' | 'PUT' | 'DELETE';
 export type VerbAccess = {
-  in?: string[] | null;
-  out?: string[] | null;
+  in?:           string[] | null;
+  out?:          string[] | null;
+  inherited_in?:  string[];
+  inherited_out?: string[];
 };
 export type PermMatrix = Record<string, Partial<Record<Verb, VerbAccess>>>;

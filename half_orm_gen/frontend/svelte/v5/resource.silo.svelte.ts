@@ -1,7 +1,9 @@
 import { auth } from '$lib/auth.svelte.ts';
 import { registerClear, registerClearForKey } from '$lib/stateRegistry';
 import type { ResourceSchema } from './schema.types';
-export type Row = Record<string, unknown>;
+import { makePkExtractor, parseCompositePk, buildListUrl, mergeDynamicRoles } from './silo-shared';
+import type { Row } from './silo-shared';
+export type { Row };
 
 export class ResourceSilo {
   items         = $state<Row[]>([]);
@@ -66,15 +68,7 @@ export class ResourceSilo {
     private baseUrl: string,
   ) {
     this.pkFields = schema.pk_fields;
-    if (schema.pk_fields.length === 1) {
-      const pk = schema.pk_fields[0];
-      this.pkExtractor = (item) => String(item[pk]);
-    } else if (schema.pk_fields.length > 1) {
-      const fields = schema.pk_fields;
-      this.pkExtractor = (item) => fields.map(f => `${f}:${item[f]}`).join('::');
-    } else {
-      this.pkExtractor = null;
-    }
+    this.pkExtractor = makePkExtractor(schema.pk_fields);
     registerClear(() => this.clear());
     registerClearForKey(key, () => this.clear());
     $effect.root(() => {
@@ -107,13 +101,7 @@ export class ResourceSilo {
   }
 
   listUrl(params: Row = {}): string {
-    const filtered = Object.fromEntries(
-      Object.entries(params)
-        .filter(([, v]) => v != null && (typeof v !== 'string' || v !== ''))
-        .map(([k, v]) => [`ho_col_${k}`, String(v)])
-    );
-    const qs = new URLSearchParams(filtered).toString();
-    return qs ? `${this.baseUrl}?${qs}` : this.baseUrl;
+    return buildListUrl(this.baseUrl, params);
   }
 
   getUrl(id: string): string { return `${this.baseUrl}/${id}`; }
@@ -186,17 +174,7 @@ export class ResourceSilo {
       if (!res.ok) return null;
       const { data, meta } = await res.json() as { data: Row[]; meta: { dynamic_roles?: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> } };
       if (data[0]) this.setItem(data[0]);
-      const incoming = meta?.dynamic_roles ?? {};
-      const merged: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> = {};
-      for (const [role, rd] of Object.entries(this.dynamicRoles)) {
-        const ids = rd.ids.filter(x => x !== id);
-        if (ids.length) merged[role] = { ...rd, ids };
-      }
-      for (const [role, rd] of Object.entries(incoming)) {
-        const prevIds = merged[role]?.ids ?? [];
-        merged[role] = { ...rd, ids: [...new Set([...prevIds, ...rd.ids])] };
-      }
-      this.dynamicRoles = merged;
+      this.dynamicRoles = mergeDynamicRoles(this.dynamicRoles, meta?.dynamic_roles ?? {}, id);
       return data[0] ?? null;
     }
     const url = this.getUrl(id);
@@ -277,12 +255,7 @@ export class ResourceSilo {
   }
 
   private parseCompositeId(id: string): Row {
-    const params: Row = {};
-    for (const part of id.split('::')) {
-      const colon = part.indexOf(':');
-      if (colon > 0) params[part.slice(0, colon)] = part.slice(colon + 1);
-    }
-    return params;
+    return parseCompositePk(id);
   }
 
   clear(): void {

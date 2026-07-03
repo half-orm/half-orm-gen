@@ -4,7 +4,9 @@ import { catchError, filter, map, of, tap } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { registerClear, registerClearForKey } from '../core/state-registry';
 import { ResourceSchema } from './schema.types';
-export type Row = Record<string, unknown>;
+import { makePkExtractor, parseCompositePk, buildListUrl, mergeDynamicRoles } from './silo-shared';
+import type { Row } from './silo-shared';
+export type { Row };
 
 export class ResourceSilo {
   readonly items         = signal<Row[]>([]);
@@ -40,15 +42,7 @@ export class ResourceSilo {
     private auth: AuthService,
   ) {
     this.pkFields = schema.pk_fields;
-    if (schema.pk_fields.length === 1) {
-      const pk = schema.pk_fields[0];
-      this.pkExtractor = (item) => String(item[pk]);
-    } else if (schema.pk_fields.length > 1) {
-      const fields = schema.pk_fields;
-      this.pkExtractor = (item) => fields.map(f => `${f}:${item[f]}`).join('::');
-    } else {
-      this.pkExtractor = null;
-    }
+    this.pkExtractor = makePkExtractor(schema.pk_fields);
 
     this.canCreate = computed(() => !!(auth.effectiveAccess() as any)[key]?.POST);
     this.fkAutoPostFields = computed(() =>
@@ -127,13 +121,7 @@ export class ResourceSilo {
   }
 
   listUrl(params: Row = {}): string {
-    const filtered = Object.fromEntries(
-      Object.entries(params)
-        .filter(([, v]) => v != null && (typeof v !== 'string' || v !== ''))
-        .map(([k, v]) => [`ho_col_${k}`, String(v)])
-    );
-    const qs = new URLSearchParams(filtered).toString();
-    return qs ? `${this.baseUrl}?${qs}` : this.baseUrl;
+    return buildListUrl(this.baseUrl, params);
   }
 
   getUrl(id: string): string { return `${this.baseUrl}/${id}`; }
@@ -211,18 +199,7 @@ export class ResourceSilo {
         tap(resp => {
           if (resp.data[0]) this.setItem(resp.data[0]);
           const incoming = resp.meta?.dynamic_roles ?? {};
-          this.dynamicRoles.update(current => {
-            const merged: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> = {};
-            for (const [role, rd] of Object.entries(current)) {
-              const ids = rd.ids.filter(x => x !== id);
-              if (ids.length) merged[role] = { ...rd, ids };
-            }
-            for (const [role, rd] of Object.entries(incoming)) {
-              const prevIds = merged[role]?.ids ?? [];
-              merged[role] = { ...rd, ids: [...new Set([...prevIds, ...rd.ids])] };
-            }
-            return merged;
-          });
+          this.dynamicRoles.update(current => mergeDynamicRoles(current, incoming, id));
         }),
         map(resp => resp.data[0] ?? null),
         catchError(() => of(null as Row | null))
@@ -300,12 +277,7 @@ export class ResourceSilo {
   }
 
   private parseCompositeId(id: string): Row {
-    const params: Row = {};
-    for (const part of id.split('::')) {
-      const colon = part.indexOf(':');
-      if (colon > 0) params[part.slice(0, colon)] = part.slice(colon + 1);
-    }
-    return params;
+    return parseCompositePk(id);
   }
 
   clear(): void {

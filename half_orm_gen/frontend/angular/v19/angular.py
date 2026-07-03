@@ -241,12 +241,19 @@ class AngularAppGenerator(StoreGenerator):
             shutil.copy2(filters_src, stores_dir / 'filters.ts')
             print(f'  {stores_dir / "filters.ts"}')
 
-        # --- shared silo files (SiloRegistry / ResourceSilo / schema types) ---
+        # --- shared silo files (SiloRegistry / ResourceSilo) ---
         angular_assets = Path(__file__).parent
         generated_dir = app_dir / 'generated'
         generated_dir.mkdir(parents=True, exist_ok=True)
-        for fname in ('schema.types.ts', 'resource.silo.ts', 'silo-registry.service.ts'):
+        for fname in ('resource.silo.ts', 'silo-registry.service.ts'):
             src = angular_assets / fname
+            if src.exists():
+                shutil.copy2(src, generated_dir / fname)
+                print(f'  {generated_dir / fname}')
+
+        # --- cross-framework shared files (schema types / silo core logic) ---
+        for fname in ('schema.types.ts', 'silo-shared.ts'):
+            src = frontend_dir / fname
             if src.exists():
                 shutil.copy2(src, generated_dir / fname)
                 print(f'  {generated_dir / fname}')
