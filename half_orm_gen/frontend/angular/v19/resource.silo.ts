@@ -22,13 +22,13 @@ export class ResourceSilo {
   readonly dynamicRoles = signal<Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }>>({});
 
   // Per-resource access signals — derived from AuthService at runtime
-  readonly canCreate:              Signal<boolean>;
-  readonly inaccessibleFields:     Signal<Set<string>>;
-  readonly inaccessiblePostFields: Signal<Set<string>>;
-  readonly inaccessiblePutFields:  Signal<Set<string>>;
-  readonly fkAutoPostFields:       Signal<Record<string, string>>;
-  readonly fkAutoPutFields:        Signal<Record<string, string>>;
-  readonly searchableFields:       Signal<string[]>;
+  readonly canCreate:               Signal<boolean>;
+  private _inaccessibleGetFields:   Signal<Set<string>>;
+  private _inaccessiblePostFields:  Signal<Set<string>>;
+  private _inaccessiblePutFields:   Signal<Set<string>>;
+  readonly fkAutoPostFields:        Signal<Record<string, string>>;
+  readonly fkAutoPutFields:         Signal<Record<string, string>>;
+  readonly searchableFields:        Signal<string[]>;
 
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
@@ -54,7 +54,7 @@ export class ResourceSilo {
     this.searchableFields = computed(() =>
       (auth.effectiveAccess() as any)[key]?.GET?.searchable ?? []
     );
-    this.inaccessibleFields = computed(() => {
+    this._inaccessibleGetFields = computed(() => {
       const allFields = schema.fields.map(f => f.name);
       const getAccess = (auth.effectiveAccess() as any)[key]?.GET;
       if (!getAccess) return new Set<string>(allFields);
@@ -62,7 +62,7 @@ export class ResourceSilo {
       if (!out || out.length === 0) return new Set<string>(allFields);
       return new Set(allFields.filter(f => !out.includes(f)));
     });
-    this.inaccessiblePostFields = computed(() => {
+    this._inaccessiblePostFields = computed(() => {
       const inFields: string[] | undefined = (auth.effectiveAccess() as any)[key]?.POST?.in;
       const fkAuto: Record<string, string> = (auth.effectiveAccess() as any)[key]?.POST?.fk_auto ?? {};
       const autoHidden = new Set(['connected_user', 'context']);
@@ -71,7 +71,7 @@ export class ResourceSilo {
       if (inFields.length === 0) return new Set(allFields);
       return new Set(allFields.filter(f => !inFields.includes(f) || autoHidden.has(fkAuto[f])));
     });
-    this.inaccessiblePutFields = computed(() => {
+    this._inaccessiblePutFields = computed(() => {
       const allFields = schema.fields.map(f => f.name);
       const fkAuto: Record<string, string> = (auth.effectiveAccess() as any)[key]?.PUT?.fk_auto ?? {};
       const staticIn: string[] | undefined = (auth.effectiveAccess() as any)[key]?.PUT?.in;
@@ -112,6 +112,14 @@ export class ResourceSilo {
   canAccess(verb: string, id: string): boolean {
     if (!!(this.auth.effectiveAccess() as any)[this.key]?.[verb]) return true;
     return Object.values(this.dynamicRoles()).some(rd => (rd as any).verbs.includes(verb) && (rd as any).ids.includes(id));
+  }
+
+  inaccessibleFields(verb: 'GET' | 'POST' | 'PUT' = 'GET'): Set<string> {
+    switch (verb) {
+      case 'POST': return this._inaccessiblePostFields();
+      case 'PUT':  return this._inaccessiblePutFields();
+      default:     return this._inaccessibleGetFields();
+    }
   }
 
   canCreateWithFilters(filters: Record<string, unknown>): boolean {

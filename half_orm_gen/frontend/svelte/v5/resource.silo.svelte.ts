@@ -23,7 +23,7 @@ export class ResourceSilo {
   fkAutoPostFields   = $derived<Record<string, string>>((auth.access as any)[this.key]?.POST?.fk_auto ?? {});
   fkAutoPutFields    = $derived<Record<string, string>>((auth.access as any)[this.key]?.PUT?.fk_auto ?? {});
   searchableFields   = $derived<string[]>((auth.access as any)[this.key]?.GET?.searchable ?? []);
-  inaccessibleFields = $derived.by(() => {
+  private _inaccessibleGetFields = $derived.by(() => {
     const allFields = this.schema.fields.map((f: any) => f.name as string);
     const getAccess = (auth.access as any)[this.key]?.GET;
     if (!getAccess) return new Set<string>(allFields);
@@ -31,7 +31,7 @@ export class ResourceSilo {
     if (!out || !Array.isArray(out) || out.length === 0) return new Set<string>(allFields);
     return new Set(allFields.filter(f => !(out as string[]).includes(f)));
   });
-  inaccessiblePostFields = $derived.by(() => {
+  private _inaccessiblePostFields = $derived.by(() => {
     const inFields = (auth.access as any)[this.key]?.POST?.in as string[] | undefined;
     const fkAuto: Record<string, string> = (auth.access as any)[this.key]?.POST?.fk_auto ?? {};
     const autoHidden = new Set(['connected_user', 'context']);
@@ -40,7 +40,7 @@ export class ResourceSilo {
     if (inFields.length === 0) return new Set(allFields);
     return new Set(allFields.filter(f => !inFields.includes(f) || autoHidden.has(fkAuto[f])));
   });
-  inaccessiblePutFields = $derived.by(() => {
+  private _inaccessiblePutFields = $derived.by(() => {
     const allFields = this.schema.fields.map((f: any) => f.name as string);
     const fkAuto: Record<string, string> = (auth.access as any)[this.key]?.PUT?.fk_auto ?? {};
     const staticIn = (auth.access as any)[this.key]?.PUT?.in as string[] | undefined;
@@ -92,6 +92,14 @@ export class ResourceSilo {
   canAccess(verb: string, id: string): boolean {
     if (!!(auth.access as any)[this.key]?.[verb]) return true;
     return Object.values(this.dynamicRoles).some(rd => rd.verbs.includes(verb) && rd.ids.includes(id));
+  }
+
+  inaccessibleFields(verb: 'GET' | 'POST' | 'PUT' = 'GET'): Set<string> {
+    switch (verb) {
+      case 'POST': return this._inaccessiblePostFields;
+      case 'PUT':  return this._inaccessiblePutFields;
+      default:     return this._inaccessibleGetFields;
+    }
   }
 
   canCreateWithFilters(filters: Record<string, unknown>): boolean {

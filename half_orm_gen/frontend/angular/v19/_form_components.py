@@ -51,7 +51,7 @@ def _create_component(
     )
 
     form_fields = '\n      '.join(
-        f"@if (!silo.inaccessiblePostFields().has('{f}')) {{\n      "
+        f"@if (!silo.inaccessibleFields('POST').has('{f}')) {{\n      "
         + _ng_form_field(f, all_fields)
         + '\n      }'
         for f in visible_post
@@ -68,7 +68,7 @@ def _create_component(
         f"    const textFields = new Set<string>([{text_fields_ts}]);\n"
         "    const payload = Object.fromEntries(\n"
         "      Object.entries(this.form as unknown as Record<string, unknown>)\n"
-        "        .filter(([k]) => !this.silo.inaccessiblePostFields().has(k))\n"
+        "        .filter(([k]) => !this.silo.inaccessibleFields('POST').has(k))\n"
         + (
             "        .filter(([k, v]) => !this.optionalFields.has(k) || v !== '')\n"
             if optional_post_fields else ""

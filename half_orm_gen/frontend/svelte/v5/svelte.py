@@ -1017,7 +1017,7 @@ def _list_component(
         )
         indicator = f"{{#if silo.sortField === '{f}'}}{{silo.sortAsc ? '↑' : '↓'}}{{/if}}"
         return (
-            f'{{#if !silo.inaccessibleFields.has(\'{f}\')}}'
+            f'{{#if !silo.inaccessibleFields().has(\'{f}\')}}'
             f'<th onclick={{{toggle}}}'
             f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600 cursor-pointer select-none hover:bg-gray-200">'
             f'{f} {indicator}</th>'
@@ -1028,12 +1028,12 @@ def _list_component(
     th_cols   = (action_th + '\n        ' if action_th else '') + '\n        '.join(_sort_th(f) for f in out_names)
 
     filter_inputs = '\n        '.join(
-        f'{{#if !silo.inaccessibleFields.has(\'{f}\') && silo.searchableFields.includes(\'{f}\')}}'
+        f'{{#if !silo.inaccessibleFields().has(\'{f}\') && silo.searchableFields.includes(\'{f}\')}}'
         f'<th class="px-2 py-1">'
         f'<input value={{localFilters[\'{f}\'] ?? \'\'}} '
         f'oninput={{(e) => localFilters = {{...localFilters, \'{f}\': e.currentTarget.value}}}} '
         f'placeholder="…" class="w-full text-xs border rounded px-2 py-1 font-normal" /></th>'
-        f'{{:else if !silo.inaccessibleFields.has(\'{f}\')}}'
+        f'{{:else if !silo.inaccessibleFields().has(\'{f}\')}}'
         f'<th class="px-2 py-1"></th>'
         f'{{/if}}'
         for f in out_names
@@ -1056,7 +1056,7 @@ def _list_component(
     )
 
     def _td(f: str) -> str:
-        inacc = f"silo.inaccessibleFields.has('{f}')"
+        inacc = f"silo.inaccessibleFields().has('{f}')"
         if f in fk_map:
             rs, rt = fk_map[f]
             return (
@@ -1504,7 +1504,7 @@ def _new_page(
     optional_set_js = ', '.join(f"'{f}'" for f in optional_post_fields)
     text_fields_js  = _text_fields(visible_post, all_fields)
     form_fields = '\n    '.join(
-        f"{{#if !silo.inaccessiblePostFields.has('{f}')}}\n    "
+        f"{{#if !silo.inaccessibleFields('POST').has('{f}')}}\n    "
         + _svelte_form_field(f, all_fields)
         + '\n    {/if}'
         for f in visible_post
@@ -1526,7 +1526,7 @@ def _new_page(
     try {{
       const payload = Object.fromEntries(
         Object.entries(form)
-          .filter(([k]) => !silo.inaccessiblePostFields.has(k))
+          .filter(([k]) => !silo.inaccessibleFields('POST').has(k))
           .filter(([k, v]) => !optionalFields.has(k) || v !== '')
           {_null_map_js()}
       );
@@ -1651,7 +1651,7 @@ def _detail_page(
 
     # Edit form fields
     form_fields = '\n    '.join(
-        f"{{#if !silo.inaccessiblePutFields.has('{f}')}}\n    "
+        f"{{#if !silo.inaccessibleFields('PUT').has('{f}')}}\n    "
         + _svelte_form_field(f, all_fields)
         + '\n    {/if}'
         for f in visible_put
@@ -1660,7 +1660,7 @@ def _detail_page(
     # Form state + edit toggle — populated reactively from item once loaded
     extra_script = ''
     edit_btn     = ''
-    edit_section = '\n  <Fields {item} inaccessibleFields={silo.inaccessibleFields} />'
+    edit_section = '\n  <Fields {item} inaccessibleFields={silo.inaccessibleFields()} />'
 
     if has_put and visible_put:
         empty_init  = ', '.join(
@@ -1690,7 +1690,7 @@ def _detail_page(
             f'    try {{\n'
             f'      const putPayload = Object.fromEntries(\n'
             f'        Object.entries(form)\n'
-            f'          .filter(([k]) => !silo.inaccessiblePutFields.has(k))\n'
+            f"          .filter(([k]) => !silo.inaccessibleFields('PUT').has(k))\n"
             f'          {_null_map_js("putTextFields")}\n'
             f'      );\n'
             f'      const res = await silo.update(id, putPayload);\n'
@@ -1712,7 +1712,7 @@ def _detail_page(
         edit_section = f"""
 
   {{#if !editing}}
-  <Fields {{item}} inaccessibleFields={{silo.inaccessibleFields}} />
+  <Fields {{item}} inaccessibleFields={{silo.inaccessibleFields()}} />
   {{:else}}
   {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
   <form onsubmit={{handleUpdate}} class="space-y-4">
