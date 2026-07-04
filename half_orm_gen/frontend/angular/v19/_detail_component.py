@@ -278,6 +278,9 @@ export class {iname}DetailComponent {{
       void this.auth.resourceAccessVersion()['{map_key}'];
       void this.auth.simulatedRole();
       if (!this.item()) untracked(() => this.silo.get(this.id() as any).subscribe());
+    }});
+    effect(() => {{
+      if (this.item()) this.silo.markRead(this.id());
     }});{form_effect}{ws_effect}{fk_fetch_effects}
   }}
 

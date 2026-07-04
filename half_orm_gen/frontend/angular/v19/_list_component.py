@@ -111,10 +111,15 @@ def _list_component(
     if pk_field:
         action_td = (
             '\n              <td class="px-2 py-2">\n'
+            '                <div class="flex items-center gap-1.5">\n'
+            '                @if (silo.isNew(getPkId(item))) {\n'
+            '                  <span class="inline-block w-2 h-2 rounded-full bg-blue-500 shrink-0" title="New"></span>\n'
+            '                }\n'
             '                @if (silo.canAccess("DELETE", getPkId(item))) {\n'
             f'                  <button (click)="handleDelete(getPkId(item), $event)"\n'
             '                          class="text-red-600 hover:underline text-sm">Delete</button>\n'
             '                }\n'
+            '                </div>\n'
             '              </td>'
         )
 
@@ -127,6 +132,11 @@ def _list_component(
             f'             class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
             f'            New\n          </a>\n        }}'
         )
+
+    new_items_badge = (
+        '<app-new-items-badge [count]="silo.newCount()" [active]="showNewOnly()" '
+        '(toggle)="toggleShowNewOnly()" />'
+    ) if pk_extractor else ''
 
 
     delete_fn = ''
@@ -177,6 +187,12 @@ def _list_component(
     {field_types_entries}
   }};"""
 
+    _new_only_filter = (
+        '\n    if (this.showNewOnly()) {\n'
+        '      items = items.filter(item => this.silo.isNew(this.getPkId(item)));\n'
+        '    }'
+    ) if pk_extractor else ''
+
     displayItems_block = f"""\
   readonly displayItems = computed(() => {{
     const hasFilters = Object.keys(this.filters()).length > 0;
@@ -186,7 +202,7 @@ def _list_component(
     const lf = this.localFilters();
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
-        Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
+        Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));{_new_only_filter}
     const sf = this.silo.sortField();
     if (sf) {{
       const asc = this.silo.sortAsc();
@@ -200,7 +216,7 @@ def _list_component(
   }});"""
 
     router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
-    _comp_imports = ['PermissionsMatrixComponent', 'HoTooltipComponent']
+    _comp_imports = ['PermissionsMatrixComponent', 'HoTooltipComponent', 'NewItemsBadgeComponent']
     if needs_router_link:
         _comp_imports.insert(0, 'RouterLink')
     imports_str = ', '.join(_comp_imports)
@@ -220,13 +236,14 @@ def _list_component(
     html = f"""\
 @if (!embedded()) {{
   <div class="flex justify-between items-center mb-4">
-    <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
+    <h1 class="text-2xl font-bold">{title}</h1>
+    <div class="flex items-center gap-3">{new_items_badge}{new_btn}</div>
   </div>
   @if (auth.isAdmin()) {{
     <app-permissions-matrix [catalogEntry]="auth.catalog()['{map_key}'] ?? null" />
   }}
-}} @else {{{new_btn and f'''
-  <div class="flex justify-end py-1 pr-1">{new_btn}
+}} @else {{{(new_btn or new_items_badge) and f'''
+  <div class="flex justify-end items-center gap-3 py-1 pr-1">{new_items_badge}{new_btn}
   </div>''' or ''}}}
 <div [class]="embedded() ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
   <table class="w-full border-collapse">
@@ -278,6 +295,7 @@ import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTi
 import type {{ FieldType }} from '../../../generated/stores/filters';
 import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
 import {{ HoTooltipComponent }} from '../../../generated/ho-tooltip.component';
+import {{ NewItemsBadgeComponent }} from '../../../generated/new-items-badge.component';
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
   standalone: true,
@@ -308,8 +326,13 @@ export class {iname}ListComponent {{
   readonly embedded = input(false);
 
   localFilters = signal<Record<string, string>>({{}});
+  showNewOnly  = signal(false);
 {field_types_map}
 {displayItems_block}
+
+  toggleShowNewOnly(): void {{
+    this.showNewOnly.update(v => !v);
+  }}
 
   constructor() {{
     // Initialize filters from URL or store before loading data

@@ -21,6 +21,10 @@ export class ResourceSilo {
   readonly sortAsc    = signal(true);
   readonly dynamicRoles = signal<Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }>>({});
 
+  // Ids created (via WS 'create' event) since this silo was instantiated — not persisted
+  private readonly newIds = signal(new Set<string>());
+  readonly newCount = computed(() => this.newIds().size);
+
   // Per-resource access signals — derived from AuthService at runtime
   readonly canCreate:               Signal<boolean>;
   private _inaccessibleGetFields:   Signal<Set<string>>;
@@ -33,6 +37,9 @@ export class ResourceSilo {
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
   private pkFields: string[];
+  // Ids created by this client's own create() calls — the WS 'create' echo for
+  // these shouldn't be marked as "new" for the user who just created them
+  private ownCreatedIds = new Set<string>();
 
   constructor(
     readonly key: string,
@@ -95,8 +102,14 @@ export class ResourceSilo {
     auth.wsEvent$
       .pipe(filter(ev => ev.resource === key))
       .subscribe(ev => {
-        if (ev.event === 'delete') this.removeItem(String(ev.id));
-        else this.refresh(String(ev.id)).subscribe();
+        const id = String(ev.id);
+        if (ev.event === 'delete') { this.removeItem(id); return; }
+        this.refresh(id).subscribe(item => {
+          if (ev.event === 'create' && item) {
+            if (this.ownCreatedIds.delete(id)) return;
+            this.newIds.update(s => new Set(s).add(id));
+          }
+        });
       });
   }
 
@@ -112,6 +125,17 @@ export class ResourceSilo {
   canAccess(verb: string, id: string): boolean {
     if (!!(this.auth.effectiveAccess() as any)[this.key]?.[verb]) return true;
     return Object.values(this.dynamicRoles()).some(rd => (rd as any).verbs.includes(verb) && (rd as any).ids.includes(id));
+  }
+
+  isNew(id: string): boolean {
+    return this.newIds().has(id);
+  }
+
+  markRead(id: string): void {
+    if (!this.newIds().has(id)) return;
+    const next = new Set(this.newIds());
+    next.delete(id);
+    this.newIds.set(next);
   }
 
   inaccessibleFields(verb: 'GET' | 'POST' | 'PUT' = 'GET'): Set<string> {
@@ -228,7 +252,11 @@ export class ResourceSilo {
   create(data: Row) {
     return this.http.post<Row>(this.baseUrl, data, {
       headers: this.headers.append('Content-Type', 'application/json'),
-    });
+    }).pipe(
+      tap(item => {
+        if (this.pkExtractor) this.ownCreatedIds.add(this.pkExtractor(item));
+      })
+    );
   }
 
   update(id: string, data: Row) {
@@ -298,5 +326,6 @@ export class ResourceSilo {
     this.loadedFilters.clear();
     this.hasMore.set(true);
     this.currentOffset.set(0);
+    this.newIds.set(new Set());
   }
 }

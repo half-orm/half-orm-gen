@@ -1127,11 +1127,16 @@ def _list_component(
     if pk_field:
         action_td = (
             f'<td class="px-2 py-2">\n'
+            f'          <div class="flex items-center gap-1.5">\n'
+            f'          {{#if silo.isNew(String({pk_item_expr}))}}\n'
+            f'            <span class="inline-block w-2 h-2 rounded-full bg-blue-500 shrink-0" title="New"></span>\n'
+            f'          {{/if}}\n'
             f'          {{#if silo.canAccess(\'DELETE\', String({pk_item_expr}))}}\n'
             f'            <button'
             f' onclick={{(e) => {{ e.stopPropagation(); handleDelete({pk_item_expr}); }}}}'
             f'\n                    class="text-red-600 hover:underline text-sm">Delete</button>\n'
             f'          {{/if}}\n'
+            f'          </div>\n'
             f'        </td>'
         )
 
@@ -1141,6 +1146,11 @@ def _list_component(
         f'       class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
         f'      New\n    </a>\n  {{/if}}'
         if has_post else ''
+    )
+
+    new_items_badge = (
+        '<NewItemsBadge count={silo.newCount} active={showNewOnly} ontoggle={toggleShowNewOnly} />'
+        if pk_field else ''
     )
 
     delete_fn  = (
@@ -1163,6 +1173,7 @@ def _list_component(
   import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '$lib/generated/stores/filters';
   import type {{ FieldType }} from '$lib/generated/stores/filters';
   import Tooltip from '$lib/generated/Tooltip.svelte';
+  import NewItemsBadge from '$lib/generated/NewItemsBadge.svelte';
 
   const fieldTypes: Record<string, FieldType> = {{
     {field_types_entries}
@@ -1235,6 +1246,9 @@ def _list_component(
     goto(`/ho_bo/{schema_name}/{table_name}/${{id}}`);
   }}
 
+  let showNewOnly = $state(false);
+  function toggleShowNewOnly() {{ showNewOnly = !showNewOnly; }}
+
   const displayItems = $derived.by(() => {{
     let items: Row[] = hasFilters
       ? silo.items.filter(item =>
@@ -1244,6 +1258,9 @@ def _list_component(
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
+    if (showNewOnly) {{
+      items = items.filter(item => silo.isNew(String({pk_item_expr})));
+    }}
     const sf = silo.sortField;
     if (sf) {{
       const asc = silo.sortAsc;
@@ -1390,10 +1407,11 @@ def _list_component(
 
 {{#if !embedded}}
 <div class="flex justify-between items-center mb-4">
-  <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
+  <h1 class="text-2xl font-bold">{title}</h1>
+  <div class="flex items-center gap-3">{new_items_badge}{new_btn}</div>
 </div>
-{{:else}}{new_btn and f'''
-<div class="flex justify-end py-1 pr-1">{new_btn}
+{{:else}}{(new_btn or new_items_badge) and f'''
+<div class="flex justify-end items-center gap-3 py-1 pr-1">{new_items_badge}{new_btn}
 </div>''' or ''}
 {{/if}}
 
@@ -1994,6 +2012,10 @@ def _detail_page(
   }});
 
   $effect(() => {{
+    if (item) silo.markRead(id);
+  }});
+
+  $effect(() => {{
     const ev = auth.lastEvent;
     if (ev?.resource === '{map_key}' && String(ev.id) === id && ev.event === 'delete')
       goto('/ho_bo/{schema_name}/{table_name}');
@@ -2062,7 +2084,7 @@ class SvelteAppGenerator(StoreGenerator):
 
         # --- shared Svelte components (permissions matrix) ---
         generated_dir = output_dir / 'src' / 'lib' / 'generated'
-        for fname in ('PermissionsFields.svelte', 'PermissionsMatrix.svelte', 'Tooltip.svelte'):
+        for fname in ('PermissionsFields.svelte', 'PermissionsMatrix.svelte', 'Tooltip.svelte', 'NewItemsBadge.svelte'):
             shutil.copy2(svelte_assets / fname, generated_dir / fname)
             print(f'  {generated_dir / fname}')
 

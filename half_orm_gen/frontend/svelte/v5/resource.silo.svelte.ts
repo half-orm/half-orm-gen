@@ -18,6 +18,10 @@ export class ResourceSilo {
   sortAsc      = $state(true);
   dynamicRoles = $state<Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }>>({});
 
+  // Ids created (via WS 'create' event) since this silo was instantiated — not persisted
+  private newIds = $state(new Set<string>());
+  newCount = $derived(this.newIds.size);
+
   // Per-resource access signals — derived from auth at runtime
   canCreate           = $derived(!!(auth.access as any)[this.key]?.POST);
   private _fkAutoPostFields = $derived<Record<string, string>>((auth.access as any)[this.key]?.POST?.fk_auto ?? {});
@@ -61,6 +65,9 @@ export class ResourceSilo {
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
   private pkFields: string[];
+  // Ids created by this client's own create() calls — the WS 'create' echo for
+  // these shouldn't be marked as "new" for the user who just created them
+  private ownCreatedIds = new Set<string>();
 
   constructor(
     readonly key: string,
@@ -75,8 +82,14 @@ export class ResourceSilo {
       $effect(() => {
         const ev = auth.lastEvent;
         if (!ev || ev.resource !== key) return;
-        if (ev.event === 'delete') this.removeItem(String(ev.id));
-        else void this.refresh(String(ev.id as string));
+        const id = String(ev.id);
+        if (ev.event === 'delete') { this.removeItem(id); return; }
+        void this.refresh(id).then(item => {
+          if (ev.event === 'create' && item) {
+            if (this.ownCreatedIds.delete(id)) return;
+            this.newIds = new Set(this.newIds).add(id);
+          }
+        });
       });
     });
   }
@@ -92,6 +105,17 @@ export class ResourceSilo {
   canAccess(verb: string, id: string): boolean {
     if (!!(auth.access as any)[this.key]?.[verb]) return true;
     return Object.values(this.dynamicRoles).some(rd => rd.verbs.includes(verb) && rd.ids.includes(id));
+  }
+
+  isNew(id: string): boolean {
+    return this.newIds.has(id);
+  }
+
+  markRead(id: string): void {
+    if (!this.newIds.has(id)) return;
+    const next = new Set(this.newIds);
+    next.delete(id);
+    this.newIds = next;
   }
 
   inaccessibleFields(verb: 'GET' | 'POST' | 'PUT' = 'GET'): Set<string> {
@@ -199,11 +223,20 @@ export class ResourceSilo {
   }
 
   create(data: Row): Promise<Response> {
-    return fetch(this.baseUrl, {
+    const req = fetch(this.baseUrl, {
       method: 'POST',
       headers: { ...this.hdrs, 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    // Fire-and-forget: remember this client's own created id so the WS 'create'
+    // echo for it isn't marked as "new" for the user who just created it.
+    void req.then(res => {
+      if (!res.ok) return;
+      res.clone().json().then((item: Row) => {
+        if (this.pkExtractor) this.ownCreatedIds.add(this.pkExtractor(item));
+      }).catch(() => {});
+    });
+    return req;
   }
 
   update(id: string, data: Row): Promise<Response> {
@@ -276,5 +309,6 @@ export class ResourceSilo {
     this.loadedFilters.clear();
     this.hasMore = true;
     this.currentOffset = 0;
+    this.newIds = new Set();
   }
 }
