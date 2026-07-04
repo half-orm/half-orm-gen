@@ -49,6 +49,22 @@ export function buildListUrl(baseUrl: string, params: Row): string {
 }
 
 /**
+ * Build a human-readable label for a row, using the resource's admin-
+ * configured `label_fields` (schema.types.ts `ResourceSchema.label_fields`,
+ * concatenation order = `label_order` in "half_orm_meta.api".field).
+ *
+ * Falls back to `fallbackFields` (e.g. a list's `searchable_fields`) when no
+ * label fields are configured yet, then to the first three field values —
+ * consistent with the pre-label-fields heuristic, so unconfigured resources
+ * don't regress.
+ */
+export function formatLabel(row: Row, labelFields: string[], fallbackFields: string[] = []): string {
+  const fields = labelFields.length ? labelFields : fallbackFields;
+  if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
+  return fields.map(f => row[f]).filter(v => v != null).join(' ');
+}
+
+/**
  * Merge dynamic_roles freshly resolved for a single refreshed row into the
  * existing dynamic_roles state, without discarding entries for other rows.
  *

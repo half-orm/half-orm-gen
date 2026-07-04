@@ -17,6 +17,7 @@ interface AccessEntry {{
 }}
 interface ResourceInfo {{
   fields: string[];
+  label_fields: string[];
   pk_fields: string[];
   fields_with_defaults: string[];
   fk_deps: FkDep[];
@@ -286,6 +287,33 @@ const VERB_COLOR: Record<string, string> = {{
                                        (change)="toggleFilter(fi.id, !panelAccess()!.active_filters.includes(fi.id))"
                                        class="rounded border-gray-300 text-violet-600 w-3 h-3">
                                 <span class="font-mono text-gray-700">{{{{ fi.name }}}}</span>
+                              </label>
+                            }}
+                          </div>
+                        </div>
+                      }}
+
+                      <!-- Label fields: resource-level, not per-role — shown once in the GET panel -->
+                      @if (panel()!.verb === 'GET') {{
+                        <div class="min-w-[180px]">
+                          <div class="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-2">
+                            Label fields
+                          </div>
+                          <div class="text-[9px] text-gray-400 mb-2">
+                            Used to display this resource elsewhere (FK select, global search).
+                            Not per-role. Auto-marked searchable.
+                          </div>
+                          <div class="space-y-1">
+                            @for (f of panelInfo()!.fields; track f) {{
+                              <label class="flex items-center gap-2 text-xs cursor-pointer">
+                                <input type="checkbox"
+                                       [checked]="isLabelField(f)"
+                                       (change)="toggleLabelField(f, !isLabelField(f))"
+                                       class="rounded border-gray-300 text-teal-600 w-3 h-3">
+                                <span class="font-mono text-gray-700">{{{{ f }}}}</span>
+                                @if (isLabelField(f)) {{
+                                  <span class="text-teal-500 font-mono">#{{{{ labelFields().indexOf(f) }}}}</span>
+                                }}
                               </label>
                             }}
                           </div>
@@ -671,6 +699,30 @@ export class HoAdminComponent implements OnInit {{
           body: JSON.stringify({{access_id: acc.id, field_name: field, resolve_rule: rule}}),
         }});
       }}
+    }}
+  }}
+
+  readonly labelFields = computed<string[]>(() => this.panelInfo()?.label_fields ?? []);
+
+  isLabelField(field: string): boolean {{
+    return this.labelFields().includes(field);
+  }}
+
+  async toggleLabelField(field: string, add: boolean): Promise<void> {{
+    const p = this.panel();
+    if (!p) return;
+    const [schema_name, table_name] = p.resource.split('/');
+    if (add) {{
+      const label_order = this.labelFields().length;
+      await fetch('{version_prefix}/ho_admin/field_label', {{
+        method: 'POST',
+        headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
+        body: JSON.stringify({{schema_name, table_name, field_name: field, label_order}}),
+      }});
+    }} else {{
+      await fetch(`{version_prefix}/ho_admin/field_label/${{schema_name}}/${{table_name}}/${{field}}`, {{
+        method: 'DELETE', headers: this._hdrs,
+      }});
     }}
   }}
 }}

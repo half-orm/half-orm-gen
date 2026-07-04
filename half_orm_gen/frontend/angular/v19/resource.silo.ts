@@ -26,8 +26,8 @@ export class ResourceSilo {
   private _inaccessibleGetFields:   Signal<Set<string>>;
   private _inaccessiblePostFields:  Signal<Set<string>>;
   private _inaccessiblePutFields:   Signal<Set<string>>;
-  readonly fkAutoPostFields:        Signal<Record<string, string>>;
-  readonly fkAutoPutFields:         Signal<Record<string, string>>;
+  private _fkAutoPostFields:        Signal<Record<string, string>>;
+  private _fkAutoPutFields:         Signal<Record<string, string>>;
   readonly searchableFields:        Signal<string[]>;
 
   private loadedFilters = new Map<string, boolean>();
@@ -45,10 +45,10 @@ export class ResourceSilo {
     this.pkExtractor = makePkExtractor(schema.pk_fields);
 
     this.canCreate = computed(() => !!(auth.effectiveAccess() as any)[key]?.POST);
-    this.fkAutoPostFields = computed(() =>
+    this._fkAutoPostFields = computed(() =>
       (auth.effectiveAccess() as any)[key]?.POST?.fk_auto ?? {}
     );
-    this.fkAutoPutFields = computed(() =>
+    this._fkAutoPutFields = computed(() =>
       (auth.effectiveAccess() as any)[key]?.PUT?.fk_auto ?? {}
     );
     this.searchableFields = computed(() =>
@@ -122,9 +122,13 @@ export class ResourceSilo {
     }
   }
 
+  fkAutoFields(verb: 'POST' | 'PUT'): Record<string, string> {
+    return verb === 'POST' ? this._fkAutoPostFields() : this._fkAutoPutFields();
+  }
+
   canCreateWithFilters(filters: Record<string, unknown>): boolean {
     if (!this.canCreate()) return false;
-    const fkAuto = this.fkAutoPostFields();
+    const fkAuto = this.fkAutoFields('POST');
     return Object.entries(fkAuto).every(([field, rule]) => rule !== 'context' || !!filters[field]);
   }
 

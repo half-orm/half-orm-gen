@@ -398,7 +398,21 @@ def _make_delete_handler(
 def _make_ho_meta(model, prefix: str):
     @get(f'{prefix}/ho_meta')
     async def ho_meta() -> dict:
-        return model.ho_meta()
+        from half_orm.null import NULL
+        from half_orm_gen.backend.ho_api.models import HoApiModels
+        meta = model.ho_meta()
+        api = HoApiModels(model)
+        label_rows = await api.field()(label_order=('is not', NULL)).ho_aselect(
+            'schema_name', 'table_name', 'column_name', 'label_order',
+        )
+        by_resource: dict[str, list] = {}
+        for row in label_rows:
+            by_resource.setdefault(f"{row['schema_name']}/{row['table_name']}", []).append(row)
+        for resource, rows in by_resource.items():
+            if resource in meta:
+                rows.sort(key=lambda r: r['label_order'])
+                meta[resource]['label_fields'] = [r['column_name'] for r in rows]
+        return meta
     return ho_meta
 
 

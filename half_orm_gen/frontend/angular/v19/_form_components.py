@@ -7,33 +7,54 @@ from ._helpers import _selector, _title, _field_type_category
 _text_fields_ts = _text_fields
 
 
-def _ng_form_field(f: str, all_fields: dict) -> str:
+def _ng_form_field(f: str, all_fields: dict, fk_target: tuple | None = None) -> str:
     req      = _is_required(f, all_fields)
     req_attr = ' required' if req else ''
     req_mark = ' <span class="text-red-500">*</span>' if req else ''
     itype    = _input_type(f, all_fields)
     if _is_bool_field(f, all_fields):
-        return (
+        default_field = (
             f'<div class="flex items-center gap-2">\n'
             f'        <input type="checkbox" [(ngModel)]="form[\'{f}\']" name="{f}"\n'
             f'               class="h-4 w-4 rounded border-gray-300" />\n'
             f'        <label class="text-sm font-medium text-gray-700">{f}</label>\n'
             f'      </div>'
         )
-    if _is_textarea_field(f, all_fields):
-        return (
+    elif _is_textarea_field(f, all_fields):
+        default_field = (
             f'<div>\n'
             f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
             f'        <textarea [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr}\n'
             f'                  class="w-full border rounded px-3 py-2 text-sm font-mono resize-y min-h-[1rem] [field-sizing:content]"></textarea>\n'
             f'      </div>'
         )
+    else:
+        default_field = (
+            f'<div>\n'
+            f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
+            f'        <input type="{itype}" [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr}\n'
+            f'               class="w-full border rounded px-3 py-2 text-sm" />\n'
+            f'      </div>'
+        )
+    if fk_target is None:
+        return default_field
+    rs, rt = fk_target
+    target_key = f'{rs}/{rt}'
     return (
-        f'<div>\n'
+        f"@if (silo.fkAutoFields('POST')['{f}'] === 'select') {{\n"
+        f'      <div>\n'
         f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
-        f'        <input type="{itype}" [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr}\n'
-        f'               class="w-full border rounded px-3 py-2 text-sm" />\n'
-        f'      </div>'
+        f'        <select [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr}\n'
+        f'                class="w-full border rounded px-3 py-2 text-sm">\n'
+        f'          <option value="">—</option>\n'
+        f"          @for (opt of fkOptions('{target_key}'); track opt.id) {{\n"
+        f'            <option [value]="opt.id">{{{{ opt.label }}}}</option>\n'
+        f'          }}\n'
+        f'        </select>\n'
+        f'      </div>\n'
+        f'    }} @else {{\n'
+        f'      {default_field}\n'
+        f'    }}'
     )
 
 
@@ -42,9 +63,11 @@ def _create_component(
     iname: str,
     post_in_names: list, all_fields: dict,
     optional_post_fields: frozenset = frozenset(),
+    fk_deps: list = (),
 ) -> tuple[str, str, str]:
     title = _title(schema_name, table_name)
     visible_post = [f for f in post_in_names if not _is_server_generated(f, all_fields)]
+    fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
     fields_ts = ', '.join(
         f'{f}: false  as any' if _is_bool_field(f, all_fields) else f'{f}: \'\'  as any'
         for f in visible_post
@@ -52,9 +75,13 @@ def _create_component(
 
     form_fields = '\n      '.join(
         f"@if (!silo.inaccessibleFields('POST').has('{f}')) {{\n      "
-        + _ng_form_field(f, all_fields)
+        + _ng_form_field(f, all_fields, fk_map.get(f))
         + '\n      }'
         for f in visible_post
+    )
+
+    fk_targets_ts = ', '.join(
+        f"'{f}': '{rs}/{rt}'" for f, (rs, rt) in fk_map.items() if f in visible_post
     )
 
     optional_set_ts = (
@@ -75,7 +102,7 @@ def _create_component(
         )
         + null_map
         + "    );\n"
-        "    const fkAuto = this.silo.fkAutoPostFields();\n"
+        "    const fkAuto = this.silo.fkAutoFields('POST');\n"
         "    for (const [field, rule] of Object.entries(fkAuto)) {\n"
         "      if (rule === 'context') {\n"
         "        const val = this.route.snapshot.queryParamMap.get(field);\n"
@@ -103,11 +130,25 @@ def _create_component(
 </div>
 """
 
+    fk_effect_ts = (
+        f"""
+  constructor() {{
+    effect(() => {{
+      const fkAuto = this.silo.fkAutoFields('POST');
+      for (const [field, target] of Object.entries(this.fkTargets)) {{
+        if (fkAuto[field] === 'select') this.registry.get(target).list();
+      }}
+    }});
+  }}"""
+        if fk_targets_ts else ''
+    )
+
     ts = f"""\
-import {{ Component, inject, signal }} from '@angular/core';
+import {{ Component, effect, inject, signal }} from '@angular/core';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
+import {{ formatLabel }} from '../../../generated/silo-shared';
 import type {{ Row }} from '../../../generated/resource.silo';
 
 @Component({{
@@ -118,9 +159,21 @@ import type {{ Row }} from '../../../generated/resource.silo';
   styleUrl: './create.component.css',
 }})
 export class {iname}CreateComponent {{
-  protected silo = inject(SiloRegistry).get('{schema_name}/{table_name}');
+  protected registry = inject(SiloRegistry);
+  protected silo = this.registry.get('{schema_name}/{table_name}');
   private router = inject(Router);
   private route  = inject(ActivatedRoute);
+  private readonly fkTargets: Record<string, string> = {{{fk_targets_ts}}};
+
+  fkOptions(targetKey: string): {{id: string; label: string}}[] {{
+    const targetSilo = this.registry.tryGet(targetKey);
+    if (!targetSilo) return [];
+    const labelFields = (this.registry.meta()[targetKey] as any)?.label_fields ?? [];
+    return targetSilo.items()
+      .map(item => ({{id: targetSilo.pkValue(item) ?? '', label: formatLabel(item, labelFields)}}))
+      .filter(opt => opt.id !== '');
+  }}
+{fk_effect_ts}
 {optional_set_ts}
   form: Partial<Row> = {{ {fields_ts} }};
   readonly error = signal('');

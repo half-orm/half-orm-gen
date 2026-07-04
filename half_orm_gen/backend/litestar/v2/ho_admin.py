@@ -154,8 +154,14 @@ def make_ho_admin_handlers(
             resource_key = f'{schema}/{table}'
             field_rows = await api.field()(
                 schema_name=schema, table_name=table, deprecated=False
-            ).ho_aselect('column_name')
+            ).ho_aselect('column_name', 'label_order')
             fields = [r['column_name'] for r in field_rows]
+            label_fields = [
+                r['column_name'] for r in sorted(
+                    (r for r in field_rows if r['label_order'] is not None),
+                    key=lambda r: r['label_order'],
+                )
+            ]
 
             rel_cls = model.get_relation_class(f'{schema}.{table}')
             rel_inst = rel_cls()
@@ -255,6 +261,7 @@ def make_ho_admin_handlers(
 
             result[resource_key] = {
                 'fields':               fields,
+                'label_fields':         label_fields,
                 'pk_fields':            pk_fields,
                 'fields_with_defaults': fields_with_defaults,
                 'fk_deps':              fk_deps,
@@ -478,6 +485,58 @@ def make_ho_admin_handlers(
         if resource:
             await _reload(resource)
 
+    @post(f'{prefix}/ho_admin/field_label')
+    async def ho_admin_set_field_label(request: Request, data: dict[str, Any]) -> dict:
+        """Mark a field as (part of) a resource's display label.
+
+        Resource-level, not per-role — unlike fk_auto/searchable, this isn't
+        scoped to an access row. Concatenation order across multiple label
+        fields is `label_order` (0, 1, 2...).
+
+        Invariant: a label field must be searchable for every role with GET
+        access to this resource (the FK select combobox and global search
+        both filter on label fields via `q=`) — auto-granted here rather
+        than left for the admin to remember.
+        """
+        _check_admin(request)
+        schema      = data.get('schema_name')
+        table       = data.get('table_name')
+        field_name  = data.get('field_name')
+        label_order = data.get('label_order')
+        if not all([schema, table, field_name]) or label_order is None:
+            raise HTTPException(
+                status_code=400,
+                detail='schema_name, table_name, field_name, label_order required',
+            )
+        await api.field()(
+            schema_name=schema, table_name=table, column_name=field_name,
+        ).ho_aupdate(label_order=label_order)
+
+        acc_rows = await api.access()(schema_name=schema, table_name=table, verb='GET').ho_aselect('id')
+        for acc in acc_rows:
+            existing = await api.field_access_searchable()(
+                access_id=acc['id'], field_name=field_name,
+            ).ho_aselect('field_name')
+            if not existing:
+                await api.field_access_searchable()(
+                    access_id=acc['id'], field_name=field_name,
+                ).ho_ainsert()
+
+        resource = f'{schema}/{table}'
+        await _reload(resource)
+        return {'schema_name': schema, 'table_name': table, 'field_name': field_name, 'label_order': label_order}
+
+    @delete(f'{prefix}/ho_admin/field_label/{{schema_name:str}}/{{table_name:str}}/{{field_name:str}}')
+    async def ho_admin_unset_field_label(
+        request: Request, schema_name: str, table_name: str, field_name: str,
+    ) -> None:
+        _check_admin(request)
+        from half_orm.null import NULL
+        await api.field()(
+            schema_name=schema_name, table_name=table_name, column_name=field_name,
+        ).ho_aupdate(label_order=NULL)
+        await _reload(f'{schema_name}/{table_name}')
+
     @get(f'{prefix}/ho_admin/simulate-access')
     async def ho_admin_simulate_access(request: Request, role: str) -> dict:
         _check_admin(request)
@@ -505,4 +564,6 @@ def make_ho_admin_handlers(
         ho_admin_remove_fk_auto,
         ho_admin_add_searchable,
         ho_admin_remove_searchable,
+        ho_admin_set_field_label,
+        ho_admin_unset_field_label,
     ]

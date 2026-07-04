@@ -78,8 +78,15 @@ CREATE TABLE IF NOT EXISTS "half_orm_meta.api".field (
   table_name   text NOT NULL,
   column_name  text NOT NULL,
   deprecated   boolean NOT NULL DEFAULT FALSE,
+  label_order  integer,
   PRIMARY KEY (schema_name, table_name, column_name)
 );
+
+ALTER TABLE "half_orm_meta.api".field
+  ADD COLUMN IF NOT EXISTS label_order integer;
+-- NULL = not a label field. 0, 1, 2... = concatenation order for the
+-- resource's display label (used by the FK select combobox and the
+-- global search result formatter).
 
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".access (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),

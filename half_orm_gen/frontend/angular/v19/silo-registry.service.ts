@@ -8,12 +8,22 @@ import { ResourceSilo } from './resource.silo';
 export class SiloRegistry {
   private http = inject(HttpClient);
   private auth = inject(AuthService);
+  private apiBase = '';
 
   readonly meta  = signal<HoMeta>({});
   private silos  = new Map<string, ResourceSilo>();
   private _ready = false;
 
+  constructor() {
+    // Schema-level facts (e.g. label_fields) aren't per-role, so they ride the
+    // same access_reload broadcast as CRUD_ACCESS changes rather than a new event.
+    this.auth.wsEvent$.subscribe(ev => {
+      if (ev.event === 'access_reload') void this.refreshMeta();
+    });
+  }
+
   async init(apiBase: string): Promise<void> {
+    this.apiBase = apiBase;
     const m = await firstValueFrom(this.http.get<HoMeta>(`${apiBase}/ho_meta`));
     this.meta.set(m);
     this.silos.clear();
@@ -24,6 +34,12 @@ export class SiloRegistry {
       );
     }
     this._ready = true;
+  }
+
+  async refreshMeta(): Promise<void> {
+    if (!this.apiBase) return;
+    const m = await firstValueFrom(this.http.get<HoMeta>(`${this.apiBase}/ho_meta`));
+    this.meta.set(m);
   }
 
   get ready(): boolean { return this._ready; }

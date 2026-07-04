@@ -225,7 +225,7 @@ export class AuthService {{
       try {{
         const msg = JSON.parse(e.data) as WsEvent;
         if (msg.event === 'access_reload') {{ void this._reloadAccess((msg as any).resource); }}
-        else {{ this.wsEvent$.next(msg); }}
+        this.wsEvent$.next(msg);
       }} catch {{}}
     }};
     ws.onclose = () => {{ setTimeout(() => this.connectWs(), 2000); }};
@@ -244,6 +244,7 @@ import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 import {{ AuthService }} from './core/auth.service';
 import {{ SiloRegistry }} from './generated/silo-registry.service';
+import {{ formatLabel }} from './generated/silo-shared';
 
 const API_BASE = '{api_base}';
 
@@ -284,7 +285,7 @@ const API_BASE = '{api_base}';
                         @for (row of entry.data; track $index) {{
                           <div (click)="goToDetail(entry.resource, row)"
                                class="px-2 py-1.5 rounded hover:bg-blue-50 cursor-pointer text-xs text-gray-700 truncate">
-                            {{{{ formatResult(row, entry.searchable_fields) }}}}
+                            {{{{ formatResult(row, entry.resource, entry.searchable_fields) }}}}
                           </div>
                         }}
                         @if (entry.has_more) {{
@@ -584,9 +585,9 @@ export class AppComponent implements OnInit {{
     this.searchOpen.set(false);
   }}
 
-  formatResult(row: Record<string, any>, fields: string[]): string {{
-    if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
-    return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
+  formatResult(row: Record<string, any>, resource: string, fields: string[]): string {{
+    const labelFields = (this.registry.meta()[resource] as any)?.label_fields ?? [];
+    return formatLabel(row, labelFields, fields);
   }}
 
   closeSearch(): void {{
@@ -610,6 +611,7 @@ import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
 import {{ map }} from 'rxjs';
 import {{ SiloRegistry }} from '../../generated/silo-registry.service';
 import {{ AuthService }} from '../../core/auth.service';
+import {{ formatLabel }} from '../../generated/silo-shared';
 
 const API_BASE = '{version_prefix}';
 
@@ -681,9 +683,9 @@ export class HoSearchComponent {{
     void this.router.navigate([`/ho_bo/${{resource}}/${{id}}`]);
   }}
 
-  formatResult(row: Record<string, any>, fields: string[]): string {{
-    if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
-    return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
+  formatResult(row: Record<string, any>, resource: string, fields: string[]): string {{
+    const labelFields = (this.registry.meta()[resource] as any)?.label_fields ?? [];
+    return formatLabel(row, labelFields, fields);
   }}
 }}
 """
@@ -717,7 +719,7 @@ def _ho_search_component_html() -> str:
           @for (row of entry.data; track $index) {
             <div (click)="goToDetail(entry.resource, row)"
                  class="px-4 py-3 hover:bg-blue-50 cursor-pointer text-sm text-gray-700">
-              {{ formatResult(row, entry.searchable_fields) }}
+              {{ formatResult(row, entry.resource, entry.searchable_fields) }}
             </div>
           }
         </div>

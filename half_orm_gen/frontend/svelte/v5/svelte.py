@@ -311,7 +311,7 @@ class AuthState {{
             try {{
                 const msg = JSON.parse(e.data) as WsEvent;
                 if (msg.event === 'access_reload') {{ void this._reloadAccess((msg as any).resource); }}
-                else {{ this.lastEvent = msg; }}
+                this.lastEvent = msg;
             }} catch {{}}
         }};
         ws.onclose = () => {{ setTimeout(() => this._connectWs(), 2000); }};
@@ -598,6 +598,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   import '../../app.css';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
+  import {{ formatLabel }} from '$lib/generated/stores/silo-shared';
   import {{ page }} from '$app/state';
   import {{ goto }} from '$app/navigation';
 
@@ -690,9 +691,9 @@ def _layout(resources: list, version_prefix: str = '') -> str:
     searchOpen = false;
   }}
 
-  function formatResult(row: Record<string, any>, fields: string[]): string {{
-    if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
-    return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
+  function formatResult(row: Record<string, any>, resource: string, fields: string[]): string {{
+    const labelFields = ((registry.meta as any)[resource]?.label_fields ?? []) as string[];
+    return formatLabel(row, labelFields, fields);
   }}
 
   function buildSeeAllHref(resource: string, term: string): string {{
@@ -774,7 +775,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
                     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
                     <div onclick={{() => goToDetail(entry.resource, row)}}
                          class="px-2 py-1.5 rounded hover:bg-blue-50 cursor-pointer text-xs text-gray-700 truncate">
-                      {{formatResult(row, entry.searchable_fields)}}
+                      {{formatResult(row, entry.resource, entry.searchable_fields)}}
                     </div>
                   {{/each}}
                   {{#if entry.has_more}}
@@ -891,6 +892,7 @@ def _search_page_svelte(version_prefix: str) -> str:
   import {{ page }} from '$app/stores';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
+  import {{ formatLabel }} from '$lib/generated/stores/silo-shared';
 
   const API_BASE = '{version_prefix}';
 
@@ -942,9 +944,9 @@ def _search_page_svelte(version_prefix: str) -> str:
     goto(`/ho_bo/${{resource}}/${{id}}`);
   }}
 
-  function formatResult(row: Record<string, any>, fields: string[]): string {{
-    if (!fields.length) return Object.values(row).slice(0, 3).join(' · ');
-    return fields.map((f: string) => row[f]).filter((v: any) => v != null).join(' · ');
+  function formatResult(row: Record<string, any>, resource: string, fields: string[]): string {{
+    const labelFields = ((registry.meta as any)[resource]?.label_fields ?? []) as string[];
+    return formatLabel(row, labelFields, fields);
   }}
 </script>
 
@@ -975,7 +977,7 @@ def _search_page_svelte(version_prefix: str) -> str:
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <div onclick={{() => goToDetail(entry.resource, row)}}
                  class="px-4 py-3 hover:bg-blue-50 cursor-pointer text-sm text-gray-700">
-              {{formatResult(row, entry.searchable_fields)}}
+              {{formatResult(row, entry.resource, entry.searchable_fields)}}
             </div>
           {{/each}}
         </div>
@@ -1352,7 +1354,7 @@ def _list_component(
 
   function fkNewUrl(): string {{
     const base = '/ho_bo/{schema_name}/{table_name}/new';
-    const fkAuto = silo.fkAutoPostFields;
+    const fkAuto = silo.fkAutoFields('POST');
     const params = new URLSearchParams();
     for (const [field, rule] of Object.entries(fkAuto)) {{
       if (rule === 'context' && filters[field] != null) params.set(field, String(filters[field]));
@@ -1458,33 +1460,54 @@ def _null_map_js(text_fields_var: str = 'textFields') -> str:
     return f'.map(([k, v]) => [k, !{text_fields_var}.has(k) && v === \'\' ? null : v] as [string, unknown])'
 
 
-def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form') -> str:
+def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form', fk_target: tuple | None = None) -> str:
     req      = _is_required(f, all_fields)
     req_attr = ' required' if req else ''
     req_mark = ' <span class="text-red-500">*</span>' if req else ''
     itype    = _input_type(f, all_fields)
     if _is_bool_field(f, all_fields):
-        return (
+        default_field = (
             f'<div class="flex items-center gap-2">\n'
             f'      <input id="f_{f}" type="checkbox" bind:checked={{{bind_prefix}.{f}}}\n'
             f'             class="h-4 w-4 rounded border-gray-300" />\n'
             f'      <label for="f_{f}" class="text-sm font-medium text-gray-700">{f}</label>\n'
             f'    </div>'
         )
-    if _is_textarea_field(f, all_fields):
-        return (
+    elif _is_textarea_field(f, all_fields):
+        default_field = (
             f'<div>\n'
             f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
             f'      <textarea id="f_{f}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
             f'               class="w-full border rounded px-3 py-2 text-sm font-mono resize-y min-h-[1rem] [field-sizing:content]"></textarea>\n'
             f'    </div>'
         )
+    else:
+        default_field = (
+            f'<div>\n'
+            f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
+            f'      <input id="f_{f}" type="{itype}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
+            f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
+            f'    </div>'
+        )
+    if fk_target is None:
+        return default_field
+    rs, rt = fk_target
+    target_key = f'{rs}/{rt}'
     return (
-        f'<div>\n'
+        f"{{#if silo.fkAutoFields('POST')['{f}'] === 'select'}}\n"
+        f'    <div>\n'
         f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
-        f'      <input id="f_{f}" type="{itype}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
-        f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
-        f'    </div>'
+        f'      <select id="f_{f}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
+        f'              class="w-full border rounded px-3 py-2 text-sm">\n'
+        f'        <option value="">—</option>\n'
+        f"        {{#each fkOptions('{target_key}') as opt (opt.id)}}\n"
+        f'          <option value={{opt.id}}>{{opt.label}}</option>\n'
+        f'        {{/each}}\n'
+        f'      </select>\n'
+        f'    </div>\n'
+        f'  {{:else}}\n'
+        f'    {default_field}\n'
+        f'  {{/if}}'
     )
 
 
@@ -1493,9 +1516,11 @@ def _new_page(
     stem: str, rname: str, iname: str,
     post_in_names: list, all_fields: dict,
     optional_post_fields: frozenset = frozenset(),
+    fk_deps: list = (),
 ) -> str:
     title = _title(schema_name, table_name)
     visible_post = [f for f in post_in_names if not _is_server_generated(f, all_fields)]
+    fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
     fields_init = ', '.join(
         f'{f}: false' if _is_bool_field(f, all_fields) else f'{f}: ""'
         for f in visible_post
@@ -1505,13 +1530,37 @@ def _new_page(
     text_fields_js  = _text_fields(visible_post, all_fields)
     form_fields = '\n    '.join(
         f"{{#if !silo.inaccessibleFields('POST').has('{f}')}}\n    "
-        + _svelte_form_field(f, all_fields)
+        + _svelte_form_field(f, all_fields, fk_target=fk_map.get(f))
         + '\n    {/if}'
         for f in visible_post
+    )
+    fk_targets_js = ', '.join(
+        f"'{f}': '{rs}/{rt}'" for f, (rs, rt) in fk_map.items() if f in visible_post
+    )
+    fk_effect_js = (
+        f"""
+  const fkTargets: Record<string, string> = {{{fk_targets_js}}};
+  $effect(() => {{
+    const fkAuto = silo.fkAutoFields('POST');
+    for (const [field, target] of Object.entries(fkTargets)) {{
+      if (fkAuto[field] === 'select') void registry.get(target).list();
+    }}
+  }});
+
+  function fkOptions(targetKey: string): {{id: string; label: string}}[] {{
+    const targetSilo = registry.tryGet(targetKey);
+    if (!targetSilo) return [];
+    const labelFields = ((registry.meta as any)[targetKey]?.label_fields ?? []) as string[];
+    return targetSilo.items
+      .map(item => ({{id: targetSilo.pkValue(item) ?? '', label: formatLabel(item, labelFields)}}))
+      .filter(opt => opt.id !== '');
+  }}"""
+        if fk_targets_js else ''
     )
     return f"""\
 <script lang="ts">
   import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
+  import {{ formatLabel }} from '$lib/generated/stores/silo-shared';
   import {{ goto }} from '$app/navigation';
 
   const silo = registry.get('{map_key}');
@@ -1520,6 +1569,7 @@ def _new_page(
 
   const optionalFields = new Set([{optional_set_js}]);
   const textFields = new Set([{text_fields_js}]);
+{fk_effect_js}
 
   async function handleSubmit(e: Event) {{
     e.preventDefault();
@@ -1531,7 +1581,7 @@ def _new_page(
           {_null_map_js()}
       );
       const urlParams = new URLSearchParams(window.location.search);
-      for (const [field, rule] of Object.entries(silo.fkAutoPostFields)) {{
+      for (const [field, rule] of Object.entries(silo.fkAutoFields('POST'))) {{
         if (rule === 'context') {{
           const val = urlParams.get(field);
           if (val != null) payload[field] = val;
@@ -2086,7 +2136,8 @@ class SvelteAppGenerator(StoreGenerator):
                 self._write(
                     comp_dir / 'CreateForm.svelte',
                     _new_page(schema_name, table_name, stem, rname, iname,
-                              post_in_names, all_fields, optional_post_fields),
+                              post_in_names, all_fields, optional_post_fields,
+                              fk_deps=fk_deps),
                 )
                 self._write(res_dir / 'new' / '+page.svelte', _new_page_wrapper(stem))
 

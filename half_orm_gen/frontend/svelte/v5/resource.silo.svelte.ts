@@ -19,9 +19,9 @@ export class ResourceSilo {
   dynamicRoles = $state<Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }>>({});
 
   // Per-resource access signals — derived from auth at runtime
-  canCreate          = $derived(!!(auth.access as any)[this.key]?.POST);
-  fkAutoPostFields   = $derived<Record<string, string>>((auth.access as any)[this.key]?.POST?.fk_auto ?? {});
-  fkAutoPutFields    = $derived<Record<string, string>>((auth.access as any)[this.key]?.PUT?.fk_auto ?? {});
+  canCreate           = $derived(!!(auth.access as any)[this.key]?.POST);
+  private _fkAutoPostFields = $derived<Record<string, string>>((auth.access as any)[this.key]?.POST?.fk_auto ?? {});
+  private _fkAutoPutFields  = $derived<Record<string, string>>((auth.access as any)[this.key]?.PUT?.fk_auto ?? {});
   searchableFields   = $derived<string[]>((auth.access as any)[this.key]?.GET?.searchable ?? []);
   private _inaccessibleGetFields = $derived.by(() => {
     const allFields = this.schema.fields.map((f: any) => f.name as string);
@@ -102,9 +102,13 @@ export class ResourceSilo {
     }
   }
 
+  fkAutoFields(verb: 'POST' | 'PUT'): Record<string, string> {
+    return verb === 'POST' ? this._fkAutoPostFields : this._fkAutoPutFields;
+  }
+
   canCreateWithFilters(filters: Record<string, unknown>): boolean {
     if (!this.canCreate) return false;
-    const fkAuto = this.fkAutoPostFields;
+    const fkAuto = this.fkAutoFields('POST');
     return Object.entries(fkAuto).every(([field, rule]) => rule !== 'context' || !!filters[field]);
   }
 

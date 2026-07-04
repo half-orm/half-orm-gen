@@ -6,9 +6,24 @@ class SiloRegistry {
   meta  = $state<HoMeta>({});
   private silos  = new Map<string, ResourceSilo>();
   private _ready = false;
+  private apiBase = '';
+
+  constructor() {
+    // Schema-level facts (e.g. label_fields) aren't per-role, so they ride the
+    // same access_reload broadcast as CRUD_ACCESS changes rather than a new event.
+    // $effect.root: this class is a module-level singleton, not a component,
+    // so it needs its own standalone reactive scope (same pattern ResourceSilo
+    // uses for its WS subscription).
+    $effect.root(() => {
+      $effect(() => {
+        if (auth.lastEvent?.event === 'access_reload') void this.refreshMeta();
+      });
+    });
+  }
 
   async init(apiBase: string): Promise<void> {
     if (this._ready) return;
+    this.apiBase = apiBase;
     const hdrs = auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
     const res = await fetch(`${apiBase}/ho_meta`, { headers: hdrs });
     if (!res.ok) return;
@@ -20,6 +35,14 @@ class SiloRegistry {
       }
     }
     this._ready = true;
+  }
+
+  async refreshMeta(): Promise<void> {
+    if (!this.apiBase) return;
+    const hdrs = auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
+    const res = await fetch(`${this.apiBase}/ho_meta`, { headers: hdrs });
+    if (!res.ok) return;
+    this.meta = await res.json() as HoMeta;
   }
 
   get ready(): boolean { return this._ready; }

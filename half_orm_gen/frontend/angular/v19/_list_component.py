@@ -436,7 +436,7 @@ export class {iname}ListComponent {{
   }}
 
   fkNewQueryParams(): Record<string, string> {{
-    const fkAuto = this.silo.fkAutoPostFields();
+    const fkAuto = this.silo.fkAutoFields('POST');
     const f = this.filters();
     const params: Record<string, string> = {{}};
     for (const [field, rule] of Object.entries(fkAuto)) {{

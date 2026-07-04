@@ -323,6 +323,7 @@ class AngularAppGenerator(StoreGenerator):
                 ts, html, css = _create_component(
                     r.schema_name, r.table_name, r.iname,
                     r.post_in_names, r.all_fields, r.optional_post_fields,
+                    fk_deps=r.fk_deps,
                 )
                 self._write(comp_dir / 'create.component.ts', ts)
                 self._write(comp_dir / 'create.component.html', html)

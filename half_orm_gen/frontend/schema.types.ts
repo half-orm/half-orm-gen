@@ -26,6 +26,7 @@ export interface ResourceSchema {
   fields: FieldSchema[];
   fk_deps: FkDep[];
   reverse_fks: ReverseFk[];
+  label_fields?: string[];
 }
 
 export type HoMeta = Record<string, ResourceSchema>;
