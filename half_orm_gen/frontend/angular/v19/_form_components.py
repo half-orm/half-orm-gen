@@ -44,6 +44,9 @@ def _ng_form_field(f: str, all_fields: dict, fk_target: tuple | None = None) -> 
         f"@if (silo.fkAutoFields('POST')['{f}'] === 'select') {{\n"
         f'      <div>\n'
         f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
+        f'        <input type="text" placeholder="Filter…"\n'
+        f'               (input)="onFkFilter(\'{target_key}\', $any($event.target).value)"\n'
+        f'               class="w-full border rounded px-3 py-1 text-xs mb-1" />\n'
         f'        <select [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr}\n'
         f'                class="w-full border rounded px-3 py-2 text-sm">\n'
         f'          <option value="">—</option>\n'
@@ -172,6 +175,23 @@ export class {iname}CreateComponent {{
     return targetSilo.items()
       .map(item => ({{id: targetSilo.pkValue(item) ?? '', label: formatLabel(item, labelFields)}}))
       .filter(opt => opt.id !== '');
+  }}
+
+  private fkFilterTimers: Record<string, ReturnType<typeof setTimeout>> = {{}};
+
+  onFkFilter(targetKey: string, term: string): void {{
+    const targetSilo = this.registry.tryGet(targetKey);
+    if (!targetSilo) return;
+    if (this.fkFilterTimers[targetKey]) clearTimeout(this.fkFilterTimers[targetKey]);
+    this.fkFilterTimers[targetKey] = setTimeout(() => {{
+      const labelFields = (this.registry.meta()[targetKey] as any)?.label_fields ?? [];
+      const trimmed = term.trim();
+      targetSilo.resetFilterState();
+      const q = trimmed && labelFields.length
+        ? labelFields.map((f: string) => `${{f}}:${{trimmed}}`).join(',')
+        : '';
+      targetSilo.list(q ? ({{q}} as any) : {{}}, 0);
+    }}, 300);
   }}
 {fk_effect_ts}
 {optional_set_ts}

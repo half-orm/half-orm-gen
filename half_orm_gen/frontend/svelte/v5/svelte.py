@@ -1497,6 +1497,9 @@ def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form', fk_t
         f"{{#if silo.fkAutoFields('POST')['{f}'] === 'select'}}\n"
         f'    <div>\n'
         f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
+        f'      <input type="text" placeholder="Filter…"\n'
+        f"             oninput={{(e: Event) => onFkFilter('{target_key}', (e.target as HTMLInputElement).value)}}\n"
+        f'             class="w-full border rounded px-3 py-1 text-xs mb-1" />\n'
         f'      <select id="f_{f}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
         f'              class="w-full border rounded px-3 py-2 text-sm">\n'
         f'        <option value="">—</option>\n'
@@ -1554,6 +1557,23 @@ def _new_page(
     return targetSilo.items
       .map(item => ({{id: targetSilo.pkValue(item) ?? '', label: formatLabel(item, labelFields)}}))
       .filter(opt => opt.id !== '');
+  }}
+
+  const fkFilterTimers: Record<string, ReturnType<typeof setTimeout>> = {{}};
+
+  function onFkFilter(targetKey: string, term: string): void {{
+    const targetSilo = registry.tryGet(targetKey);
+    if (!targetSilo) return;
+    if (fkFilterTimers[targetKey]) clearTimeout(fkFilterTimers[targetKey]);
+    fkFilterTimers[targetKey] = setTimeout(() => {{
+      const labelFields = ((registry.meta as any)[targetKey]?.label_fields ?? []) as string[];
+      const trimmed = term.trim();
+      targetSilo.resetFilterState();
+      const q = trimmed && labelFields.length
+        ? labelFields.map((f: string) => `${{f}}:${{trimmed}}`).join(',')
+        : '';
+      void targetSilo.list(q ? ({{q}} as any) : {{}}, 0);
+    }}, 300);
   }}"""
         if fk_targets_js else ''
     )
