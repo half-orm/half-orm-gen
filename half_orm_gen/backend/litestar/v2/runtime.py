@@ -5,8 +5,10 @@ Replaces code-generated api/app.py route handlers with runtime-constructed
 closures. No TypedDicts, no per-relation files — routes are registered at
 server startup by reading access configuration from "half_orm_meta.api" tables.
 """
+import asyncio
 import importlib
 import re
+import signal
 import sys
 from typing import Optional, List, Any
 
@@ -507,7 +509,7 @@ def _make_ho_search(
             for filter_name in _get_active_filters(crud_access, 'GET', roles):
                 fn = _FILTER_REGISTRY.get((schema_name, table_name, filter_name))
                 if fn:
-                    inst &= fn(cls()) or cls()
+                    inst &= fn(cls(), request) or cls()
 
             rows = await inst.ho_aselect(*authorized, limit=limit)
             data = list(rows)
@@ -640,6 +642,40 @@ def build_crud_app(
         loggers={'app': {'level': 'ERROR', 'handlers': ['queue_listener']}}
     )
 
+    async def _reload_all_access() -> None:
+        """Re-read CRUD_ACCESS / access map / role hierarchy from the DB for every
+        resource. Shared by startup and the SIGHUP-triggered live reload below —
+        the only way to pick up config written directly to "half_orm_meta.api"
+        (e.g. a fixture replay) without going through /ho_admin/* (which already
+        calls the single-resource equivalent, _reload_resource_access, itself).
+        """
+        access_map: dict = {}
+
+        for cls, _kind in model.classes():
+            inst     = cls()
+            schema   = inst._t_fqrn[1]
+            table    = inst._t_fqrn[2]
+            resource = f'{schema}/{table}'
+            api_excluded = api_excluded_by_res.get(resource, [])
+
+            crud_access = await load_crud_access(model, schema, table) or {}
+            crud_access_by_res[resource] = crud_access
+
+            sfqrn = inst._t_fqrn
+            all_field_names = list(model._fields_metadata(sfqrn).keys())
+            all_fields_by_res[resource] = [f for f in all_field_names if f not in api_excluded]
+
+            resource_pk_info = _pk_info(cls)
+            pk_names = [p[0] for p in resource_pk_info] if resource_pk_info else None
+            access_entry = _build_access_entry(crud_access, api_excluded, all_field_names, pk_names)
+
+            if access_entry:
+                access_map[resource] = access_entry
+
+        access_map_holder[0] = access_map
+        parent_map_holder[0] = await load_role_parents(model)
+        roles_holder[0] = sorted(k for k in parent_map_holder[0] if k != 'anonymous')
+
     async def _startup() -> None:
         global _HO_WARN_SHOWN
         await model.aconnect()
@@ -659,36 +695,24 @@ def build_crud_app(
         from half_orm_gen.backend.ho_api.registry import discover_and_register
         await discover_and_register(model, model.classes())
 
-        roles_set: set[str] = set()
-        access_map: dict = {}
+        await _reload_all_access()
 
-        for cls, _kind in model.classes():
-            inst     = cls()
-            schema   = inst._t_fqrn[1]
-            table    = inst._t_fqrn[2]
-            resource = f'{schema}/{table}'
-            api_excluded = api_excluded_by_res.get(resource, [])
+        # SIGHUP: conventional "reload config" signal (nginx, postgres, ...).
+        # Lets an operator (or `make demo-blog-access-load`) apply config written
+        # directly to "half_orm_meta.api" — e.g. a fixture replay — without
+        # restarting the process. Requires a single-worker deployment (the signal
+        # only reaches the process it's sent to).
+        def _on_sighup() -> None:
+            async def _do_reload() -> None:
+                await _reload_all_access()
+                await _manager.broadcast({'event': 'access_reload'})
+                print('Reloaded CRUD_ACCESS/roles from DB (SIGHUP)', file=sys.stderr, flush=True)
+            asyncio.ensure_future(_do_reload())
 
-            crud_access = await load_crud_access(model, schema, table) or {}
-            crud_access_by_res[resource] = crud_access
-
-            sfqrn = inst._t_fqrn
-            all_field_names = list(model._fields_metadata(sfqrn).keys())
-            all_fields_by_res[resource] = [f for f in all_field_names if f not in api_excluded]
-
-            for verb_roles in crud_access.values():
-                if isinstance(verb_roles, dict):
-                    roles_set.update(verb_roles.keys())
-
-            pk_names_startup = [p[0] for p in pk_info] if pk_info else None
-            access_entry = _build_access_entry(crud_access, api_excluded, all_field_names, pk_names_startup)
-
-            if access_entry:
-                access_map[resource] = access_entry
-
-        access_map_holder[0] = access_map
-        parent_map_holder[0] = await load_role_parents(model)
-        roles_holder[0] = sorted(k for k in parent_map_holder[0] if k != 'anonymous')
+        try:
+            asyncio.get_running_loop().add_signal_handler(signal.SIGHUP, _on_sighup)
+        except (NotImplementedError, RuntimeError):
+            pass  # e.g. Windows, or no running loop (shouldn't happen in on_startup)
 
     all_handlers = special_handlers + relation_handlers
     if route_handlers and prefix:

@@ -64,7 +64,7 @@ demo-blog-api:  ## Régénère l'API
 .PHONY: demo-blog-api-run
 demo-blog-api-run:  ## Lance l'API Litestar en tâche de fond puis suit les logs
 	@mkdir -p $(DEMO_LOGS)
-	@setsid nohup bash -c 'cd $(DEMO_DIR)/ho_api && PATH="$${VIRTUAL_ENV:+$$VIRTUAL_ENV/bin:}$$PATH" exec litestar run --debug --reload' \
+	@setsid nohup bash -c 'cd $(DEMO_DIR)/ho_api && PATH="$${VIRTUAL_ENV:+$$VIRTUAL_ENV/bin:}$$PATH" exec litestar run --debug' \
 		> $(DEMO_LOGS)/api.log 2>&1 & echo $$! > $(DEMO_LOGS)/api.pid
 	@echo "API   PID $$(cat $(DEMO_LOGS)/api.pid) — logs: $(DEMO_LOGS)/api.log"
 	@tail -f $(DEMO_LOGS)/api.log & echo $$! > $(DEMO_LOGS)/api.tail.pid
@@ -95,6 +95,68 @@ demo-blog-svelte-run:  ## Lance le front Svelte en tâche de fond puis suit les 
 
 .PHONY: demo-blog-run
 demo-blog-run: demo-blog-api-run demo-blog-angular-run demo-blog-svelte-run  ## Lance API + fronts en tâche de fond
+
+.PHONY: demo-blog-access-save
+demo-blog-access-save:  ## Sauvegarde la config d'accès admin (CRUD_ACCESS/fk_auto/searchable/labels/filtres actifs) dans fixtures/
+	@# role, route, field et filter sont auto-peuplées par l'app au démarrage (system
+	@# roles, discover_and_register, scan des CRUD_ACCESS/@ho_api_filter) — jamais dumpées.
+	@# filter.id en particulier change de valeur à chaque redémarrage (gen_random_uuid()
+	@# côté insert auto) : access_filter est donc résolu par clé naturelle du filtre
+	@# (schema_name, table_name, name), pas par son id, pour rester rejouable après rebuild.
+	pg_dump blog_demo --data-only --inserts \
+	  -t '"half_orm_meta.api".access' \
+	  -t '"half_orm_meta.api".field_access_in' \
+	  -t '"half_orm_meta.api".field_access_out' \
+	  -t '"half_orm_meta.api".field_access_fk_auto' \
+	  -t '"half_orm_meta.api".field_access_searchable' \
+	  -t '"half_orm_meta.api".user_role' \
+	  | sed -E '/^INSERT INTO/ s/\);$$/) ON CONFLICT DO NOTHING;/' \
+	  > fixtures/blog_demo_access.sql
+	psql blog_demo -Atc "SELECT 'INSERT INTO \"half_orm_meta.api\".access_filter (access_id, filter_id) SELECT ''' || af.access_id || '''::uuid, f.id FROM \"half_orm_meta.api\".filter f WHERE f.schema_name=''' || f.schema_name || ''' AND f.table_name=''' || f.table_name || ''' AND f.name=''' || f.name || ''' ON CONFLICT DO NOTHING;' FROM \"half_orm_meta.api\".access_filter af JOIN \"half_orm_meta.api\".filter f ON f.id = af.filter_id" \
+	  >> fixtures/blog_demo_access.sql
+	psql blog_demo -Atc "SELECT 'UPDATE \"half_orm_meta.api\".field SET label_order = ' || label_order || ' WHERE schema_name = ''' || schema_name || ''' AND table_name = ''' || table_name || ''' AND column_name = ''' || column_name || ''';' FROM \"half_orm_meta.api\".field WHERE label_order IS NOT NULL" \
+	  >> fixtures/blog_demo_access.sql
+	@echo "Saved fixtures/blog_demo_access.sql"
+
+.PHONY: demo-blog-access-load
+demo-blog-access-load:  ## Recharge la config d'accès admin sauvegardée puis signale l'API (SIGHUP) pour qu'elle relise sa config sans redémarrer
+	@# ON CONFLICT DO NOTHING rend chaque tentative idempotente : ce qui a déjà
+	@# été inséré lors d'un essai précédent est simplement ignoré au suivant.
+	@ok=0; \
+	for i in 1 2 3 4 5; do \
+		if psql blog_demo -v ON_ERROR_STOP=1 -f fixtures/blog_demo_access.sql > /tmp/demo-blog-access-load.log 2>&1; then \
+			echo "Loaded fixtures/blog_demo_access.sql"; ok=1; break; \
+		fi; \
+		echo "Attempt $$i/5 failed (a dynamic role may not be registered yet) — retrying in 2s..."; \
+		sleep 2; \
+	done; \
+	if [ "$$ok" != "1" ]; then \
+		echo "FAILED after 5 attempts — is the API running (make demo-blog-api-run)?"; \
+		cat /tmp/demo-blog-access-load.log; exit 1; \
+	fi
+	@# crud_access_by_res / access_map_holder are read from the DB once at API
+	@# startup — a psql-loaded config is invisible to an already-running process
+	@# unless it's told to reload. SIGHUP is registered in build_crud_app's
+	@# on_startup hook for exactly this (see runtime.py: _reload_all_access).
+	@# Sent by pattern, not via api.pid: `litestar run` always spawns uvicorn as
+	@# a *child* subprocess (subprocess.run, not exec) regardless of --reload,
+	@# and that child is where the asyncio signal handler actually lives —
+	@# signalling the wrapper PID would not reach it. (`--reload` specifically
+	@# is avoided in demo-blog-api-run: it adds its own supervisor/worker split
+	@# with a churning worker PID, on top of the same wrapper-vs-child gap —
+	@# and it only watches ho_api/, not the installed half_orm_gen package.)
+	@# `pgrep -f`/`pkill -f` match the *full command line* of every process —
+	@# including this very shell's own, since the recipe text it was launched
+	@# with ("sh -c '... uvicorn.*demos/blog_demo/ho_api ...'") contains that
+	@# same pattern as a literal substring. Exclude our own PID ($$$$) or this
+	@# recipe would SIGHUP itself instead of (or as well as) the API.
+	@pids=$$(pgrep -f litestar); \
+	if [ -n "$$pids" ]; then \
+		echo "$$pids" | xargs -r kill -HUP; \
+		echo "Sent SIGHUP to $$pids — API reloading CRUD_ACCESS/roles from DB (see api.log)"; \
+	else \
+		echo "No running API matched 'uvicorn.*demos/blog_demo/ho_api' — start it with make demo-blog-api-run"; \
+	fi
 
 .PHONY: demo-blog-stop
 demo-blog-stop:  ## Arrête API + fronts + tails (via PID files)

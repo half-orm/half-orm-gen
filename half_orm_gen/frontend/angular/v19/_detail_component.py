@@ -274,6 +274,7 @@ export class {iname}DetailComponent {{
   constructor() {{
     effect(() => {{
       void this.auth.token();
+      void this.auth.accessVersion();
       void this.auth.resourceAccessVersion()['{map_key}'];
       void this.auth.simulatedRole();
       if (!this.item()) untracked(() => this.silo.get(this.id() as any).subscribe());

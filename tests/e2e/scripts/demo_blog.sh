@@ -126,6 +126,16 @@ half_orm dev release promote prod
 # ---------------------------------------------------------------------------
 echo -e "${GREEN}=== GENERATE gen API ===${NC}"
 half_orm gen api --litestar
+
+# `ho_api/.env` is scaffolded once by half_orm-gen with a random HO_JWT_SECRET,
+# but `--cleanup` wipes the whole project (including this file), so every
+# rebuild would otherwise get a new secret — invalidating any JWT already
+# stored in a browser session and forcing a fresh login every time. Fixed to
+# a stable, non-secret dev value so existing sessions keep working across
+# `make demo-blog` rebuilds. NOT FOR PRODUCTION.
+echo 'HO_JWT_SECRET=blog_demo_dev_secret_do_not_use_in_production' > ho_api/.env
+echo -e "${GREEN}✓ Fixed ho_api/.env HO_JWT_SECRET (stable across rebuilds)${NC}"
+
 half_orm gen frontend --angular
 half_orm gen frontend --svelte
 
@@ -319,4 +329,4 @@ echo ""
 echo "To start the backend:"
 echo "  cd ${DEMOS_DIR}/${PROJECT} && litestar --app ho_api.app:application run --reload"
 echo ""
-echo "  (ho_api/.env was generated with a random HO_JWT_SECRET — loaded automatically)"
+echo "  (ho_api/.env uses a fixed dev HO_JWT_SECRET, stable across rebuilds — loaded automatically)"
