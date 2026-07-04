@@ -28,27 +28,25 @@ def _list_component(
     filter_inputs = '\n              '.join(
         f'@if (!silo.inaccessibleFields().has(\'{f}\') && silo.searchableFields().includes(\'{f}\')) {{'
         f'<th class="px-2 py-1">'
+        f'<div class="relative">'
         f'<input [value]="localFilters()[\'{f}\'] || \'\'"'
         f' (input)="setFilter(\'{f}\', $any($event).target.value)"'
         f' placeholder="…"'
-        f' class="w-full text-xs border rounded px-2 py-1" /></th>'
+        f' class="w-full text-xs border rounded pl-2 pr-5 py-1" />'
+        f'<app-filter-help-tooltip />'
+        f'</div>'
+        f'</th>'
         f'}} @else if (!silo.inaccessibleFields().has(\'{f}\')) {{'
         f'<th class="px-2 py-1"></th>'
         f'}}'
         for f in out_names
-    )
-    _filter_help = (
-        'Tip: plain text = starts with; *text = search anywhere in the field; '
-        '&gt;value, &lt;value, &gt;=value, &lt;=value for numeric/date comparisons; '
-        '&gt;=A&lt;=B for a range.'
     )
     action_filter_th = (
         '<th class="px-2 py-1 whitespace-nowrap">'
         '<button (click)="clearAllFilters()" '
         '[disabled]="Object.keys(localFilters()).length === 0" '
         'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
-        'title="Clear all filters">✕</button> '
-        f'<span class="text-xs text-gray-400 cursor-help" title="{_filter_help}">?</span>'
+        'title="Clear all filters">✕</button>'
         '</th>'
     ) if pk_field else ''
     filter_row = (
@@ -185,7 +183,7 @@ def _list_component(
   }});"""
 
     router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
-    _comp_imports = ['PermissionsMatrixComponent']
+    _comp_imports = ['PermissionsMatrixComponent', 'FilterHelpTooltipComponent']
     if needs_router_link:
         _comp_imports.insert(0, 'RouterLink')
     imports_str = ', '.join(_comp_imports)
@@ -262,6 +260,7 @@ import {{ AuthService }} from '../../../core/auth.service';
 import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
 import type {{ FieldType }} from '../../../generated/stores/filters';
 import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
+import {{ FilterHelpTooltipComponent }} from '../../../generated/filter-help-tooltip.component';
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
   standalone: true,

@@ -1032,26 +1032,24 @@ def _list_component(
     filter_inputs = '\n        '.join(
         f'{{#if !silo.inaccessibleFields().has(\'{f}\') && silo.searchableFields.includes(\'{f}\')}}'
         f'<th class="px-2 py-1">'
+        f'<div class="relative">'
         f'<input value={{localFilters[\'{f}\'] ?? \'\'}} '
         f'oninput={{(e) => localFilters = {{...localFilters, \'{f}\': e.currentTarget.value}}}} '
-        f'placeholder="…" class="w-full text-xs border rounded px-2 py-1 font-normal" /></th>'
+        f'placeholder="…" class="w-full text-xs border rounded pl-2 pr-5 py-1 font-normal" />'
+        f'<FilterHelpTooltip />'
+        f'</div>'
+        f'</th>'
         f'{{:else if !silo.inaccessibleFields().has(\'{f}\')}}'
         f'<th class="px-2 py-1"></th>'
         f'{{/if}}'
         for f in out_names
-    )
-    _filter_help = (
-        'Tip: plain text = starts with; *text = search anywhere in the field; '
-        '&gt;value, &lt;value, &gt;=value, &lt;=value for numeric/date comparisons; '
-        '&gt;=A&lt;=B for a range.'
     )
     action_filter_th = (
         '<th class="px-2 py-1 whitespace-nowrap">'
         '<button onclick={() => clearAllFilters()} '
         'disabled={Object.keys(localFilters).length === 0} '
         'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
-        'title="Clear all filters">✕</button> '
-        f'<span class="text-xs text-gray-400 cursor-help" title="{_filter_help}">?</span>'
+        'title="Clear all filters">✕</button>'
         '</th>'
     ) if pk_field else ''
     filter_row = (
@@ -1145,6 +1143,7 @@ def _list_component(
     field_types_code = f"""
   import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '$lib/generated/stores/filters';
   import type {{ FieldType }} from '$lib/generated/stores/filters';
+  import FilterHelpTooltip from '$lib/generated/FilterHelpTooltip.svelte';
 
   const fieldTypes: Record<string, FieldType> = {{
     {field_types_entries}
@@ -2044,7 +2043,7 @@ class SvelteAppGenerator(StoreGenerator):
 
         # --- shared Svelte components (permissions matrix) ---
         generated_dir = output_dir / 'src' / 'lib' / 'generated'
-        for fname in ('PermissionsFields.svelte', 'PermissionsMatrix.svelte'):
+        for fname in ('PermissionsFields.svelte', 'PermissionsMatrix.svelte', 'FilterHelpTooltip.svelte'):
             shutil.copy2(svelte_assets / fname, generated_dir / fname)
             print(f'  {generated_dir / fname}')
 
