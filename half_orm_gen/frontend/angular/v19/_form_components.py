@@ -42,18 +42,24 @@ def _ng_form_field(f: str, all_fields: dict, fk_target: tuple | None = None) -> 
     target_key = f'{rs}/{rt}'
     return (
         f"@if (silo.fkAutoFields('POST')['{f}'] === 'select') {{\n"
-        f'      <div>\n'
+        f'      <div class="relative">\n'
         f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
-        f'        <input type="text" placeholder="Filter…"\n'
-        f'               (input)="onFkFilter(\'{target_key}\', $any($event.target).value)"\n'
-        f'               class="w-full border rounded px-3 py-1 text-xs mb-1" />\n'
-        f'        <select [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr}\n'
-        f'                class="w-full border rounded px-3 py-2 text-sm">\n'
-        f'          <option value="">—</option>\n'
+        f'        <input type="hidden" [(ngModel)]="form[\'{f}\']" name="{f}"{req_attr} />\n'
+        f'        <input type="text" placeholder="Type to search…"\n'
+        f'               [value]="fkComboText()[\'{f}\'] ?? \'\'"\n'
+        f'               (input)="onFkComboInput(\'{f}\', \'{target_key}\', $any($event.target).value)"\n'
+        f'               (focus)="openFkCombo(\'{f}\')" (blur)="closeFkCombo(\'{f}\')"\n'
+        f'               class="w-full border rounded px-3 py-2 text-sm" />\n'
+        f"        @if (fkComboOpen()['{f}']) {{\n"
+        f'        <div class="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-56 overflow-y-auto">\n'
         f"          @for (opt of fkOptions('{target_key}'); track opt.id) {{\n"
-        f'            <option [value]="opt.id">{{{{ opt.label }}}}</option>\n'
+        f"            <div (mousedown)=\"selectFkOption('{f}', opt)\"\n"
+        f'                 class="px-3 py-1.5 text-sm hover:bg-blue-50 cursor-pointer">{{{{ opt.label }}}}</div>\n'
+        f'          }} @empty {{\n'
+        f'            <div class="px-3 py-1.5 text-sm text-gray-400">No match</div>\n'
         f'          }}\n'
-        f'        </select>\n'
+        f'        </div>\n'
+        f'        }}\n'
         f'      </div>\n'
         f'    }} @else {{\n'
         f'      {default_field}\n'
@@ -168,18 +174,26 @@ export class {iname}CreateComponent {{
   private route  = inject(ActivatedRoute);
   private readonly fkTargets: Record<string, string> = {{{fk_targets_ts}}};
 
+  private fkFilterTerms = signal<Record<string, string | undefined>>({{}});
+
   fkOptions(targetKey: string): {{id: string; label: string}}[] {{
     const targetSilo = this.registry.tryGet(targetKey);
     if (!targetSilo) return [];
     const labelFields = (this.registry.meta()[targetKey] as any)?.label_fields ?? [];
+    const term = (this.fkFilterTerms()[targetKey] ?? '').trim().toLowerCase();
     return targetSilo.items()
       .map(item => ({{id: targetSilo.pkValue(item) ?? '', label: formatLabel(item, labelFields)}}))
-      .filter(opt => opt.id !== '');
+      .filter(opt => opt.id !== '')
+      .filter(opt => !term || opt.label.toLowerCase().includes(term));
   }}
 
   private fkFilterTimers: Record<string, ReturnType<typeof setTimeout>> = {{}};
 
   onFkFilter(targetKey: string, term: string): void {{
+    // Instant client-side narrowing of already-loaded options (like the list view's
+    // localFilters), independent of the debounced server round-trip below.
+    this.fkFilterTerms.update(t => ({{ ...t, [targetKey]: term }}));
+
     const targetSilo = this.registry.tryGet(targetKey);
     if (!targetSilo) return;
     if (this.fkFilterTimers[targetKey]) clearTimeout(this.fkFilterTimers[targetKey]);
@@ -188,10 +202,37 @@ export class {iname}CreateComponent {{
       const trimmed = term.trim();
       targetSilo.resetFilterState();
       const q = trimmed && labelFields.length
-        ? labelFields.map((f: string) => `${{f}}:${{trimmed}}`).join(',')
+        ? labelFields.map((f: string) => `${{f}}:*${{trimmed}}`).join(',')
         : '';
       targetSilo.list(q ? ({{q}} as any) : {{}}, 0);
     }}, 300);
+  }}
+
+  // Custom combobox (not a native <select>): keyed by field name, since several
+  // fields could in principle target the same resource.
+  fkComboOpen = signal<Record<string, boolean | undefined>>({{}});
+  fkComboText = signal<Record<string, string | undefined>>({{}});
+
+  openFkCombo(field: string): void {{
+    this.fkComboOpen.update(o => ({{ ...o, [field]: true }}));
+  }}
+
+  closeFkCombo(field: string): void {{
+    // Delay so a (mousedown) selection on an option registers before blur closes the list.
+    setTimeout(() => this.fkComboOpen.update(o => ({{ ...o, [field]: false }})), 150);
+  }}
+
+  onFkComboInput(field: string, targetKey: string, term: string): void {{
+    this.fkComboText.update(t => ({{ ...t, [field]: term }}));
+    (this.form as any)[field] = '';
+    this.fkComboOpen.update(o => ({{ ...o, [field]: true }}));
+    this.onFkFilter(targetKey, term);
+  }}
+
+  selectFkOption(field: string, opt: {{id: string; label: string}}): void {{
+    (this.form as any)[field] = opt.id;
+    this.fkComboText.update(t => ({{ ...t, [field]: opt.label }}));
+    this.fkComboOpen.update(o => ({{ ...o, [field]: false }}));
   }}
 {fk_effect_ts}
 {optional_set_ts}

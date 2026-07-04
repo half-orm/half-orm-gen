@@ -229,6 +229,14 @@ export function matchFilter(itemValue: unknown, filterValue: string): boolean {
     if (op === '<') return strItem < normalizedVal;
   }
 
+  // Contains filter: *text (mirrors the backend's `col:*text` convention)
+  if (filterValue.startsWith('*')) {
+    const term = filterValue.slice(1);
+    if (!term) return true;
+    return removeAccents(String(itemValue ?? '').toLowerCase())
+      .includes(removeAccents(term.toLowerCase()));
+  }
+
   // Normal text filter (startsWith + unaccent)
   return removeAccents(String(itemValue ?? '').toLowerCase())
     .startsWith(removeAccents(filterValue.toLowerCase()));

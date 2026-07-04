@@ -1040,12 +1040,18 @@ def _list_component(
         f'{{/if}}'
         for f in out_names
     )
+    _filter_help = (
+        'Tip: plain text = starts with; *text = search anywhere in the field; '
+        '&gt;value, &lt;value, &gt;=value, &lt;=value for numeric/date comparisons; '
+        '&gt;=A&lt;=B for a range.'
+    )
     action_filter_th = (
-        '<th class="px-2 py-1">'
+        '<th class="px-2 py-1 whitespace-nowrap">'
         '<button onclick={() => clearAllFilters()} '
         'disabled={Object.keys(localFilters).length === 0} '
         'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
-        'title="Clear all filters">✕</button>'
+        'title="Clear all filters">✕</button> '
+        f'<span class="text-xs text-gray-400 cursor-help" title="{_filter_help}">?</span>'
         '</th>'
     ) if pk_field else ''
     filter_row = (
@@ -1495,18 +1501,24 @@ def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form', fk_t
     target_key = f'{rs}/{rt}'
     return (
         f"{{#if silo.fkAutoFields('POST')['{f}'] === 'select'}}\n"
-        f'    <div>\n'
+        f'    <div class="relative">\n'
         f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
-        f'      <input type="text" placeholder="Filter…"\n'
-        f"             oninput={{(e: Event) => onFkFilter('{target_key}', (e.target as HTMLInputElement).value)}}\n"
-        f'             class="w-full border rounded px-3 py-1 text-xs mb-1" />\n'
-        f'      <select id="f_{f}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
-        f'              class="w-full border rounded px-3 py-2 text-sm">\n'
-        f'        <option value="">—</option>\n'
+        f'      <input type="hidden" bind:value={{{bind_prefix}.{f}}} name="{f}"{req_attr} />\n'
+        f'      <input id="f_{f}" type="text" placeholder="Type to search…"\n'
+        f"             value={{fkComboText['{f}'] ?? ''}}\n"
+        f"             oninput={{(e: Event) => onFkComboInput('{f}', '{target_key}', (e.target as HTMLInputElement).value)}}\n"
+        f"             onfocus={{() => openFkCombo('{f}')}} onblur={{() => closeFkCombo('{f}')}}\n"
+        f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
+        f"      {{#if fkComboOpen['{f}']}}\n"
+        f'      <div class="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-56 overflow-y-auto">\n'
         f"        {{#each fkOptions('{target_key}') as opt (opt.id)}}\n"
-        f'          <option value={{opt.id}}>{{opt.label}}</option>\n'
+        f"          <div onmousedown={{() => selectFkOption('{f}', opt)}}\n"
+        f'               class="px-3 py-1.5 text-sm hover:bg-blue-50 cursor-pointer">{{opt.label}}</div>\n'
+        f'        {{:else}}\n'
+        f'          <div class="px-3 py-1.5 text-sm text-gray-400">No match</div>\n'
         f'        {{/each}}\n'
-        f'      </select>\n'
+        f'      </div>\n'
+        f'      {{/if}}\n'
         f'    </div>\n'
         f'  {{:else}}\n'
         f'    {default_field}\n'
@@ -1550,18 +1562,26 @@ def _new_page(
     }}
   }});
 
+  let fkFilterTerms = $state<Record<string, string>>({{}});
+
   function fkOptions(targetKey: string): {{id: string; label: string}}[] {{
     const targetSilo = registry.tryGet(targetKey);
     if (!targetSilo) return [];
     const labelFields = ((registry.meta as any)[targetKey]?.label_fields ?? []) as string[];
+    const term = (fkFilterTerms[targetKey] ?? '').trim().toLowerCase();
     return targetSilo.items
       .map(item => ({{id: targetSilo.pkValue(item) ?? '', label: formatLabel(item, labelFields)}}))
-      .filter(opt => opt.id !== '');
+      .filter(opt => opt.id !== '')
+      .filter(opt => !term || opt.label.toLowerCase().includes(term));
   }}
 
   const fkFilterTimers: Record<string, ReturnType<typeof setTimeout>> = {{}};
 
   function onFkFilter(targetKey: string, term: string): void {{
+    // Instant client-side narrowing of already-loaded options (like the list view's
+    // localFilters), independent of the debounced server round-trip below.
+    fkFilterTerms[targetKey] = term;
+
     const targetSilo = registry.tryGet(targetKey);
     if (!targetSilo) return;
     if (fkFilterTimers[targetKey]) clearTimeout(fkFilterTimers[targetKey]);
@@ -1570,10 +1590,37 @@ def _new_page(
       const trimmed = term.trim();
       targetSilo.resetFilterState();
       const q = trimmed && labelFields.length
-        ? labelFields.map((f: string) => `${{f}}:${{trimmed}}`).join(',')
+        ? labelFields.map((f: string) => `${{f}}:*${{trimmed}}`).join(',')
         : '';
       void targetSilo.list(q ? ({{q}} as any) : {{}}, 0);
     }}, 300);
+  }}
+
+  // Custom combobox (not a native <select>): keyed by field name, since several
+  // fields could in principle target the same resource.
+  let fkComboOpen = $state<Record<string, boolean>>({{}});
+  let fkComboText = $state<Record<string, string>>({{}});
+
+  function openFkCombo(field: string): void {{
+    fkComboOpen[field] = true;
+  }}
+
+  function closeFkCombo(field: string): void {{
+    // Delay so a (mousedown) selection on an option registers before blur closes the list.
+    setTimeout(() => {{ fkComboOpen[field] = false; }}, 150);
+  }}
+
+  function onFkComboInput(field: string, targetKey: string, term: string): void {{
+    fkComboText[field] = term;
+    (form as any)[field] = '';
+    fkComboOpen[field] = true;
+    onFkFilter(targetKey, term);
+  }}
+
+  function selectFkOption(field: string, opt: {{id: string; label: string}}): void {{
+    (form as any)[field] = opt.id;
+    fkComboText[field] = opt.label;
+    fkComboOpen[field] = false;
   }}"""
         if fk_targets_js else ''
     )

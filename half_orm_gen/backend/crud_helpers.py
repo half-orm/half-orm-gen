@@ -335,9 +335,12 @@ def _parse_q(
 ) -> tuple[dict, list[str], list]:
     """Parse the ?q= search string into filter structures for halfORM.
 
-    Accepts comma-separated ``col:value`` pairs. Supports three forms:
+    Accepts comma-separated ``col:value`` pairs. Supports four forms:
       - ``col:text``          → ilike 'text%' (prefix search); col added to search_cols
-      - ``col:>N`` / ``col:<=N``  → single comparison operator
+      - ``col:*text``         → ilike '%text%' (contains search, anywhere in the field);
+                                col added to search_cols
+      - ``col:>N`` / ``col:<=N``  → single comparison operator (numeric/date range,
+                                also usable on text for an alphabetical jump, e.g. ``col:>=M``)
       - ``col:>=A<=B``        → range filter, returned in range_filters
 
     Returns (filter_kwargs, search_cols, range_filters).
@@ -364,6 +367,11 @@ def _parse_q(
                 op, operand = single.groups()
                 if operand.strip():
                     filter_kwargs[col] = (op, operand.strip())
+            elif val.startswith('*'):
+                term = val[1:].strip()
+                if term:
+                    filter_kwargs[col] = ('ilike', '%' + term + '%')
+                    search_cols.append(col)
             else:
                 filter_kwargs[col] = ('ilike', val + '%')
                 search_cols.append(col)

@@ -37,12 +37,18 @@ def _list_component(
         f'}}'
         for f in out_names
     )
+    _filter_help = (
+        'Tip: plain text = starts with; *text = search anywhere in the field; '
+        '&gt;value, &lt;value, &gt;=value, &lt;=value for numeric/date comparisons; '
+        '&gt;=A&lt;=B for a range.'
+    )
     action_filter_th = (
-        '<th class="px-2 py-1">'
+        '<th class="px-2 py-1 whitespace-nowrap">'
         '<button (click)="clearAllFilters()" '
         '[disabled]="Object.keys(localFilters()).length === 0" '
         'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
-        'title="Clear all filters">✕</button>'
+        'title="Clear all filters">✕</button> '
+        f'<span class="text-xs text-gray-400 cursor-help" title="{_filter_help}">?</span>'
         '</th>'
     ) if pk_field else ''
     filter_row = (
