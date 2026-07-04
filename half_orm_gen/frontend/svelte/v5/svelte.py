@@ -755,7 +755,9 @@ def _layout(resources: list, version_prefix: str = '') -> str:
                  class="flex-1 px-3 py-1.5 outline-none min-w-0"/>
           <select value={{searchResource}} onchange={{(e) => {{ searchResource = (e.target as HTMLSelectElement).value; }}}}
                   class="border-l px-2 py-1.5 bg-gray-50 text-gray-600 text-[11px] outline-none cursor-pointer max-w-[130px]">
-            <option value="all">All</option>
+            {{#if searchableResources.length > 1}}
+              <option value="all">All</option>
+            {{/if}}
             {{#each searchableResources as r}}
               <option value={{r.key}}>{{r.label}}</option>
             {{/each}}
