@@ -192,7 +192,7 @@ export class ResourceSilo {
       return this.http.get<{ data: Row[] }>(
         this.listUrl(params), { headers: this.headers }
       ).pipe(
-        tap(resp => { if (resp.data[0]) this.setItem(resp.data[0]); }),
+        tap(resp => { if (resp.data[0]) this.setItem(resp.data[0]); else this.removeItem(id); }),
         map(resp => resp.data[0] ?? null),
         catchError(() => of(null as Row | null))
       );
@@ -209,7 +209,7 @@ export class ResourceSilo {
         url, { headers: this.headers }
       ).pipe(
         tap(resp => {
-          if (resp.data[0]) this.setItem(resp.data[0]);
+          if (resp.data[0]) this.setItem(resp.data[0]); else this.removeItem(id);
           const incoming = resp.meta?.dynamic_roles ?? {};
           this.dynamicRoles.update(current => mergeDynamicRoles(current, incoming, id));
         }),

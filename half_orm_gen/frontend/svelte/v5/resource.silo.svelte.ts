@@ -172,7 +172,7 @@ export class ResourceSilo {
       const res = await fetch(this.listUrl(params), { headers: this.hdrs });
       if (!res.ok) return null;
       const { data } = await res.json() as { data: Row[] };
-      if (data[0]) this.setItem(data[0]);
+      if (data[0]) this.setItem(data[0]); else this.removeItem(id);
       return data[0] ?? null;
     }
     return this.refresh(id);
@@ -185,7 +185,7 @@ export class ResourceSilo {
       const res = await fetch(url, { headers: this.hdrs });
       if (!res.ok) return null;
       const { data, meta } = await res.json() as { data: Row[]; meta: { dynamic_roles?: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> } };
-      if (data[0]) this.setItem(data[0]);
+      if (data[0]) this.setItem(data[0]); else this.removeItem(id);
       this.dynamicRoles = mergeDynamicRoles(this.dynamicRoles, meta?.dynamic_roles ?? {}, id);
       return data[0] ?? null;
     }
