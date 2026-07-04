@@ -1029,6 +1029,16 @@ def _list_component(
     action_th = '<th class="px-2 py-2 w-16"></th>' if pk_field else ''
     th_cols   = (action_th + '\n        ' if action_th else '') + '\n        '.join(_sort_th(f) for f in out_names)
 
+    _filter_help_html = ''.join(
+        f'<li class="flex gap-1.5"><code class="shrink-0 rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-800">{code}</code>'
+        f'<span>{desc}</span></li>'
+        for code, desc in [
+            ('text', 'starts with'),
+            ('*text', 'anywhere in the field'),
+            ('&gt; &lt; &gt;= &lt;=', 'numeric/date comparison'),
+            ('&gt;=A&lt;=B', 'range'),
+        ]
+    )
     filter_inputs = '\n        '.join(
         f'{{#if !silo.inaccessibleFields().has(\'{f}\') && silo.searchableFields.includes(\'{f}\')}}'
         f'<th class="px-2 py-1">'
@@ -1036,7 +1046,12 @@ def _list_component(
         f'<input value={{localFilters[\'{f}\'] ?? \'\'}} '
         f'oninput={{(e) => localFilters = {{...localFilters, \'{f}\': e.currentTarget.value}}}} '
         f'placeholder="…" class="w-full text-xs border rounded pl-2 pr-5 py-1 font-normal" />'
-        f'<FilterHelpTooltip />'
+        f'<div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">'
+        f'<Tooltip align="right">'
+        f'{{#snippet trigger()}}<span class="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-gray-200 text-[9px] font-semibold text-gray-500 cursor-help select-none leading-none">?</span>{{/snippet}}'
+        f'<ul class="space-y-1">{_filter_help_html}</ul>'
+        f'</Tooltip>'
+        f'</div>'
         f'</div>'
         f'</th>'
         f'{{:else if !silo.inaccessibleFields().has(\'{f}\')}}'
@@ -1046,10 +1061,12 @@ def _list_component(
     )
     action_filter_th = (
         '<th class="px-2 py-1 whitespace-nowrap">'
-        '<button onclick={() => clearAllFilters()} '
+        '<Tooltip>'
+        '{#snippet trigger()}<button onclick={() => clearAllFilters()} '
         'disabled={Object.keys(localFilters).length === 0} '
-        'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
-        'title="Clear all filters">✕</button>'
+        'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed">✕</button>{/snippet}'
+        'Clear all filters'
+        '</Tooltip>'
         '</th>'
     ) if pk_field else ''
     filter_row = (
@@ -1143,7 +1160,7 @@ def _list_component(
     field_types_code = f"""
   import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '$lib/generated/stores/filters';
   import type {{ FieldType }} from '$lib/generated/stores/filters';
-  import FilterHelpTooltip from '$lib/generated/FilterHelpTooltip.svelte';
+  import Tooltip from '$lib/generated/Tooltip.svelte';
 
   const fieldTypes: Record<string, FieldType> = {{
     {field_types_entries}
@@ -2043,7 +2060,7 @@ class SvelteAppGenerator(StoreGenerator):
 
         # --- shared Svelte components (permissions matrix) ---
         generated_dir = output_dir / 'src' / 'lib' / 'generated'
-        for fname in ('PermissionsFields.svelte', 'PermissionsMatrix.svelte', 'FilterHelpTooltip.svelte'):
+        for fname in ('PermissionsFields.svelte', 'PermissionsMatrix.svelte', 'Tooltip.svelte'):
             shutil.copy2(svelte_assets / fname, generated_dir / fname)
             print(f'  {generated_dir / fname}')
 

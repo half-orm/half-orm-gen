@@ -25,6 +25,16 @@ def _list_component(
     action_th = '<th class="px-2 py-2 w-16"></th>' if pk_field else ''
 
     # Filter row (one input per column, hidden when embedded)
+    _filter_help_html = ''.join(
+        f'<li class="flex gap-1.5"><code class="shrink-0 rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-800">{code}</code>'
+        f'<span>{desc}</span></li>'
+        for code, desc in [
+            ('text', 'starts with'),
+            ('*text', 'anywhere in the field'),
+            ('&gt; &lt; &gt;= &lt;=', 'numeric/date comparison'),
+            ('&gt;=A&lt;=B', 'range'),
+        ]
+    )
     filter_inputs = '\n              '.join(
         f'@if (!silo.inaccessibleFields().has(\'{f}\') && silo.searchableFields().includes(\'{f}\')) {{'
         f'<th class="px-2 py-1">'
@@ -33,7 +43,12 @@ def _list_component(
         f' (input)="setFilter(\'{f}\', $any($event).target.value)"'
         f' placeholder="…"'
         f' class="w-full text-xs border rounded pl-2 pr-5 py-1" />'
-        f'<app-filter-help-tooltip />'
+        f'<div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">'
+        f'<ho-tooltip align="right">'
+        f'<span ho-tooltip-trigger class="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-gray-200 text-[9px] font-semibold text-gray-500 cursor-help select-none leading-none">?</span>'
+        f'<ul class="space-y-1">{_filter_help_html}</ul>'
+        f'</ho-tooltip>'
+        f'</div>'
         f'</div>'
         f'</th>'
         f'}} @else if (!silo.inaccessibleFields().has(\'{f}\')) {{'
@@ -43,10 +58,12 @@ def _list_component(
     )
     action_filter_th = (
         '<th class="px-2 py-1 whitespace-nowrap">'
-        '<button (click)="clearAllFilters()" '
+        '<ho-tooltip>'
+        '<button ho-tooltip-trigger (click)="clearAllFilters()" '
         '[disabled]="Object.keys(localFilters()).length === 0" '
-        'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
-        'title="Clear all filters">✕</button>'
+        'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed">✕</button>'
+        'Clear all filters'
+        '</ho-tooltip>'
         '</th>'
     ) if pk_field else ''
     filter_row = (
@@ -183,7 +200,7 @@ def _list_component(
   }});"""
 
     router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
-    _comp_imports = ['PermissionsMatrixComponent', 'FilterHelpTooltipComponent']
+    _comp_imports = ['PermissionsMatrixComponent', 'HoTooltipComponent']
     if needs_router_link:
         _comp_imports.insert(0, 'RouterLink')
     imports_str = ', '.join(_comp_imports)
@@ -260,7 +277,7 @@ import {{ AuthService }} from '../../../core/auth.service';
 import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
 import type {{ FieldType }} from '../../../generated/stores/filters';
 import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
-import {{ FilterHelpTooltipComponent }} from '../../../generated/filter-help-tooltip.component';
+import {{ HoTooltipComponent }} from '../../../generated/ho-tooltip.component';
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
   standalone: true,

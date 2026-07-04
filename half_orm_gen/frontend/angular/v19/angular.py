@@ -245,7 +245,7 @@ class AngularAppGenerator(StoreGenerator):
         angular_assets = Path(__file__).parent
         generated_dir = app_dir / 'generated'
         generated_dir.mkdir(parents=True, exist_ok=True)
-        for fname in ('resource.silo.ts', 'silo-registry.service.ts', 'filter-help-tooltip.component.ts'):
+        for fname in ('resource.silo.ts', 'silo-registry.service.ts', 'ho-tooltip.component.ts'):
             src = angular_assets / fname
             if src.exists():
                 shutil.copy2(src, generated_dir / fname)
