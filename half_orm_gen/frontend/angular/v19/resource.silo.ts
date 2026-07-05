@@ -100,7 +100,10 @@ export class ResourceSilo {
     registerClear(() => this.clear());
     registerClearForKey(key, () => this.clear());
     auth.wsEvent$
-      .pipe(filter(ev => ev.resource === key))
+      .pipe(filter(ev =>
+        ev.resource === key &&
+        (ev.event === 'create' || ev.event === 'update' || ev.event === 'delete')
+      ))
       .subscribe(ev => {
         const id = String(ev.id);
         if (ev.event === 'delete') { this.removeItem(id); return; }

@@ -253,3 +253,46 @@ DO $$ BEGIN
   END IF;
 END $$;
 """
+
+# DDL for the "half_orm_meta.identity" schema — federated identity between
+# independently-deployed half-orm-gen projects ("peers"). Always created
+# alongside "half_orm_meta.api" (cheap, harmless if unused) but inert until
+# an admin actually registers peers via /ho_admin/peer. See
+# planning/identite_federee.md for the full design rationale.
+HO_IDENTITY_DDL = """\
+CREATE SCHEMA IF NOT EXISTS "half_orm_meta.identity";
+
+CREATE TABLE IF NOT EXISTS "half_orm_meta.identity".peer (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name           text NOT NULL UNIQUE,
+  url            text NOT NULL,
+  jwt_public_key text,
+  trusted        boolean NOT NULL DEFAULT TRUE,
+  created_at     timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS "half_orm_meta.identity"."user" (
+  id             uuid PRIMARY KEY,
+  origin_peer_id uuid REFERENCES "half_orm_meta.identity".peer(id) ON DELETE SET NULL,
+  name           text,
+  email          text,
+  password_hash  text,
+  first_seen_at  timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at   timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- id: NOT generated locally — the "sub" claim of the person's JWT, immuable.
+-- origin_peer_id: which peer first vouched for this identity (NULL = born
+-- locally on this peer). password_hash: only set for accounts authenticated
+-- locally on THIS peer (HO_LOCAL_AUTH=db) — never set for an identity whose
+-- origin is another peer, which authenticates via that peer's token instead.
+
+CREATE TABLE IF NOT EXISTS "half_orm_meta.identity".login_state (
+  state      text PRIMARY KEY,
+  peer_id    uuid NOT NULL REFERENCES "half_orm_meta.identity".peer(id) ON DELETE CASCADE,
+  return_to  text,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- Server-side anti-CSRF state for the login-delegation redirect/callback
+-- flow (planning/identite_federee.md section 4) — single-use, short-lived
+-- (checked against created_at at validation time), deleted once consumed.
+"""

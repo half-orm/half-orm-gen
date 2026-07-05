@@ -186,6 +186,8 @@ class AuthState {{
     accessVersion         = $state(0);
     resourceAccessVersion = $state<Record<string, number>>({{}});
     fetchedRoutes         = new Set<string>();
+    peers                 = $state<{{ name: string; url: string }}[]>([]);
+    localAuthEnabled      = $state<boolean>(true);
 
     userId = $derived.by(() => {{
         const t = this.token;
@@ -231,21 +233,21 @@ class AuthState {{
         void this._fetchRoles();
     }}
 
-    async loginWithEmail(email: string) {{
+    async loginWithEmail(email: string, password: string) {{
         const res = await fetch('{version_prefix}/auth/login', {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
-            body: JSON.stringify({{ email }}),
+            body: JSON.stringify({{ email, password }}),
         }});
         if (!res.ok) throw new Error(((await res.json()) as any).detail ?? 'Login failed');
         this.setToken(((await res.json()) as any).token);
     }}
 
-    async signupUser(name: string, email: string) {{
+    async signupUser(name: string, email: string, password: string) {{
         const res = await fetch('{version_prefix}/auth/signup', {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
-            body: JSON.stringify({{ name, email }}),
+            body: JSON.stringify({{ name, email, password }}),
         }});
         if (!res.ok) throw new Error(((await res.json()) as any).detail ?? 'Signup failed');
         this.setToken(((await res.json()) as any).token);
@@ -282,6 +284,22 @@ class AuthState {{
             const res = await fetch('{version_prefix}/ho_setup');
             if (res.ok) this.hasAdmin = ((await res.json()) as any).has_admin;
         }} catch {{}}
+    }}
+
+    async _fetchPeers() {{
+        try {{
+            const res = await fetch('{version_prefix}/auth/peers');
+            if (res.ok) {{
+                const data = await res.json() as {{ peers: {{ name: string; url: string }}[]; local_auth_enabled: boolean }};
+                this.peers = data.peers ?? [];
+                this.localAuthEnabled = data.local_auth_enabled ?? true;
+            }}
+        }} catch {{}}
+    }}
+
+    loginUrlForPeer(name: string): string {{
+        const returnTo = `${{window.location.origin}}/auth/callback`;
+        return `{version_prefix}/auth/login?peer=${{encodeURIComponent(name)}}&return_to=${{encodeURIComponent(returnTo)}}`;
     }}
 
     async _reloadAccess(resource?: string) {{
@@ -326,6 +344,7 @@ if (typeof window !== 'undefined') {{
     void auth._fetchRoles();
     void auth._fetchUsers();
     void auth._fetchSetupStatus();
+    void auth._fetchPeers();
     auth._connectWs();
 }}
 """
@@ -345,6 +364,95 @@ def _login_page(version_prefix: str) -> str:
   {/if}
 </div>
 """
+
+def _auth_callback_page() -> str:
+    return """\
+<script lang="ts">
+  import { page } from '$app/state';
+  import { goto } from '$app/navigation';
+  import { auth } from '$lib/auth.svelte.ts';
+
+  let error = $state('');
+
+  const token = page.url.searchParams.get('token');
+  if (!token) {
+    error = 'Missing token — sign-in did not complete.';
+  } else {
+    auth.setToken(token);
+    goto('/', { replaceState: true });
+  }
+</script>
+
+<div class="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
+  {#if error}
+    <p class="text-red-500">{error}</p>
+  {:else}
+    <p>Signing you in…</p>
+  {/if}
+</div>
+"""
+
+def _auth_delegate_page(version_prefix: str) -> str:
+    return f"""\
+<script lang="ts">
+  import {{ page }} from '$app/state';
+
+  let email = $state('');
+  let password = $state('');
+  let error = $state('');
+  let submitting = $state(false);
+  let redirecting = $state(false);
+
+  const redirectUri = page.url.searchParams.get('redirect_uri') ?? '';
+  const csrfState = page.url.searchParams.get('csrf_state') ?? '';
+  if (!redirectUri || !csrfState) {{
+    error = 'Missing redirect_uri or csrf_state — this page must be reached via a peer login redirect.';
+  }}
+
+  async function submit() {{
+    if (!redirectUri || !csrfState || submitting) return;
+    submitting = true;
+    error = '';
+    try {{
+      const res = await fetch('{version_prefix}/auth/login', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ email, password }}),
+      }});
+      if (!res.ok) {{
+        error = ((await res.json()) as any).detail ?? 'Login failed';
+        return;
+      }}
+      const {{ token }} = (await res.json()) as {{ token: string }};
+      redirecting = true;
+      const sep = redirectUri.includes('?') ? '&' : '?';
+      window.location.href = `${{redirectUri}}${{sep}}token=${{encodeURIComponent(token)}}&csrf_state=${{encodeURIComponent(csrfState)}}`;
+    }} finally {{
+      submitting = false;
+    }}
+  }}
+</script>
+
+<div class="flex flex-col items-center justify-center h-full text-sm gap-3">
+  <p class="text-gray-500">Sign in to continue to the requesting site.</p>
+  {{#if error}}
+    <p class="text-red-500">{{error}}</p>
+  {{/if}}
+  {{#if redirecting}}
+    <p class="text-gray-400">Redirecting…</p>
+  {{:else}}
+    <form onsubmit={{(e: Event) => {{ e.preventDefault(); void submit(); }}}} class="flex flex-col gap-2 w-64">
+      <input bind:value={{email}} type="email" placeholder="Email" class="border rounded px-2 py-1 text-sm" />
+      <input bind:value={{password}} type="password" placeholder="Password" class="border rounded px-2 py-1 text-sm" />
+      <button type="submit" disabled={{submitting}}
+              class="bg-blue-600 text-white rounded py-1 text-sm hover:bg-blue-700 disabled:opacity-50">
+        {{submitting ? 'Signing in…' : 'Sign in'}}
+      </button>
+    </form>
+  {{/if}}
+</div>
+"""
+
 
 def _home_page() -> str:
     return """\
@@ -608,8 +716,10 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   let newItemsMenuOpen = $state(false);
   let showSignup = $state(false);
   let loginEmail = $state('');
+  let loginPassword = $state('');
   let signupName = $state('');
   let signupEmail = $state('');
+  let signupPassword = $state('');
   let authError  = $state('');
 
   let searchTerm     = $state('');
@@ -623,25 +733,25 @@ def _layout(resources: list, version_prefix: str = '') -> str:
     auth.logout();
     menuOpen = true;
     showSignup = false;
-    loginEmail = '';
+    loginEmail = ''; loginPassword = '';
     authError = '';
   }}
 
   async function doLogin() {{
     try {{
       authError = '';
-      await auth.loginWithEmail(loginEmail);
+      await auth.loginWithEmail(loginEmail, loginPassword);
       menuOpen = false;
-      loginEmail = '';
+      loginEmail = ''; loginPassword = '';
     }} catch (e: any) {{ authError = e.message; }}
   }}
 
   async function doSignup() {{
     try {{
       authError = '';
-      await auth.signupUser(signupName, signupEmail);
+      await auth.signupUser(signupName, signupEmail, signupPassword);
       menuOpen = false;
-      signupName = ''; signupEmail = '';
+      signupName = ''; signupEmail = ''; signupPassword = '';
     }} catch (e: any) {{ authError = e.message; }}
   }}
 
@@ -825,40 +935,61 @@ def _layout(resources: list, version_prefix: str = '') -> str:
                    class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
             <input bind:value={{signupEmail}} placeholder="Email" type="email"
                    class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <input bind:value={{signupPassword}} placeholder="Password" type="password"
+                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
             {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
             <button onclick={{doSignup}}
                     class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
               Create account
             </button>
-          {{:else if !showSignup}}
-            <p class="text-xs font-semibold text-gray-700 mb-3">Sign in</p>
-            <input bind:value={{loginEmail}} placeholder="Email" type="email"
-                   onkeydown={{(e) => {{ if (e.key === 'Enter') doLogin(); }}}}
-                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
-            <button onclick={{doLogin}}
-                    class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
-              Sign in
-            </button>
-            <button onclick={{() => {{ showSignup = true; authError = ''; }}}}
-                    class="w-full text-xs text-blue-500 hover:underline">
-              Create account
-            </button>
           {{:else}}
-            <p class="text-xs font-semibold text-gray-700 mb-3">Create account</p>
-            <input bind:value={{signupName}} placeholder="Name"
-                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            <input bind:value={{signupEmail}} placeholder="Email" type="email"
-                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
-            <button onclick={{doSignup}}
-                    class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
-              Create account
-            </button>
-            <button onclick={{() => {{ showSignup = false; authError = ''; }}}}
-                    class="w-full text-xs text-gray-400 hover:underline">
-              Back to sign in
-            </button>
+            {{#if auth.peers.length > 0}}
+              <p class="text-xs font-semibold text-gray-700 mb-2">Sign in via</p>
+              <div class="space-y-1 mb-3">
+                {{#each auth.peers as p}}
+                  <a href={{auth.loginUrlForPeer(p.name)}}
+                     class="block w-full text-xs text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
+                    {{p.name}}
+                  </a>
+                {{/each}}
+              </div>
+            {{/if}}
+            {{#if auth.localAuthEnabled}}
+              {{#if !showSignup}}
+                <p class="text-xs font-semibold text-gray-700 mb-3">Sign in</p>
+                <input bind:value={{loginEmail}} placeholder="Email" type="email"
+                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                <input bind:value={{loginPassword}} placeholder="Password" type="password"
+                       onkeydown={{(e) => {{ if (e.key === 'Enter') doLogin(); }}}}
+                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
+                <button onclick={{doLogin}}
+                        class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+                  Sign in
+                </button>
+                <button onclick={{() => {{ showSignup = true; authError = ''; }}}}
+                        class="w-full text-xs text-blue-500 hover:underline">
+                  Create account
+                </button>
+              {{:else}}
+                <p class="text-xs font-semibold text-gray-700 mb-3">Create account</p>
+                <input bind:value={{signupName}} placeholder="Name"
+                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                <input bind:value={{signupEmail}} placeholder="Email" type="email"
+                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                <input bind:value={{signupPassword}} placeholder="Password" type="password"
+                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
+                <button onclick={{doSignup}}
+                        class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+                  Create account
+                </button>
+                <button onclick={{() => {{ showSignup = false; authError = ''; }}}}
+                        class="w-full text-xs text-gray-400 hover:underline">
+                  Back to sign in
+                </button>
+              {{/if}}
+            {{/if}}
           {{/if}}
         </div>
       {{/if}}
@@ -2264,6 +2395,8 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(routes_dir / '(nav)' / 'schema' / '+page.svelte', _schema_page_svelte(), once=True)
         self._write(routes_dir / '(nav)' / 'ho_bo' / 'search' / '+page.svelte',
                     _search_page_svelte(version_prefix))
+        self._write(routes_dir / 'auth' / 'callback' / '+page.svelte', _auth_callback_page())
+        self._write(routes_dir / 'auth' / 'delegate' / '+page.svelte', _auth_delegate_page(version_prefix))
 
         # --- per-resource components + routes ---
         for (schema_name, table_name, stem, rname, iname,

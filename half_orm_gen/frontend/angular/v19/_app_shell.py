@@ -50,6 +50,9 @@ export class AuthService {{
   readonly simulatedAccess = signal<Record<string, any> | null>(null);
   readonly effectiveAccess = computed(() => this.simulatedAccess() ?? this.access());
 
+  readonly peers             = signal<{{ name: string; url: string }}[]>([]);
+  readonly localAuthEnabled  = signal<boolean>(true);
+
   readonly userId = computed<string | null>(() => {{
     const t = this.token();
     if (!t) return null;
@@ -143,21 +146,21 @@ export class AuthService {{
     }} catch {{}}
   }}
 
-  async loginWithEmail(email: string): Promise<void> {{
+  async loginWithEmail(email: string, password: string): Promise<void> {{
     const res = await fetch('{version_prefix}/auth/login', {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ email }}),
+      body: JSON.stringify({{ email, password }}),
     }});
     if (!res.ok) throw new Error((await res.json() as any).detail ?? 'Login failed');
     this.setToken(((await res.json()) as any).token);
   }}
 
-  async signupUser(name: string, email: string): Promise<void> {{
+  async signupUser(name: string, email: string, password: string): Promise<void> {{
     const res = await fetch('{version_prefix}/auth/signup', {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ name, email }}),
+      body: JSON.stringify({{ name, email, password }}),
     }});
     if (!res.ok) throw new Error((await res.json() as any).detail ?? 'Signup failed');
     this.setToken(((await res.json()) as any).token);
@@ -195,6 +198,22 @@ export class AuthService {{
       const res = await fetch('{version_prefix}/ho_setup');
       if (res.ok) this.hasAdmin.set(((await res.json()) as any).has_admin);
     }} catch {{}}
+  }}
+
+  async _fetchPeers(): Promise<void> {{
+    try {{
+      const res = await fetch('{version_prefix}/auth/peers');
+      if (res.ok) {{
+        const data = await res.json() as {{ peers: {{ name: string; url: string }}[]; local_auth_enabled: boolean }};
+        this.peers.set(data.peers ?? []);
+        this.localAuthEnabled.set(data.local_auth_enabled ?? true);
+      }}
+    }} catch {{}}
+  }}
+
+  loginUrlForPeer(name: string): string {{
+    const returnTo = `${{window.location.origin}}/auth/callback`;
+    return `{version_prefix}/auth/login?peer=${{encodeURIComponent(name)}}&return_to=${{encodeURIComponent(returnTo)}}`;
   }}
 
   async _reloadAccess(resource?: string): Promise<void> {{
@@ -328,6 +347,9 @@ const API_BASE = '{api_base}';
                   <input (input)="signupEmail.set($any($event).target.value)"
                          [value]="signupEmail()" placeholder="Email" type="email"
                          class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                  <input (input)="signupPassword.set($any($event).target.value)"
+                         [value]="signupPassword()" placeholder="Password" type="password"
+                         class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
                   @if (authError()) {{
                     <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
                   }}
@@ -336,42 +358,61 @@ const API_BASE = '{api_base}';
                     Create account
                   </button>
                 }} @else {{
-                  @if (!showSignup()) {{
-                    <p class="text-xs font-semibold text-gray-700 mb-3">Sign in</p>
-                    <input (input)="loginEmail.set($any($event).target.value)"
-                           [value]="loginEmail()" placeholder="Email" type="email"
-                           (keydown.enter)="doLogin()"
-                           class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                    @if (authError()) {{
-                      <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
+                  @if (auth.peers().length > 0) {{
+                    <p class="text-xs font-semibold text-gray-700 mb-2">Sign in via</p>
+                    <div class="space-y-1 mb-3">
+                      @for (p of auth.peers(); track p.name) {{
+                        <a [href]="auth.loginUrlForPeer(p.name)"
+                           class="block w-full text-xs text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
+                          {{{{ p.name }}}}
+                        </a>
+                      }}
+                    </div>
+                  }}
+                  @if (auth.localAuthEnabled()) {{
+                    @if (!showSignup()) {{
+                      <p class="text-xs font-semibold text-gray-700 mb-3">Sign in</p>
+                      <input (input)="loginEmail.set($any($event).target.value)"
+                             [value]="loginEmail()" placeholder="Email" type="email"
+                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                      <input (input)="loginPassword.set($any($event).target.value)"
+                             [value]="loginPassword()" placeholder="Password" type="password"
+                             (keydown.enter)="doLogin()"
+                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                      @if (authError()) {{
+                        <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
+                      }}
+                      <button (click)="doLogin()"
+                              class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+                        Sign in
+                      </button>
+                      <button (click)="showSignup.set(true); authError.set('')"
+                              class="w-full text-xs text-blue-500 hover:underline">
+                        Create account
+                      </button>
+                    }} @else {{
+                      <p class="text-xs font-semibold text-gray-700 mb-3">Create account</p>
+                      <input (input)="signupName.set($any($event).target.value)"
+                             [value]="signupName()" placeholder="Name"
+                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                      <input (input)="signupEmail.set($any($event).target.value)"
+                             [value]="signupEmail()" placeholder="Email" type="email"
+                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                      <input (input)="signupPassword.set($any($event).target.value)"
+                             [value]="signupPassword()" placeholder="Password" type="password"
+                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                      @if (authError()) {{
+                        <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
+                      }}
+                      <button (click)="doSignup()"
+                              class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+                        Create account
+                      </button>
+                      <button (click)="showSignup.set(false); authError.set('')"
+                              class="w-full text-xs text-gray-400 hover:underline">
+                        Back to sign in
+                      </button>
                     }}
-                    <button (click)="doLogin()"
-                            class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
-                      Sign in
-                    </button>
-                    <button (click)="showSignup.set(true); authError.set('')"
-                            class="w-full text-xs text-blue-500 hover:underline">
-                      Create account
-                    </button>
-                  }} @else {{
-                    <p class="text-xs font-semibold text-gray-700 mb-3">Create account</p>
-                    <input (input)="signupName.set($any($event).target.value)"
-                           [value]="signupName()" placeholder="Name"
-                           class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                    <input (input)="signupEmail.set($any($event).target.value)"
-                           [value]="signupEmail()" placeholder="Email" type="email"
-                           class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                    @if (authError()) {{
-                      <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
-                    }}
-                    <button (click)="doSignup()"
-                            class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
-                      Create account
-                    </button>
-                    <button (click)="showSignup.set(false); authError.set('')"
-                            class="w-full text-xs text-gray-400 hover:underline">
-                      Back to sign in
-                    </button>
                   }}
                 }}
               </div>
@@ -463,8 +504,10 @@ export class AppComponent implements OnInit {{
   newItemsMenuOpen = false;
   showSignup = signal(false);
   loginEmail = signal('');
+  loginPassword = signal('');
   signupName = signal('');
   signupEmail = signal('');
+  signupPassword = signal('');
   authError  = signal('');
 
   searchTerm     = signal('');
@@ -534,15 +577,16 @@ export class AppComponent implements OnInit {{
     void this.auth._fetchRoles();
     void this.auth._fetchUsers();
     void this.auth._fetchSetupStatus();
+    void this.auth._fetchPeers();
     this.auth.connectWs();
   }}
 
   async doLogin(): Promise<void> {{
     this.authError.set('');
     try {{
-      await this.auth.loginWithEmail(this.loginEmail());
+      await this.auth.loginWithEmail(this.loginEmail(), this.loginPassword());
       this.menuOpen = false;
-      this.loginEmail.set('');
+      this.loginEmail.set(''); this.loginPassword.set('');
     }} catch (e: any) {{
       this.authError.set(e.message ?? 'Login failed');
     }}
@@ -551,9 +595,9 @@ export class AppComponent implements OnInit {{
   async doSignup(): Promise<void> {{
     this.authError.set('');
     try {{
-      await this.auth.signupUser(this.signupName(), this.signupEmail());
+      await this.auth.signupUser(this.signupName(), this.signupEmail(), this.signupPassword());
       this.menuOpen = false;
-      this.signupName.set(''); this.signupEmail.set('');
+      this.signupName.set(''); this.signupEmail.set(''); this.signupPassword.set('');
     }} catch (e: any) {{
       this.authError.set(e.message ?? 'Signup failed');
     }}
@@ -822,6 +866,12 @@ def _app_routes(resources: list, first_route: str, *, include_admin: bool = Fals
     lines.append(
         "  { path: 'ho_bo/search', loadComponent: () => import('./pages/search/ho-search.component').then(m => m.HoSearchComponent) },"
     )
+    lines.append(
+        "  { path: 'auth/callback', loadComponent: () => import('./pages/auth-callback/auth-callback.component').then(m => m.AuthCallbackComponent) },"
+    )
+    lines.append(
+        "  { path: 'auth/delegate', loadComponent: () => import('./pages/auth-delegate/auth-delegate.component').then(m => m.AuthDelegateComponent) },"
+    )
     if include_admin:
         lines.append(
             "  { path: 'ho_bo/admin', loadComponent: () => import('./generated/ho_admin/ho_admin.component').then(m => m.HoAdminComponent), canActivate: [adminGuard] },"
@@ -867,6 +917,120 @@ import { AuthService } from '../../core/auth.service';
 export class LoginComponent {
   protected auth = inject(AuthService);
 }
+"""
+
+
+def _auth_callback_component() -> str:
+    return """\
+import { Component, inject, signal } from '@angular/core';
+import { Router, ActivatedRoute } from '@angular/router';
+import { AuthService } from '../../core/auth.service';
+
+@Component({
+  selector: 'app-auth-callback',
+  standalone: true,
+  template: `
+    <div class="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
+      @if (error()) {
+        <p class="text-red-500">{{ error() }}</p>
+      } @else {
+        <p>Signing you in…</p>
+      }
+    </div>
+  `
+})
+export class AuthCallbackComponent {
+  private auth   = inject(AuthService);
+  private router = inject(Router);
+  private route  = inject(ActivatedRoute);
+  protected error = signal('');
+
+  constructor() {
+    const token = this.route.snapshot.queryParamMap.get('token');
+    if (!token) {
+      this.error.set('Missing token — sign-in did not complete.');
+      return;
+    }
+    this.auth.setToken(token);
+    void this.router.navigate(['/'], { replaceUrl: true });
+  }
+}
+"""
+
+
+def _auth_delegate_component(version_prefix: str) -> str:
+    return f"""\
+import {{ Component, inject, signal }} from '@angular/core';
+import {{ ActivatedRoute }} from '@angular/router';
+
+@Component({{
+  selector: 'app-auth-delegate',
+  standalone: true,
+  template: `
+    <div class="flex flex-col items-center justify-center h-full text-sm gap-3">
+      <p class="text-gray-500">Sign in to continue to the requesting site.</p>
+      @if (error()) {{
+        <p class="text-red-500">{{{{ error() }}}}</p>
+      }}
+      @if (redirecting()) {{
+        <p class="text-gray-400">Redirecting…</p>
+      }} @else {{
+        <form (submit)="$event.preventDefault(); submit()" class="flex flex-col gap-2 w-64">
+          <input [value]="email()" (input)="email.set($any($event.target).value)"
+                 type="email" placeholder="Email" class="border rounded px-2 py-1 text-sm" />
+          <input [value]="password()" (input)="password.set($any($event.target).value)"
+                 type="password" placeholder="Password" class="border rounded px-2 py-1 text-sm" />
+          <button type="submit" [disabled]="submitting()"
+                  class="bg-blue-600 text-white rounded py-1 text-sm hover:bg-blue-700 disabled:opacity-50">
+            {{{{ submitting() ? 'Signing in…' : 'Sign in' }}}}
+          </button>
+        </form>
+      }}
+    </div>
+  `,
+}})
+export class AuthDelegateComponent {{
+  private route = inject(ActivatedRoute);
+  protected email       = signal('');
+  protected password    = signal('');
+  protected error       = signal('');
+  protected submitting  = signal(false);
+  protected redirecting = signal(false);
+
+  private redirectUri = '';
+  private csrfState   = '';
+
+  constructor() {{
+    this.redirectUri = this.route.snapshot.queryParamMap.get('redirect_uri') ?? '';
+    this.csrfState   = this.route.snapshot.queryParamMap.get('csrf_state') ?? '';
+    if (!this.redirectUri || !this.csrfState) {{
+      this.error.set('Missing redirect_uri or csrf_state — this page must be reached via a peer login redirect.');
+    }}
+  }}
+
+  async submit(): Promise<void> {{
+    if (!this.redirectUri || !this.csrfState || this.submitting()) return;
+    this.submitting.set(true);
+    this.error.set('');
+    try {{
+      const res = await fetch('{version_prefix}/auth/login', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ email: this.email(), password: this.password() }}),
+      }});
+      if (!res.ok) {{
+        this.error.set(((await res.json()) as any).detail ?? 'Login failed');
+        return;
+      }}
+      const {{ token }} = (await res.json()) as {{ token: string }};
+      this.redirecting.set(true);
+      const sep = this.redirectUri.includes('?') ? '&' : '?';
+      window.location.href = `${{this.redirectUri}}${{sep}}token=${{encodeURIComponent(token)}}&csrf_state=${{encodeURIComponent(this.csrfState)}}`;
+    }} finally {{
+      this.submitting.set(false);
+    }}
+  }}
+}}
 """
 
 

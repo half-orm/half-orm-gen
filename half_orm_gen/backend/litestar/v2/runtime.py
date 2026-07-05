@@ -436,6 +436,27 @@ def _make_ho_access(access_map_holder: list, parent_map_holder: list, model, pre
     return ho_access
 
 
+def _make_auth_peers(model, prefix: str):
+    """Return trusted peers (name, url) + whether local DB auth is enabled.
+
+    Public, unauthenticated — used by the login page to render "sign in
+    via ..." buttons and decide whether to show the email/password form
+    (HO_LOCAL_AUTH=none means a federation-only peer, no local sign-in).
+    See ho_api/federation.py and planning/identite_federee.md.
+    """
+    @get(f'{prefix}/auth/peers')
+    async def auth_peers() -> dict:
+        import os
+        from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
+        identity = HoIdentityModels(model)
+        rows = await identity.peer()(trusted=True).ho_aselect('name', 'url')
+        return {
+            'peers': rows,
+            'local_auth_enabled': os.environ.get('HO_LOCAL_AUTH', 'db') != 'none',
+        }
+    return auth_peers
+
+
 def _make_ho_setup(model, prefix: str):
     """Return {has_admin: bool} — used by the frontend to detect first-run state."""
     @get(f'{prefix}/ho_setup')
@@ -629,14 +650,17 @@ def build_crud_app(
             )
 
     from half_orm_gen.backend.litestar.v2.ho_admin import make_ho_admin_handlers
+    from half_orm_gen.backend.litestar.v2.identity_admin import make_identity_admin_handlers
     special_handlers = [
         _make_ho_meta(model, prefix),
         _make_ho_roles(roles_holder, prefix),
         _make_ho_access(access_map_holder, parent_map_holder, model, prefix),
         _make_ho_setup(model, prefix),
+        _make_auth_peers(model, prefix),
         _make_ho_search(prefix, classes_by_res, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder),
         _make_ws_handler(prefix),
         *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
+        *make_identity_admin_handlers(model, prefix),
     ]
 
     logging_config = LoggingConfig(

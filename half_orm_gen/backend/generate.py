@@ -10,11 +10,12 @@ from pathlib import Path
 
 
 def _ensure_ho_api_schema(model) -> None:
-    """Create the "half_orm_meta.api" schema and seed system roles + catalog."""
+    """Create the "half_orm_meta.api"/"half_orm_meta.identity" schemas and seed system roles + catalog."""
     import asyncio
-    from half_orm_gen.backend.ho_api.ddl import HO_API_DDL
+    from half_orm_gen.backend.ho_api.ddl import HO_API_DDL, HO_IDENTITY_DDL
     from half_orm_gen.backend.ho_api.loader import ensure_system_roles, reconcile_catalog
     model.execute_query(HO_API_DDL)
+    model.execute_query(HO_IDENTITY_DDL)
     model.reconnect(reload=True)
 
     async def _run():
@@ -24,6 +25,7 @@ def _ensure_ho_api_schema(model) -> None:
 
     asyncio.run(_run())
     print('  ensured  "half_orm_meta.api" schema')
+    print('  ensured  "half_orm_meta.identity" schema')
 
 
 class GenApi:
@@ -43,6 +45,12 @@ class GenApi:
         Integer API version (written as ``/vN/`` prefix in routes).
     framework:
         ``'litestar'`` (default) or ``'fastapi'``.
+    federation:
+        When True (Litestar only), scaffold an RS256 keypair instead of
+        the default HS256 shared secret, for projects that will register
+        with a federation of trusted peers (see
+        ``planning/identite_federee.md``). Ignored for FastAPI, which has
+        no auth scaffolding at all yet.
     """
 
     def __init__(
@@ -53,6 +61,7 @@ class GenApi:
         base_dir: str | None = None,
         api_version: int | None = None,
         framework: str = 'litestar',
+        federation: bool = False,
     ):
         self._model = repo.model if repo is not None else None
         if repo is not None:
@@ -68,6 +77,7 @@ class GenApi:
 
         self._api_version = api_version
         self._framework = framework
+        self._federation = federation
         self._api_dir = self._base_dir / 'ho_api'
         self._generate()
 
@@ -80,12 +90,18 @@ class GenApi:
         if self._framework == 'fastapi':
             from half_orm_gen.backend.fastapi.v0.scaffold import scaffold_api_dir
             runtime_mod = 'half_orm_gen.backend.fastapi.v0.runtime'
+            scaffold_api_dir(
+                self._api_dir,
+                module_name=self._module_name,
+                api_version=self._api_version,
+            )
         else:
             from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
             runtime_mod = 'half_orm_gen.backend.litestar.v2.runtime'
-        scaffold_api_dir(
-            self._api_dir,
-            module_name=self._module_name,
-            api_version=self._api_version,
-        )
+            scaffold_api_dir(
+                self._api_dir,
+                module_name=self._module_name,
+                api_version=self._api_version,
+                federation=self._federation,
+            )
         print(f'\nDone. Routes are loaded dynamically at startup via {runtime_mod}.')

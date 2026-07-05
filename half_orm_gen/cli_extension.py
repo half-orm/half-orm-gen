@@ -52,7 +52,12 @@ def add_commands(main_group):
                   help='Generate a Litestar app.')
     @click.option('--fastapi', 'framework', flag_value='fastapi',
                   help='Generate a FastAPI app (no @api_* support).')
-    def api(dry_run, bump, framework):
+    @click.option(
+        '--federation', is_flag=True, default=False,
+        help='Scaffold an RS256 keypair for cross-project identity federation '
+             '(Litestar only) instead of the default HS256 shared secret.',
+    )
+    def api(dry_run, bump, framework, federation):
         """Generate ho_api/app.py from CRUD_ACCESS and @api_* decorated methods.
 
         The API version is read from ho_api/.api_version (default: 0).
@@ -95,6 +100,10 @@ def add_commands(main_group):
             click.echo('Error: specify --litestar or --fastapi.', err=True)
             sys.exit(1)
 
+        if federation and framework != 'litestar':
+            click.echo('Error: --federation requires --litestar.', err=True)
+            sys.exit(1)
+
         api_version = _read_api_version()
 
         if bump:
@@ -114,7 +123,7 @@ def add_commands(main_group):
             return
 
         click.echo(f'Generating {framework} API for project: {repo.name} (v{api_version})')
-        GenApi(repo, api_version=api_version, framework=framework)
+        GenApi(repo, api_version=api_version, framework=framework, federation=federation)
         if framework == 'litestar':
             click.echo('\nTo run:  litestar --app ho_api.app:application run --reload')
         else:

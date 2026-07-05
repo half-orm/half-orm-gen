@@ -26,6 +26,8 @@ interface ResourceInfo {{
   access: Record<string, Record<string, AccessEntry>>;
 }}
 interface RoleInfo {{ name: string; deletable: boolean; kind: 'system' | 'dynamic' | 'user'; parent_name: string | null; }}
+interface PeerInfo {{ id: string; name: string; url: string; jwt_public_key: string | null; trusted: boolean; }}
+interface SelfPeerInfo {{ url: string; algorithm: string; public_key: string | null; }}
 type Catalog = Record<string, ResourceInfo>;
 
 const VERB_COLOR: Record<string, string> = {{
@@ -41,8 +43,10 @@ const VERB_COLOR: Record<string, string> = {{
   template: `
     <div class="flex h-full gap-0 -m-6">
 
-      <!-- Left: role list -->
+      <!-- Left: role list + peer management (federated identity — planning/identite_federee.md), stacked in one column -->
       <div class="w-52 shrink-0 border-r bg-white flex flex-col h-full">
+
+        <!-- Roles -->
         <div class="px-4 py-3 border-b flex items-center justify-between">
           <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Roles</h2>
           <button (click)="showNewRole.set(!showNewRole())"
@@ -62,7 +66,7 @@ const VERB_COLOR: Record<string, string> = {{
                     class="w-full text-xs bg-blue-600 text-white rounded py-1 hover:bg-blue-700">Create</button>
           </div>
         }}
-        <div class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+        <div class="shrink-0 max-h-[45%] overflow-y-auto px-2 py-2 space-y-0.5">
           @for (r of roles(); track r.name) {{
             <div class="group relative">
               <button (click)="selectRole(r.name)"
@@ -94,6 +98,68 @@ const VERB_COLOR: Record<string, string> = {{
             </div>
           }}
         </div>
+
+        <!-- Peers -->
+        <div class="px-4 py-3 border-b border-t flex items-center justify-between">
+          <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Peers</h2>
+          <button (click)="showNewPeer.set(!showNewPeer())"
+                  class="text-xs text-blue-600 hover:text-blue-800 font-semibold">+</button>
+        </div>
+        @if (selfPeer(); as sp) {{
+          <div class="px-3 py-2 border-b bg-gray-50 space-y-1">
+            <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">This peer</div>
+            <div class="text-[10px] text-gray-500 truncate" [title]="sp.url">{{{{ sp.url || '(HO_PEER_URL not set)' }}}}</div>
+            @if (sp.algorithm === 'RS256' && sp.public_key) {{
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-gray-400">Public key — share with trusted peers</span>
+                <button (click)="copySelfPublicKey()" class="text-[10px] text-blue-600 hover:text-blue-800 font-semibold">
+                  {{{{ copiedSelfKey() ? 'Copied!' : 'Copy' }}}}
+                </button>
+              </div>
+              <textarea readonly rows="3" (click)="$any($event.target).select()"
+                        class="w-full text-[9px] border rounded px-2 py-1 font-mono bg-white text-gray-500">{{{{ sp.public_key }}}}</textarea>
+            }} @else {{
+              <div class="text-[10px] text-amber-500">HS256 — no federation key (set HO_JWT_ALGORITHM=RS256 to federate)</div>
+            }}
+          </div>
+        }}
+        @if (showNewPeer()) {{
+          <div class="px-3 py-2 border-b bg-gray-50 space-y-1.5">
+            <input [value]="newPeerName()" (input)="newPeerName.set($any($event.target).value)"
+                   placeholder="Peer name" class="w-full text-xs border rounded px-2 py-1" />
+            <input [value]="newPeerUrl()" (input)="newPeerUrl.set($any($event.target).value)"
+                   placeholder="https://peer.example.com" class="w-full text-xs border rounded px-2 py-1" />
+            <textarea [value]="newPeerPublicKey()" (input)="newPeerPublicKey.set($any($event.target).value)"
+                      placeholder="-----BEGIN PUBLIC KEY-----" rows="3"
+                      class="w-full text-xs border rounded px-2 py-1 font-mono"></textarea>
+            <button (click)="createPeer()"
+                    class="w-full text-xs bg-blue-600 text-white rounded py-1 hover:bg-blue-700">Register peer</button>
+          </div>
+        }}
+        <div class="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-1">
+          @for (p of peers(); track p.id) {{
+            <div class="group relative border rounded px-2 py-1.5">
+              <div class="flex items-center justify-between gap-1">
+                <span class="text-sm font-semibold text-gray-700 truncate">{{{{ p.name }}}}</span>
+                <button (click)="deletePeer(p.id)"
+                        class="text-[10px] px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-500"
+                        title="Remove peer">✕</button>
+              </div>
+              <div class="text-[10px] text-gray-400 truncate">{{{{ p.url }}}}</div>
+              <label class="flex items-center gap-1 mt-1 cursor-pointer select-none">
+                <input type="checkbox" [checked]="p.trusted"
+                       (change)="togglePeerTrusted(p)"
+                       class="rounded border-gray-300" />
+                <span class="text-[10px]" [class]="p.trusted ? 'text-emerald-600' : 'text-gray-400'">
+                  {{{{ p.trusted ? 'trusted' : 'untrusted' }}}}
+                </span>
+              </label>
+            </div>
+          }} @empty {{
+            <p class="text-gray-400 text-xs text-center mt-4">No peers registered.</p>
+          }}
+        </div>
+
       </div>
 
       <!-- Centre: access matrix with inline field editors -->
@@ -346,6 +412,14 @@ export class HoAdminComponent implements OnInit {{
   readonly newRoleName  = signal('');
   readonly newRoleParent = signal('connected');
 
+  readonly peers            = signal<PeerInfo[]>([]);
+  readonly selfPeer         = signal<SelfPeerInfo | null>(null);
+  readonly copiedSelfKey    = signal(false);
+  readonly showNewPeer      = signal(false);
+  readonly newPeerName      = signal('');
+  readonly newPeerUrl       = signal('');
+  readonly newPeerPublicKey = signal('');
+
   readonly verbs = ['GET', 'POST', 'PUT', 'DELETE'] as const;
 
   readonly catalogEntries = computed(() => {{
@@ -432,12 +506,65 @@ export class HoAdminComponent implements OnInit {{
 
   private async _load(): Promise<void> {{
     this.loading.set(true);
-    const [, rolesRes] = await Promise.all([
+    const [, rolesRes, peersRes, selfPeerRes] = await Promise.all([
       this.auth._fetchCatalog(),
       fetch('{version_prefix}/ho_admin/roles', {{headers: this._hdrs}}),
+      fetch('{version_prefix}/ho_admin/peer', {{headers: this._hdrs}}),
+      fetch('{version_prefix}/ho_admin/peer/self', {{headers: this._hdrs}}),
     ]);
     if (rolesRes.ok) this.roles.set(await rolesRes.json() as RoleInfo[]);
+    if (peersRes.ok) this.peers.set(await peersRes.json() as PeerInfo[]);
+    if (selfPeerRes.ok) this.selfPeer.set(await selfPeerRes.json() as SelfPeerInfo);
     this.loading.set(false);
+  }}
+
+  private async _loadPeers(): Promise<void> {{
+    const res = await fetch('{version_prefix}/ho_admin/peer', {{headers: this._hdrs}});
+    if (res.ok) this.peers.set(await res.json() as PeerInfo[]);
+  }}
+
+  async copySelfPublicKey(): Promise<void> {{
+    const key = this.selfPeer()?.public_key;
+    if (!key) return;
+    await navigator.clipboard.writeText(key);
+    this.copiedSelfKey.set(true);
+    setTimeout(() => this.copiedSelfKey.set(false), 1500);
+  }}
+
+  async createPeer(): Promise<void> {{
+    const name = this.newPeerName().trim();
+    const url  = this.newPeerUrl().trim();
+    if (!name || !url) return;
+    await fetch('{version_prefix}/ho_admin/peer', {{
+      method: 'POST',
+      headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
+      body: JSON.stringify({{
+        name, url,
+        jwt_public_key: this.newPeerPublicKey().trim() || null,
+      }}),
+    }});
+    this.newPeerName.set('');
+    this.newPeerUrl.set('');
+    this.newPeerPublicKey.set('');
+    this.showNewPeer.set(false);
+    await this._loadPeers();
+  }}
+
+  async togglePeerTrusted(peer: PeerInfo): Promise<void> {{
+    await fetch(`{version_prefix}/ho_admin/peer/${{peer.id}}`, {{
+      method: 'PUT',
+      headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
+      body: JSON.stringify({{trusted: !peer.trusted}}),
+    }});
+    await this._loadPeers();
+  }}
+
+  async deletePeer(id: string): Promise<void> {{
+    if (!confirm('Remove this peer? Sign-in delegated from it will stop working.')) return;
+    await fetch(`{version_prefix}/ho_admin/peer/${{id}}`, {{
+      method: 'DELETE', headers: this._hdrs,
+    }});
+    await this._loadPeers();
   }}
 
   getAccess(resource: string, verb: string): AccessEntry | undefined {{

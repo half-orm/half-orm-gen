@@ -83,6 +83,7 @@ export class ResourceSilo {
       $effect(() => {
         const ev = auth.lastEvent;
         if (!ev || ev.resource !== key) return;
+        if (ev.event !== 'create' && ev.event !== 'update' && ev.event !== 'delete') return;
         // Everything below reads/writes $state but must NOT become a tracked
         // dependency of this effect — only a new `lastEvent` should re-trigger
         // it. Without untrack(), reading `byPk` here makes the effect re-run
