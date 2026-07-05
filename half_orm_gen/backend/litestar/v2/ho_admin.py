@@ -12,7 +12,7 @@ from typing import Any
 from litestar import Request, get, post, put, delete
 from litestar.exceptions import HTTPException
 
-from half_orm_gen.backend.crud_helpers import _get_roles, _expand_roles, _filter_access_for_roles
+from half_orm_gen.backend.crud_helpers import _get_roles, _expand_roles, _filter_access_for_roles, _ws_event
 from half_orm_gen.backend.ho_api.loader import load_crud_access, load_role_parents
 from half_orm_gen.backend.ho_api.models import HoApiModels
 from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
@@ -81,11 +81,11 @@ def make_ho_admin_handlers(
         await _reload_resource_access(
             model, resource, crud_access_by_res, api_excluded_by_res, access_map_holder
         )
-        await _manager.broadcast({'event': 'access_reload', 'resource': resource})
+        await _manager.broadcast(_ws_event('access_reload', resource))
 
     async def _reload_parent_map() -> None:
         parent_map_holder[0] = await load_role_parents(model)
-        await _manager.broadcast({'event': 'access_reload'})
+        await _manager.broadcast(_ws_event('access_reload'))
 
     @get(f'{prefix}/ho_admin/roles')
     async def ho_admin_roles(request: Request) -> list:

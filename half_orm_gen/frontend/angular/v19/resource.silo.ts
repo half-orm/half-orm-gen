@@ -37,8 +37,8 @@ export class ResourceSilo {
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
   private pkFields: string[];
-  // Ids created by this client's own create() calls — the WS 'create' echo for
-  // these shouldn't be marked as "new" for the user who just created them
+  // Ids touched by this client's own create()/update() calls — the WS echo for
+  // these shouldn't be marked as "new" for the user who just acted on them
   private ownCreatedIds = new Set<string>();
 
   constructor(
@@ -104,8 +104,13 @@ export class ResourceSilo {
       .subscribe(ev => {
         const id = String(ev.id);
         if (ev.event === 'delete') { this.removeItem(id); return; }
+        // "New" means "not previously visible to me" — a create is the common case,
+        // but an update can also reveal a row for the first time (e.g. published
+        // flipped to true after being created hidden), so check prior presence
+        // rather than the event type.
+        const wasKnown = this.byPk().has(id);
         this.refresh(id).subscribe(item => {
-          if (ev.event === 'create' && item) {
+          if (item && !wasKnown) {
             if (this.ownCreatedIds.delete(id)) return;
             this.newIds.update(s => new Set(s).add(id));
           }
@@ -262,7 +267,9 @@ export class ResourceSilo {
   update(id: string, data: Row) {
     return this.http.put<Row>(`${this.baseUrl}/${id}`, data, {
       headers: this.headers.append('Content-Type', 'application/json'),
-    });
+    }).pipe(
+      tap(() => this.ownCreatedIds.add(id))
+    );
   }
 
   remove(id: string) {
@@ -309,6 +316,7 @@ export class ResourceSilo {
 
   removeItem(id: string): void {
     if (!this.pkExtractor) return;
+    if (!this.byPk().has(id)) return; // no-op: avoid churning byPk when there's nothing to remove
     const ex = this.pkExtractor;
     const map = new Map(this.byPk());
     map.delete(id);

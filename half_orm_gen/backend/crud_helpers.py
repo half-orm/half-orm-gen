@@ -4,10 +4,22 @@ Framework-agnostic CRUD helpers shared between Litestar and FastAPI runtimes.
 Functions here must not import from any specific web framework.
 """
 import re
+import time
 import uuid
 import datetime
 import decimal
 from typing import Any
+
+
+def _ws_event(event: str, resource: str | None = None, id: Any = None, **extra: Any) -> dict:
+    """Build a WebSocket event payload, timestamped in epoch milliseconds (JS Date.now()-compatible)."""
+    payload: dict = {'event': event, 'ts': int(time.time() * 1000)}
+    if resource is not None:
+        payload['resource'] = resource
+    if id is not None:
+        payload['id'] = str(id)
+    payload.update(extra)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -414,4 +426,4 @@ async def _ws_broadcast_cascade(
         for row in await child_cls(**{fk_field: pk_val}).ho_aselect(child_pk):
             rid = row[child_pk]
             await _ws_broadcast_cascade(child_cls(**{child_pk: rid}), child_resource, rid, ws_rmap, broadcast_fn, _seen)
-            await broadcast_fn({'event': 'delete', 'resource': child_resource, 'id': str(rid)})
+            await broadcast_fn(_ws_event('delete', child_resource, rid))

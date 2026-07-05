@@ -45,6 +45,14 @@ class SiloRegistry {
     this.meta = await res.json() as HoMeta;
   }
 
+  newItemsByResource = $derived.by(() => {
+    const out: Record<string, number> = {};
+    for (const [key, silo] of this.silos) {
+      if (silo.newCount > 0) out[key] = silo.newCount;
+    }
+    return out;
+  });
+
   get ready(): boolean { return this._ready; }
 
   get(key: string): ResourceSilo {

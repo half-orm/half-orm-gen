@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import { auth } from '$lib/auth.svelte.ts';
 import { registerClear, registerClearForKey } from '$lib/stateRegistry';
 import type { ResourceSchema } from './schema.types';
@@ -65,8 +66,8 @@ export class ResourceSilo {
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
   private pkFields: string[];
-  // Ids created by this client's own create() calls — the WS 'create' echo for
-  // these shouldn't be marked as "new" for the user who just created them
+  // Ids touched by this client's own create()/update() calls — the WS echo for
+  // these shouldn't be marked as "new" for the user who just acted on them
   private ownCreatedIds = new Set<string>();
 
   constructor(
@@ -82,13 +83,24 @@ export class ResourceSilo {
       $effect(() => {
         const ev = auth.lastEvent;
         if (!ev || ev.resource !== key) return;
-        const id = String(ev.id);
-        if (ev.event === 'delete') { this.removeItem(id); return; }
-        void this.refresh(id).then(item => {
-          if (ev.event === 'create' && item) {
-            if (this.ownCreatedIds.delete(id)) return;
-            this.newIds = new Set(this.newIds).add(id);
-          }
+        // Everything below reads/writes $state but must NOT become a tracked
+        // dependency of this effect — only a new `lastEvent` should re-trigger
+        // it. Without untrack(), reading `byPk` here makes the effect re-run
+        // on every setItem/removeItem it itself causes: infinite refetch loop.
+        untrack(() => {
+          const id = String(ev.id);
+          if (ev.event === 'delete') { this.removeItem(id); return; }
+          // "New" means "not previously visible to me" — a create is the common
+          // case, but an update can also reveal a row for the first time (e.g.
+          // published flipped to true after being created hidden), so check
+          // prior presence rather than the event type.
+          const wasKnown = this.byPk.has(id);
+          void this.refresh(id).then(item => {
+            if (item && !wasKnown) {
+              if (this.ownCreatedIds.delete(id)) return;
+              this.newIds = new Set(this.newIds).add(id);
+            }
+          });
         });
       });
     });
@@ -240,11 +252,13 @@ export class ResourceSilo {
   }
 
   update(id: string, data: Row): Promise<Response> {
-    return fetch(`${this.baseUrl}/${id}`, {
+    const req = fetch(`${this.baseUrl}/${id}`, {
       method: 'PUT',
       headers: { ...this.hdrs, 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    void req.then(res => { if (res.ok) this.ownCreatedIds.add(id); });
+    return req;
   }
 
   remove(id: string): Promise<Response> {
@@ -292,6 +306,7 @@ export class ResourceSilo {
 
   removeItem(id: string): void {
     if (!this.pkExtractor) return;
+    if (!this.byPk.has(id)) return; // no-op: avoid churning byPk when there's nothing to remove
     const ex = this.pkExtractor;
     const map = new Map(this.byPk);
     map.delete(id);

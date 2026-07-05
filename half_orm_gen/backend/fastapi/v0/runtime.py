@@ -21,6 +21,7 @@ from half_orm_gen.backend.crud_helpers import (
     _resolved_out, _resolved_in,
     _parse_q, _build_access_entry, _filter_access_for_roles,
     _ws_broadcast_cascade,
+    _ws_event,
 )
 from half_orm_gen.backend.ho_api.loader import ensure_system_roles
 
@@ -196,7 +197,7 @@ def _make_post_handler(cls, crud_access: dict, api_excluded: list, all_field_nam
         }
         result = await cls(**payload).ho_ainsert()
         pk_val = result.get(pk_name, '') if result else ''
-        await _manager.broadcast({'event': 'create', 'resource': resource, 'id': str(pk_val)})
+        await _manager.broadcast(_ws_event('create', resource, pk_val))
         return result
 
     handler.__name__ = handler.__qualname__ = f'create_{slug}'
@@ -226,7 +227,7 @@ def _make_put_handler(cls, crud_access: dict, api_excluded: list, all_field_name
         result = await cls(**pk_filter).ho_aupdate(*cols, **payload)
         if not result:
             raise HTTPException(status_code=404)
-        await _manager.broadcast({'event': 'update', 'resource': resource, 'id': str(id)})
+        await _manager.broadcast(_ws_event('update', resource, id))
         return result[0] if authorized else {'ok': True, 'id': str(id)}
 
     handler.__name__ = handler.__qualname__ = f'update_{slug}'
@@ -247,7 +248,7 @@ def _make_delete_handler(cls, crud_access: dict, api_excluded: list,
         result = await inst.ho_adelete('*')
         if not result:
             raise HTTPException(status_code=404)
-        await _manager.broadcast({'event': 'delete', 'resource': resource, 'id': str(id)})
+        await _manager.broadcast(_ws_event('delete', resource, id))
 
     handler.__name__ = handler.__qualname__ = f'delete_{slug}'
     return handler

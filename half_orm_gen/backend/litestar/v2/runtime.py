@@ -30,6 +30,7 @@ from half_orm_gen.backend.crud_helpers import (
     _parse_q, _build_access_entry, _filter_access_for_roles,
     _expand_roles,
     _ws_broadcast_cascade,
+    _ws_event,
 )
 
 
@@ -291,7 +292,7 @@ def _make_post_handler(
                     payload[field] = user_id
         result = await cls(**payload).ho_ainsert()
         pk_val = result.get(pk_name, '') if result else ''
-        await _manager.broadcast({'event': 'create', 'resource': resource, 'id': str(pk_val)})
+        await _manager.broadcast(_ws_event('create', resource, pk_val))
         return result
 
     handler.__name__ = handler.__qualname__ = f'create_{slug}'
@@ -342,7 +343,7 @@ def _make_put_handler(
         result = await cls(**pk_filter).ho_aupdate(*cols, **payload)
         if not result:
             raise HTTPException(status_code=404)
-        await _manager.broadcast({'event': 'update', 'resource': resource, 'id': str(id)})
+        await _manager.broadcast(_ws_event('update', resource, id))
         return result[0] if authorized else {'ok': True, 'id': str(id)}
 
     handler.__name__ = handler.__qualname__ = f'update_{slug}'
@@ -387,7 +388,7 @@ def _make_delete_handler(
         result = await inst.ho_adelete('*')
         if not result:
             raise HTTPException(status_code=404)
-        await _manager.broadcast({'event': 'delete', 'resource': resource, 'id': str(id)})
+        await _manager.broadcast(_ws_event('delete', resource, id))
 
     handler.__name__ = handler.__qualname__ = f'delete_{slug}'
     return delete(f'{path}/{{id:str}}')(handler)
@@ -705,7 +706,7 @@ def build_crud_app(
         def _on_sighup() -> None:
             async def _do_reload() -> None:
                 await _reload_all_access()
-                await _manager.broadcast({'event': 'access_reload'})
+                await _manager.broadcast(_ws_event('access_reload'))
                 print('Reloaded CRUD_ACCESS/roles from DB (SIGHUP)', file=sys.stderr, flush=True)
             asyncio.ensure_future(_do_reload())
 

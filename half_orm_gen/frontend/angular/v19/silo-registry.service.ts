@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, inject, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../core/auth.service';
@@ -41,6 +41,15 @@ export class SiloRegistry {
     const m = await firstValueFrom(this.http.get<HoMeta>(`${this.apiBase}/ho_meta`));
     this.meta.set(m);
   }
+
+  readonly newItemsByResource = computed(() => {
+    const out: Record<string, number> = {};
+    for (const [key, silo] of this.silos) {
+      const n = silo.newCount();
+      if (n > 0) out[key] = n;
+    }
+    return out;
+  });
 
   get ready(): boolean { return this._ready; }
 

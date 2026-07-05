@@ -302,6 +302,7 @@ const API_BASE = '{api_base}';
               }}
             </div>
           }}
+          <div class="flex items-center gap-2 shrink-0">
           <div class="relative shrink-0">
             <button (click)="menuOpen = !menuOpen; $event.stopPropagation()"
                     [class]="'flex items-center gap-1 text-xs px-3 py-1 rounded-full border transition-colors ' +
@@ -376,6 +377,28 @@ const API_BASE = '{api_base}';
               </div>
             }}
           </div>
+          @if (totalNewCount() > 0) {{
+            <div class="relative shrink-0">
+              <button (click)="newItemsMenuOpen = !newItemsMenuOpen; $event.stopPropagation()"
+                      class="flex items-center gap-1 text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                🔔 {{{{ totalNewCount() }}}}
+              </button>
+              @if (newItemsMenuOpen) {{
+                <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 w-64 p-2"
+                     (click)="$event.stopPropagation()">
+                  @for (entry of newItemsEntries(); track entry.resource) {{
+                    <a [routerLink]="['/ho_bo/' + entry.resource]" [queryParams]="{{ new: '1' }}"
+                       (click)="newItemsMenuOpen = false"
+                       class="flex justify-between items-center px-2 py-1.5 rounded hover:bg-blue-50 text-sm text-gray-700">
+                      <span>{{{{ entry.label }}}}</span>
+                      <span class="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5">{{{{ entry.count }}}}</span>
+                    </a>
+                  }}
+                </div>
+              }}
+            </div>
+          }}
+          </div>
         </header>
         <div class="flex flex-1 overflow-hidden">
           <aside class="w-max shrink-0 bg-white border-r flex flex-col">
@@ -437,6 +460,7 @@ export class AppComponent implements OnInit {{
   readonly isHome = signal(this.router.url === '/');
   navFilter  = signal('');
   menuOpen   = false;
+  newItemsMenuOpen = false;
   showSignup = signal(false);
   loginEmail = signal('');
   signupName = signal('');
@@ -473,6 +497,16 @@ export class AppComponent implements OnInit {{
   }});
 
   readonly hasGlobalSearch = computed(() => this.searchableResources().length > 0);
+
+  readonly newItemsEntries = computed(() =>
+    Object.entries(this.registry.newItemsByResource())
+      .map(([resource, count]) => ({{ resource, label: resource.replace('/', '.'), count }}))
+      .sort((a, b) => b.count - a.count)
+  );
+
+  readonly totalNewCount = computed(() =>
+    this.newItemsEntries().reduce((sum, e) => sum + e.count, 0)
+  );
 
   readonly searchResultEntries = computed(() =>
     Object.entries(this.searchResults())
@@ -535,6 +569,9 @@ export class AppComponent implements OnInit {{
   closeMenu(e: MouseEvent): void {{
     if (this.menuOpen && !(e.target as HTMLElement).closest('.relative')) {{
       this.menuOpen = false;
+    }}
+    if (this.newItemsMenuOpen && !(e.target as HTMLElement).closest('.relative')) {{
+      this.newItemsMenuOpen = false;
     }}
     if (this.searchOpen()) this.searchOpen.set(false);
   }}

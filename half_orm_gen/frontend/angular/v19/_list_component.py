@@ -134,7 +134,7 @@ def _list_component(
         )
 
     new_items_badge = (
-        '<app-new-items-badge [count]="silo.newCount()" [active]="showNewOnly()" '
+        '<app-new-items-badge [count]="contextualNewCount()" [active]="showNewOnly()" '
         '(toggle)="toggleShowNewOnly()" />'
     ) if pk_extractor else ''
 
@@ -193,8 +193,17 @@ def _list_component(
         '    }'
     ) if pk_extractor else ''
 
+    _contextual_new_count = (
+        '\n\n  // "New" count scoped to this list\'s own context (parent FK filter + local\n'
+        "  // filters) — not the silo's resource-wide count, which would leak e.g. a new\n"
+        "  // comment on a DIFFERENT post into this post's embedded comment list.\n"
+        '  readonly contextualNewCount = computed(() =>\n'
+        '    this.contextItems().filter(item => this.silo.isNew(this.getPkId(item))).length\n'
+        '  );'
+    ) if pk_extractor else ''
+
     displayItems_block = f"""\
-  readonly displayItems = computed(() => {{
+  readonly contextItems = computed(() => {{
     const hasFilters = Object.keys(this.filters()).length > 0;
     let items: Row[] = hasFilters
       ? {_fk_items_src}
@@ -202,7 +211,12 @@ def _list_component(
     const lf = this.localFilters();
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
-        Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));{_new_only_filter}
+        Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
+    return items;
+  }});{_contextual_new_count}
+
+  readonly displayItems = computed(() => {{
+    let items: Row[] = this.contextItems();{_new_only_filter}
     const sf = this.silo.sortField();
     if (sf) {{
       const asc = this.silo.sortAsc();
@@ -429,6 +443,7 @@ export class {iname}ListComponent {{
     if (this.embedded()) return; // Don't sync URL for embedded components
 
     const params = this.route.snapshot.queryParams;
+    if (params['new'] === '1') this.showNewOnly.set(true);
     const urlFilters = parseFiltersFromUrl(params, this.fieldTypes);
 
     // If URL has filters, use them (priority)

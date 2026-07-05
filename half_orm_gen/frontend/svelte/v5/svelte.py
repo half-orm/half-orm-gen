@@ -605,6 +605,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   let {{ children }} = $props();
   let navFilter  = $state('');
   let menuOpen   = $state(!auth.token);
+  let newItemsMenuOpen = $state(false);
   let showSignup = $state(false);
   let loginEmail = $state('');
   let signupName = $state('');
@@ -720,6 +721,13 @@ def _layout(resources: list, version_prefix: str = '') -> str:
       .sort((a: any, b: any) => a.label.localeCompare(b.label))
   );
   const hasGlobalSearch = $derived(searchableResources.length > 0);
+
+  const newItemsEntries = $derived(
+    Object.entries(registry.newItemsByResource)
+      .map(([resource, count]) => ({{ resource, label: resource.replace('/', '.'), count: count as number }}))
+      .sort((a, b) => b.count - a.count)
+  );
+  const totalNewCount = $derived(newItemsEntries.reduce((sum, e) => sum + e.count, 0));
   const searchResultEntries = $derived(
     Object.entries(searchResults)
       .map(([resource, val]: [string, any]) => ({{
@@ -737,9 +745,10 @@ def _layout(resources: list, version_prefix: str = '') -> str:
 <div class="h-screen flex flex-col bg-gray-50 overflow-hidden"
      onclick={{(e) => {{
        if (menuOpen && !(e.target as HTMLElement).closest('.auth-menu')) menuOpen = false;
+       if (newItemsMenuOpen && !(e.target as HTMLElement).closest('.new-items-menu')) newItemsMenuOpen = false;
        if (searchOpen && !(e.target as HTMLElement).closest('.search-bar')) searchOpen = false;
      }}}}
-     onkeydown={{(e) => {{ if (e.key === 'Escape') {{ menuOpen = false; searchOpen = false; }} }}}}
+     onkeydown={{(e) => {{ if (e.key === 'Escape') {{ menuOpen = false; newItemsMenuOpen = false; searchOpen = false; }} }}}}
      role="presentation">
   <header class="shrink-0 bg-white border-b h-11 flex items-center justify-between px-4">
     <span class="font-bold text-gray-800 shrink-0">halfORM Backoffice</span>
@@ -791,6 +800,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
         {{/if}}
       </div>
     {{/if}}
+    <div class="flex items-center gap-2 shrink-0">
     <div class="relative auth-menu shrink-0">
       <button onclick={{(e) => {{ e.stopPropagation(); menuOpen = !menuOpen; }}}}
               class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border
@@ -852,6 +862,28 @@ def _layout(resources: list, version_prefix: str = '') -> str:
           {{/if}}
         </div>
       {{/if}}
+    </div>
+    {{#if totalNewCount > 0}}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="relative new-items-menu shrink-0" onclick={{(e) => e.stopPropagation()}}>
+        <button onclick={{() => newItemsMenuOpen = !newItemsMenuOpen}}
+                class="flex items-center gap-1 text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+          🔔 {{totalNewCount}}
+        </button>
+        {{#if newItemsMenuOpen}}
+          <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 w-64 p-2">
+            {{#each newItemsEntries as entry}}
+              <a href={{`/ho_bo/${{entry.resource}}?new=1`}}
+                 onclick={{() => newItemsMenuOpen = false}}
+                 class="flex justify-between items-center px-2 py-1.5 rounded hover:bg-blue-50 text-sm text-gray-700">
+                <span>{{entry.label}}</span>
+                <span class="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5">{{entry.count}}</span>
+              </a>
+            {{/each}}
+          </div>
+        {{/if}}
+      </div>
+    {{/if}}
     </div>
   </header>
   <div class="flex flex-1 overflow-hidden">
@@ -1149,7 +1181,7 @@ def _list_component(
     )
 
     new_items_badge = (
-        '<NewItemsBadge count={silo.newCount} active={showNewOnly} ontoggle={toggleShowNewOnly} />'
+        '<NewItemsBadge count={contextualNewCount} active={showNewOnly} ontoggle={toggleShowNewOnly} />'
         if pk_field else ''
     )
 
@@ -1213,11 +1245,14 @@ def _list_component(
 {field_types_code}
 {"" if not pk_field else f"""
   let localFilters = $state<Record<string, string>>({{}});
+  let showNewOnly = $state(false);
+  function toggleShowNewOnly() {{ showNewOnly = !showNewOnly; }}
 
   // Initialize localFilters from URL or silo on mount (using a closure to run once)
   (() => {{
     if (embedded) return;
     const sp = new URLSearchParams(window.location.search);
+    if (sp.get('new') === '1') showNewOnly = true;
     const urlFilters = initFiltersFromUrl(sp);
     if (Object.keys(urlFilters).length > 0) {{
       // URL has priority
@@ -1246,10 +1281,7 @@ def _list_component(
     goto(`/ho_bo/{schema_name}/{table_name}/${{id}}`);
   }}
 
-  let showNewOnly = $state(false);
-  function toggleShowNewOnly() {{ showNewOnly = !showNewOnly; }}
-
-  const displayItems = $derived.by(() => {{
+  const contextItems = $derived.by(() => {{
     let items: Row[] = hasFilters
       ? silo.items.filter(item =>
             Object.entries(filters).every(([k, v]) => String((item as any)[k]) === String(v)))
@@ -1258,6 +1290,18 @@ def _list_component(
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
+    return items;
+  }});
+
+  // "New" count scoped to this list's own context (parent FK filter + local
+  // filters) — not the silo's resource-wide count, which would leak e.g. a new
+  // comment on a DIFFERENT post into this post's embedded comment list.
+  const contextualNewCount = $derived(
+    contextItems.filter(item => silo.isNew(String({pk_item_expr}))).length
+  );
+
+  const displayItems = $derived.by(() => {{
+    let items: Row[] = contextItems;
     if (showNewOnly) {{
       items = items.filter(item => silo.isNew(String({pk_item_expr})));
     }}
@@ -2012,7 +2056,7 @@ def _detail_page(
   }});
 
   $effect(() => {{
-    if (item) silo.markRead(id);
+    if (item) untrack(() => silo.markRead(id));
   }});
 
   $effect(() => {{
