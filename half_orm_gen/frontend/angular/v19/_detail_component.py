@@ -2,6 +2,7 @@ from ._helpers import _cname, _selector, _title
 from ._form_components import (
     _is_bool_field, _is_server_generated, _input_type, _text_fields_ts, _ng_form_field,
 )
+from half_orm_gen.frontend.base import NO_COMPONENT_FK_TARGETS
 
 
 def _detail_component(
@@ -14,11 +15,16 @@ def _detail_component(
 ) -> tuple[str, str, str]:
     title   = _title(schema_name, table_name)
     fk_map  = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
+    # fk_map (above) keeps every dep — including FK-select-only targets like
+    # half_orm_meta.identity/user — for the edit form's dropdown. The
+    # "linked reference" preview below needs a real generated Fields
+    # component + detail route, which those targets don't have.
+    linkable_fk_deps = [d for d in fk_deps if (d[1], d[2]) not in NO_COMPONENT_FK_TARGETS]
 
     # FK store imports + injects — deduplicated: skip self-ref and multi-FK to same table
     _seen: set[str] = {f'{schema_name}_{table_name}'}
     _unique_fk_deps = []
-    for dep in fk_deps:
+    for dep in linkable_fk_deps:
         _, rs, rt, _ = dep
         stem = f'{rs}_{rt}'
         if stem not in _seen:
@@ -113,9 +119,9 @@ def _detail_component(
       </form>
     }}"""
 
-    # FK reference sections — all deps; self-refs reuse this.silo (already injected)
+    # FK reference sections — all linkable deps; self-refs reuse this.silo (already injected)
     fk_sections = ''
-    for lf, rs, rt, remote_pk in fk_deps:
+    for lf, rs, rt, remote_pk in linkable_fk_deps:
         fk_key   = f'{rs}/{rt}'
         rt_title = _title(rs, rt)
         fk_fields_sel = _selector(rs, rt, 'fields')
@@ -153,11 +159,11 @@ def _detail_component(
     </div>"""
 
     right_col = ''
-    if fk_deps:
+    if linkable_fk_deps:
         right_col += '\n      <p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">↗ Direct references</p>'
         right_col += fk_sections
     if rev_fk_deps:
-        if fk_deps:
+        if linkable_fk_deps:
             right_col += '\n      <hr class="my-6 border-gray-200">'
         right_col += '\n      <p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">↙ Related</p>'
         right_col += rev_sections

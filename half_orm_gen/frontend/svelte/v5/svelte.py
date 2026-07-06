@@ -24,6 +24,7 @@ from half_orm_gen.frontend.base import (
     _title, _cname, _rname, _field_type_category,
     _is_bool_field, _is_text_field, _is_textarea_field,
     _is_required, _is_server_generated, _input_type, _text_fields,
+    NO_COMPONENT_FK_TARGETS,
 )
 
 # ---------------------------------------------------------------------------
@@ -1323,6 +1324,17 @@ def _list_component(
         inacc = f"silo.inaccessibleFields().has('{f}')"
         if f in fk_map:
             rs, rt = fk_map[f]
+            if (rs, rt) in NO_COMPONENT_FK_TARGETS:
+                # No generated detail route for this target (e.g.
+                # half_orm_meta.identity/user) — plain text, not a dead link.
+                return (
+                    f'{{#if !{inacc}}}'
+                    f'<td class="px-4 py-2 text-sm">'
+                    f'<span class="font-mono text-xs text-gray-500 truncate block" class:max-w-xs={{!embedded}}'
+                    f' title="{{cellTitle(item.{f})}}">{{fmtCell(item.{f})}}</span>'
+                    f'</td>'
+                    f'{{/if}}'
+                )
             return (
                 f'{{#if !{inacc}}}'
                 f'<td class="px-4 py-2 text-sm">'
@@ -2006,6 +2018,13 @@ def _fields_component_svelte(
             )
         if f in fk_map:
             rs, rt = fk_map[f]
+            if (rs, rt) in NO_COMPONENT_FK_TARGETS:
+                # No generated detail route for this target (e.g.
+                # half_orm_meta.identity/user) — plain text, not a dead link.
+                return (
+                    f'<div class="flex gap-2 items-baseline">{label}'
+                    f'<span class="font-mono text-xs text-gray-500">{{item.{f}}}</span></div>'
+                )
             return (
                 f'<div class="flex gap-2 items-baseline">{label}'
                 f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
@@ -2050,6 +2069,11 @@ def _detail_page(
 ) -> str:
     title   = _title(schema_name, table_name)
     fk_map    = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
+    # fk_map (above) keeps every dep — including FK-select-only targets like
+    # half_orm_meta.identity/user — for the edit form's dropdown. The
+    # "linked reference" preview below needs a real generated Fields
+    # component + detail route, which those targets don't have.
+    linkable_fk_deps = [d for d in fk_deps if (d[1], d[2]) not in NO_COMPONENT_FK_TARGETS]
 
     visible_put = [f for f in put_in_names if not _is_server_generated(f, all_fields)]
 
@@ -2198,10 +2222,10 @@ def _detail_page(
             f'{{/if}}'
         )
 
-    fk_imports  = _fk_ref_imports(fk_deps)
-    fk_states   = _fk_ref_states(fk_deps)
-    fk_effects  = _fk_ref_effects(fk_deps)
-    fk_sections = '\n'.join(_fk_ref_section(*d) for d in fk_deps)
+    fk_imports  = _fk_ref_imports(linkable_fk_deps)
+    fk_states   = _fk_ref_states(linkable_fk_deps)
+    fk_effects  = _fk_ref_effects(linkable_fk_deps)
+    fk_sections = '\n'.join(_fk_ref_section(*d) for d in linkable_fk_deps)
 
     # Reverse FK imports and sections
     rev_imports = '\n'.join(
@@ -2365,6 +2389,12 @@ class SvelteAppGenerator(StoreGenerator):
 
         # Pass 1: identify all resources that expose CRUD_ACCESS
         crud_resources: set[tuple[str, str]] = set()
+        # "half_orm_meta.identity"."user" never appears in `classes` (halfORM's
+        # own model.classes() skips every half_orm_meta-prefixed schema), but
+        # the backend still serves it GET-only for FK-select purposes — see
+        # planning/a_resoudre.md item 18. Recognized here purely so FKs
+        # targeting it (e.g. blog.post.author_id) get fk_auto UI at all.
+        crud_resources.add(('half_orm_meta.identity', 'user'))
         raw = []
         for relation, _relation_type in classes:
             module_str = relation.__module__

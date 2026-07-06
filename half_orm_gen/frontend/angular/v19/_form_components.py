@@ -1,6 +1,7 @@
 from half_orm_gen.frontend.base import (
     _is_bool_field, _is_text_field, _is_textarea_field,
     _is_required, _is_server_generated, _input_type, _text_fields,
+    NO_COMPONENT_FK_TARGETS,
 )
 from ._helpers import _selector, _title, _field_type_category
 
@@ -288,6 +289,13 @@ def _fields_component(
             )
         if f in fk_map:
             rs, rt = fk_map[f]
+            if (rs, rt) in NO_COMPONENT_FK_TARGETS:
+                # No generated detail route for this target (e.g.
+                # half_orm_meta.identity/user) — plain text, not a dead link.
+                return (
+                    f'<div class="flex gap-2 items-baseline">{label}'
+                    f'<span class="font-mono text-xs text-gray-500">{{{{ item()[\'{f}\'] }}}}</span></div>'
+                )
             return (
                 f'<div class="flex gap-2 items-baseline">{label}'
                 f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}/\' + String(item()[\'{f}\'])]"'

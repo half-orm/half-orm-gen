@@ -116,6 +116,19 @@ async def reconcile_catalog(model) -> None:
         for f in v.get('fields', [])
     }
 
+    # "half_orm_meta.identity"."user" is invisible to model.ho_meta() too —
+    # it delegates to pg_meta.desc(), which applies the exact same
+    # half_orm_meta-prefix skip as model.classes() (not just the Python-class
+    # exclusion runtime.py works around for routing). Without this, it would
+    # never get a "half_orm_meta.api".route row and so never appear in
+    # /ho_admin/catalog at all, even though build_crud_app already serves it
+    # GET-only (see planning/a_resoudre.md item 18).
+    from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
+    identity_user_sfqrn = HoIdentityModels(model).user()()._t_fqrn
+    live_relations.add(('half_orm_meta.identity', 'user'))
+    for fname in model._fields_metadata(identity_user_sfqrn):
+        live_fields.add(('half_orm_meta.identity', 'user', fname))
+
     # ── Routes ──────────────────────────────────────────────────────────────
     db_routes = {
         (r['schema_name'], r['table_name'], r['verb']): r['deprecated']

@@ -135,6 +135,12 @@ class AngularAppGenerator(StoreGenerator):
 
         # Pass 1 — identify CRUD resources
         crud_resources: set[tuple[str, str]] = set()
+        # "half_orm_meta.identity"."user" never appears in `classes` (halfORM's
+        # own model.classes() skips every half_orm_meta-prefixed schema), but
+        # the backend still serves it GET-only for FK-select purposes — see
+        # planning/a_resoudre.md item 18. Recognized here purely so FKs
+        # targeting it (e.g. blog.post.author_id) get fk_auto UI at all.
+        crud_resources.add(('half_orm_meta.identity', 'user'))
         raw = []
         for relation, _relation_type in classes:
             module_str = relation.__module__

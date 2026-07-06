@@ -9,6 +9,16 @@ from pathlib import Path
 
 from half_orm_gen.backend.crud_routes import _py_type_str
 
+# Resources recognized as valid FK-select targets (see _fk_deps below) but
+# that never get a full generated component set (no Fields/List/detail
+# route) — currently just "half_orm_meta.identity"."user", served GET-only
+# purely so other resources' forms can look up/auto-fill a reference to it
+# (planning/a_resoudre.md item 18). Any "linked reference" feature that
+# assumes a real generated component (detail-page FK preview, reverse-FK
+# list) must exclude these, or it ends up importing a file that was never
+# written.
+NO_COMPONENT_FK_TARGETS = {('half_orm_meta.identity', 'user')}
+
 
 # ---------------------------------------------------------------------------
 # Name helpers
@@ -151,6 +161,16 @@ class StoreGenerator(ABC):
                 continue
             fqtn = fk.remote['fqtn']
             remote_schema = fqtn[0].replace('.', '_')
+            # "half_orm_meta.identity" is a schema whose name legitimately
+            # contains a literal dot (not a hierarchical separator to
+            # flatten, unlike the general case this .replace() targets) —
+            # undo the mangling for it specifically so it matches the real
+            # runtime resource key ("half_orm_meta.identity/user", used by
+            # both the generated backend route and the frontend's
+            # SiloRegistry, neither of which mangle it) instead of a key
+            # nothing actually uses. See planning/a_resoudre.md item 18.
+            if remote_schema == 'half_orm_meta_identity':
+                remote_schema = 'half_orm_meta.identity'
             remote_table  = fqtn[1]
             if (remote_schema, remote_table) not in crud_resources:
                 continue
@@ -175,6 +195,16 @@ class StoreGenerator(ABC):
                 continue
             fqtn = fk.remote['fqtn']
             remote_schema = fqtn[0].replace('.', '_')
+            # "half_orm_meta.identity" is a schema whose name legitimately
+            # contains a literal dot (not a hierarchical separator to
+            # flatten, unlike the general case this .replace() targets) —
+            # undo the mangling for it specifically so it matches the real
+            # runtime resource key ("half_orm_meta.identity/user", used by
+            # both the generated backend route and the frontend's
+            # SiloRegistry, neither of which mangle it) instead of a key
+            # nothing actually uses. See planning/a_resoudre.md item 18.
+            if remote_schema == 'half_orm_meta_identity':
+                remote_schema = 'half_orm_meta.identity'
             remote_table  = fqtn[1]
             if (remote_schema, remote_table) not in crud_resources:
                 continue

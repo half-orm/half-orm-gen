@@ -22,6 +22,7 @@ from half_orm_gen.backend.ho_api.loader import (
     ensure_system_roles,
     reconcile_catalog,
 )
+from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
 from half_orm_gen.backend.crud_helpers import (
     _COMPOSITE_PK_PATTERN, _py_type_str,
     _get_roles, _get_role_filter, _get_active_filters,
@@ -623,14 +624,31 @@ def build_crud_app(
     classes_by_res: dict[str, type] = {}
     relation_handlers: list = []
 
-    for cls, _kind in model.classes():
-        try:
-            mod = importlib.import_module(cls.__module__)
-        except ModuleNotFoundError:
-            mod = None
+    # "half_orm_meta.identity"."user" is invisible to model.classes() (halfORM
+    # itself skips every half_orm_meta-prefixed schema there) — by design, so
+    # it never gets full generic CRUD. But other resources hold real FKs to it
+    # (e.g. blog.post.author_id), and their forms need a working GET/list to
+    # populate a "select" FK dropdown and a "connected_user"/"context" auto-fill
+    # (planning/a_resoudre.md item 18) — so it's added back explicitly here,
+    # GET-only (no POST/PUT/DELETE handlers below), with password_hash always
+    # excluded regardless of what CRUD_ACCESS an admin configures for it.
+    identity_user_cls = HoIdentityModels(model).user()
 
-        # API_EXCLUDED_FIELDS stays in Python modules
-        api_excluded: list[str] = getattr(mod, 'API_EXCLUDED_FIELDS', []) if mod else []
+    def _all_classes():
+        yield from model.classes()
+        yield identity_user_cls, 'r'
+
+    for cls, _kind in _all_classes():
+        is_identity_user = cls is identity_user_cls
+        if is_identity_user:
+            api_excluded: list[str] = ['password_hash']
+        else:
+            try:
+                mod = importlib.import_module(cls.__module__)
+            except ModuleNotFoundError:
+                mod = None
+            # API_EXCLUDED_FIELDS stays in Python modules
+            api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', []) if mod else []
 
         inst    = cls()
         schema  = inst._t_fqrn[1]
@@ -652,15 +670,16 @@ def build_crud_app(
             relation_handlers.append(
                 _make_get_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info, parent_map_holder)
             )
-            relation_handlers.append(
-                _make_post_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info[0][0], parent_map_holder)
-            )
-            relation_handlers.append(
-                _make_put_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info, parent_map_holder)
-            )
-            relation_handlers.append(
-                _make_delete_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info, ws_rmap, parent_map_holder)
-            )
+            if not is_identity_user:
+                relation_handlers.append(
+                    _make_post_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info[0][0], parent_map_holder)
+                )
+                relation_handlers.append(
+                    _make_put_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info, parent_map_holder)
+                )
+                relation_handlers.append(
+                    _make_delete_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info, ws_rmap, parent_map_holder)
+                )
 
     from half_orm_gen.backend.litestar.v2.ho_admin import make_ho_admin_handlers
     from half_orm_gen.backend.litestar.v2.identity_admin import make_identity_admin_handlers
@@ -689,7 +708,7 @@ def build_crud_app(
         """
         access_map: dict = {}
 
-        for cls, _kind in model.classes():
+        for cls, _kind in _all_classes():
             inst     = cls()
             schema   = inst._t_fqrn[1]
             table    = inst._t_fqrn[2]
