@@ -447,6 +447,12 @@ def _make_auth_peers(model, prefix: str):
     THIS peer's own HO_PEER_NAME (may be unset for a non-federated
     project) — used to label the local sign-in form ("Sign in on
     <local_name>") so it isn't confused with the "Sign in via <peer>" list.
+    `local_id` is THIS peer's own HO_PEER_ID — used to build a direct
+    cross-site navigation link (federationNavUrl): since a peer's `peer`
+    table looks its trusted peers up by id (see planning/
+    identite_federee.md section 4bis), this project can construct a
+    delegation-initiating URL on the TARGET peer's own API directly,
+    without needing to visit that peer's login page first.
     See ho_api/federation.py and planning/identite_federee.md.
     """
     @get(f'{prefix}/auth/peers')
@@ -454,11 +460,12 @@ def _make_auth_peers(model, prefix: str):
         import os
         from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
         identity = HoIdentityModels(model)
-        rows = await identity.peer()(trusted=True).ho_aselect('id', 'name', 'url')
+        rows = await identity.peer()(trusted=True).ho_aselect('id', 'name', 'url', 'frontend_url')
         return {
             'peers': rows,
             'local_auth_enabled': os.environ.get('HO_LOCAL_AUTH', 'db') != 'none',
             'local_name': os.environ.get('HO_PEER_NAME') or None,
+            'local_id': os.environ.get('HO_PEER_ID') or None,
         }
     return auth_peers
 

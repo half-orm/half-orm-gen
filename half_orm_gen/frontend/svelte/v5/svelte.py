@@ -186,9 +186,10 @@ class AuthState {{
     accessVersion         = $state(0);
     resourceAccessVersion = $state<Record<string, number>>({{}});
     fetchedRoutes         = new Set<string>();
-    peers                 = $state<{{ id: string; name: string; url: string }}[]>([]);
+    peers                 = $state<{{ id: string; name: string; url: string; frontend_url: string | null }}[]>([]);
     localAuthEnabled      = $state<boolean>(true);
     localPeerName         = $state<string | null>(null);
+    localPeerId           = $state<string | null>(null);
 
     userId = $derived.by(() => {{
         const t = this.token;
@@ -292,12 +293,13 @@ class AuthState {{
             const res = await fetch('{version_prefix}/auth/peers');
             if (res.ok) {{
                 const data = await res.json() as {{
-                    peers: {{ id: string; name: string; url: string }}[];
-                    local_auth_enabled: boolean; local_name: string | null;
+                    peers: {{ id: string; name: string; url: string; frontend_url: string | null }}[];
+                    local_auth_enabled: boolean; local_name: string | null; local_id: string | null;
                 }};
                 this.peers = data.peers ?? [];
                 this.localAuthEnabled = data.local_auth_enabled ?? true;
                 this.localPeerName = data.local_name ?? null;
+                this.localPeerId = data.local_id ?? null;
             }}
         }} catch {{}}
     }}
@@ -305,6 +307,23 @@ class AuthState {{
     loginUrlForPeer(peerId: string): string {{
         const returnTo = `${{window.location.origin}}/auth/callback`;
         return `{version_prefix}/auth/login?peer=${{encodeURIComponent(peerId)}}&return_to=${{encodeURIComponent(returnTo)}}`;
+    }}
+
+    // Navigate to a trusted peer's own frontend, arriving already signed in
+    // when possible — triggers delegation on the TARGET's own API directly
+    // (as if we'd clicked "sign in via <this peer>" on its login page
+    // ourselves), using this peer's own id as the identifier the target
+    // peer's `peer` table was registered under (never a free-text name —
+    // see planning/identite_federee.md section 4bis). Falls back to a
+    // plain link if either side lacks what's needed.
+    federationNavUrl(peer: {{ url: string; frontend_url: string | null }}): string {{
+        // No frontend_url registered for this peer (e.g. it never set
+        // HO_FRONTEND_URL) — no friendly page to land on, best effort is
+        // its bare API origin rather than a guaranteed-broken '.../ho_bo'.
+        if (!peer.frontend_url) return peer.url;
+        if (!this.localPeerId) return `${{peer.frontend_url}}/ho_bo`;
+        const returnTo = `${{peer.frontend_url}}/auth/callback`;
+        return `${{peer.url}}/auth/login?peer=${{encodeURIComponent(this.localPeerId)}}&return_to=${{encodeURIComponent(returnTo)}}`;
     }}
 
     async _reloadAccess(resource?: string) {{
@@ -826,6 +845,8 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   let navFilter  = $state('');
   let menuOpen   = $state(false);
   let newItemsMenuOpen = $state(false);
+  let showFederationNav = $state(false);
+  let showLocalNav      = $state(true);
 
   let searchTerm     = $state('');
   let searchResource = $state('all');
@@ -1046,18 +1067,46 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   </header>
   <div class="flex flex-1 overflow-hidden">
     <aside class="w-max shrink-0 bg-white border-r flex flex-col">
-      <div class="px-2 pt-2 pb-1">
-        <input bind:value={{navFilter}} placeholder="Filter…"
-               class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
+      {{#if auth.peers.length > 0}}
+        <div class="border-b shrink-0">
+          <button onclick={{() => showFederationNav = !showFederationNav}}
+                  class="w-full flex items-center justify-between gap-4 px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:bg-gray-50 transition-colors">
+            Federation
+            <span class="opacity-60">{{showFederationNav ? '▲' : '▼'}}</span>
+          </button>
+          {{#if showFederationNav}}
+            <div class="px-2 pb-2 space-y-0.5">
+              {{#each auth.peers as p (p.id)}}
+                <a href={{auth.federationNavUrl(p)}}
+                   class="block px-3 py-1.5 rounded hover:bg-gray-100 text-sm text-gray-700 truncate">
+                  {{p.name}}
+                </a>
+              {{/each}}
+            </div>
+          {{/if}}
+        </div>
+      {{/if}}
+      <div class="flex flex-col flex-1 overflow-hidden">
+        <button onclick={{() => showLocalNav = !showLocalNav}}
+                class="w-full shrink-0 flex items-center justify-between gap-4 px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:bg-gray-50 transition-colors border-b">
+          {{auth.localPeerName || 'Resources'}}
+          <span class="opacity-60">{{showLocalNav ? '▲' : '▼'}}</span>
+        </button>
+        {{#if showLocalNav}}
+          <div class="px-2 pt-2 pb-1 shrink-0">
+            <input bind:value={{navFilter}} placeholder="Filter…"
+                   class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
+          </div>
+          <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+            {{#each filteredNav as item}}
+              <a href={{item.href}}
+                 class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
+                {{item.label}}
+              </a>
+            {{/each}}
+          </nav>
+        {{/if}}
       </div>
-      <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-        {{#each filteredNav as item}}
-          <a href={{item.href}}
-             class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
-            {{item.label}}
-          </a>
-        {{/each}}
-      </nav>
       <div class="px-4 py-3 border-t flex items-center justify-between">
         <a href="/schema" title="Schema"
            class="transition-colors {{page.url.pathname === '/schema' ? 'text-blue-600' : 'text-gray-400 hover:text-blue-600'}}">

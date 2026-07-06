@@ -50,9 +50,10 @@ export class AuthService {{
   readonly simulatedAccess = signal<Record<string, any> | null>(null);
   readonly effectiveAccess = computed(() => this.simulatedAccess() ?? this.access());
 
-  readonly peers             = signal<{{ id: string; name: string; url: string }}[]>([]);
+  readonly peers             = signal<{{ id: string; name: string; url: string; frontend_url: string | null }}[]>([]);
   readonly localAuthEnabled  = signal<boolean>(true);
   readonly localPeerName     = signal<string | null>(null);
+  readonly localPeerId       = signal<string | null>(null);
 
   readonly userId = computed<string | null>(() => {{
     const t = this.token();
@@ -206,12 +207,13 @@ export class AuthService {{
       const res = await fetch('{version_prefix}/auth/peers');
       if (res.ok) {{
         const data = await res.json() as {{
-          peers: {{ id: string; name: string; url: string }}[];
-          local_auth_enabled: boolean; local_name: string | null;
+          peers: {{ id: string; name: string; url: string; frontend_url: string | null }}[];
+          local_auth_enabled: boolean; local_name: string | null; local_id: string | null;
         }};
         this.peers.set(data.peers ?? []);
         this.localAuthEnabled.set(data.local_auth_enabled ?? true);
         this.localPeerName.set(data.local_name ?? null);
+        this.localPeerId.set(data.local_id ?? null);
       }}
     }} catch {{}}
   }}
@@ -219,6 +221,27 @@ export class AuthService {{
   loginUrlForPeer(peerId: string): string {{
     const returnTo = `${{window.location.origin}}/auth/callback`;
     return `{version_prefix}/auth/login?peer=${{encodeURIComponent(peerId)}}&return_to=${{encodeURIComponent(returnTo)}}`;
+  }}
+
+  /**
+   * Navigate to a trusted peer's own frontend, arriving already signed in
+   * when possible — this triggers delegation on the TARGET's own API
+   * directly (as if we'd clicked "sign in via <this peer>" on its login
+   * page ourselves), using this peer's own id as the identifier the
+   * target peer's `peer` table was registered under (never a free-text
+   * name — see planning/identite_federee.md section 4bis). Falls back to
+   * a plain link if either side lacks what's needed (non-federated peer,
+   * or the target never registered a frontend_url).
+   */
+  federationNavUrl(peer: {{ url: string; frontend_url: string | null }}): string {{
+    // No frontend_url registered for this peer (e.g. it never set
+    // HO_FRONTEND_URL) — no friendly page to land on, best effort is its
+    // bare API origin rather than a guaranteed-broken '.../ho_bo' path.
+    if (!peer.frontend_url) return peer.url;
+    const localId = this.localPeerId();
+    if (!localId) return `${{peer.frontend_url}}/ho_bo`;
+    const returnTo = `${{peer.frontend_url}}/auth/callback`;
+    return `${{peer.url}}/auth/login?peer=${{encodeURIComponent(localId)}}&return_to=${{encodeURIComponent(returnTo)}}`;
   }}
 
   async _reloadAccess(resource?: string): Promise<void> {{
@@ -376,19 +399,47 @@ const API_BASE = '{api_base}';
         </header>
         <div class="flex flex-1 overflow-hidden">
           <aside class="w-max shrink-0 bg-white border-r flex flex-col">
-            <div class="px-2 pt-2 pb-1">
-              <input [value]="navFilter()" (input)="navFilter.set($any($event).target.value)"
-                     placeholder="Filter…"
-                     class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
-            </div>
-            <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-              @for (item of filteredNav(); track item.href) {{
-                <a [routerLink]="item.href" routerLinkActive="bg-gray-100 font-semibold"
-                   class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
-                  {{{{ item.label }}}}
-                </a>
+            @if (auth.peers().length > 0) {{
+              <div class="border-b shrink-0">
+                <button (click)="showFederationNav = !showFederationNav"
+                        class="w-full flex items-center justify-between gap-4 px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:bg-gray-50 transition-colors">
+                  Federation
+                  <span class="opacity-60">{{{{ showFederationNav ? '▲' : '▼' }}}}</span>
+                </button>
+                @if (showFederationNav) {{
+                  <div class="px-2 pb-2 space-y-0.5">
+                    @for (p of auth.peers(); track p.id) {{
+                      <a [href]="auth.federationNavUrl(p)"
+                         class="block px-3 py-1.5 rounded hover:bg-gray-100 text-sm text-gray-700 truncate">
+                        {{{{ p.name }}}}
+                      </a>
+                    }}
+                  </div>
+                }}
+              </div>
+            }}
+            <div class="flex flex-col flex-1 overflow-hidden">
+              <button (click)="showLocalNav = !showLocalNav"
+                      class="w-full shrink-0 flex items-center justify-between gap-4 px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:bg-gray-50 transition-colors border-b">
+                {{{{ auth.localPeerName() || 'Resources' }}}}
+                <span class="opacity-60">{{{{ showLocalNav ? '▲' : '▼' }}}}</span>
+              </button>
+              @if (showLocalNav) {{
+                <div class="px-2 pt-2 pb-1 shrink-0">
+                  <input [value]="navFilter()" (input)="navFilter.set($any($event).target.value)"
+                         placeholder="Filter…"
+                         class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
+                </div>
+                <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+                  @for (item of filteredNav(); track item.href) {{
+                    <a [routerLink]="item.href" routerLinkActive="bg-gray-100 font-semibold"
+                       class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
+                      {{{{ item.label }}}}
+                    </a>
+                  }}
+                </nav>
               }}
-            </nav>
+            </div>
             <div class="px-4 py-3 border-t flex items-center justify-between">
               @if (auth.isAdmin()) {{
                 <a routerLink="/ho_bo/admin" routerLinkActive="text-blue-600"
@@ -435,6 +486,8 @@ export class AppComponent implements OnInit {{
   navFilter  = signal('');
   menuOpen   = false;
   newItemsMenuOpen = false;
+  showFederationNav = false;
+  showLocalNav      = true;
 
   searchTerm     = signal('');
   searchResource = signal('all');
