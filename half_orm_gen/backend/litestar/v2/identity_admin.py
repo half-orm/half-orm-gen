@@ -14,11 +14,20 @@ this is what keeps `name` consistent everywhere (self-declared, not
 locally chosen) and `id` (HO_PEER_ID) usable as a stable cross-peer lookup
 key, instead of a free-text name nobody else agrees on.
 
+The two admins registering each other are not necessarily the same
+person sitting at two browser tabs — the card is displayed so it can be
+sent by whatever channel the two admins actually use (email, chat, ...),
+not just copy-pasted within a single session. It therefore carries a
+short expiry (`expires_at`) so a card that leaks into some semi-public
+channel, or simply sits unused, stops being valid — regenerating one
+costs nothing (just reopen the admin page).
+
 Trust is bilateral but never automatically symmetric: a peer only appears
 here because an admin explicitly pasted its card. Pasting it here says
 nothing about whether that peer has done the same for you.
 """
 import base64
+import datetime
 import json
 import os
 import uuid
@@ -29,6 +38,8 @@ from litestar.exceptions import HTTPException
 
 from half_orm_gen.backend.crud_helpers import _get_roles
 from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
+
+_REGISTRATION_KEY_TTL_SECONDS = 1800  # 30 minutes — long enough to send it out of band
 
 
 def _check_admin(request: Request) -> list[str]:
@@ -46,15 +57,24 @@ def _decode_registration_key(registration_key: str) -> dict[str, Any]:
 
     No signature to verify here — trust comes from the channel the admin
     used to obtain this string from the other peer's admin, not from the
-    encoding itself (see planning/identite_federee.md section 4bis).
+    encoding itself (see planning/identite_federee.md section 4bis). The
+    `expires_at` check is what actually matters security-wise: it bounds
+    how long a card is usable after being generated, regardless of which
+    channel carried it.
     """
     try:
         payload = json.loads(base64.b64decode(registration_key).decode('utf-8'))
     except Exception:
         raise HTTPException(status_code=400, detail='Invalid registration key')
-    missing = [k for k in ('id', 'name', 'url', 'jwt_public_key') if not payload.get(k)]
+    missing = [k for k in ('id', 'name', 'url', 'jwt_public_key', 'expires_at') if not payload.get(k)]
     if missing:
         raise HTTPException(status_code=400, detail=f'Registration key missing: {", ".join(missing)}')
+    try:
+        expires_at = datetime.datetime.fromisoformat(payload['expires_at'])
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail='Registration key has an invalid expiry')
+    if datetime.datetime.now(datetime.timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail='Registration key has expired — ask for a fresh one')
     try:
         payload['id'] = uuid.UUID(payload['id'])
     except (ValueError, TypeError):
@@ -88,10 +108,16 @@ def make_identity_admin_handlers(model, prefix: str) -> list:
         frontend_url = os.environ.get('HO_FRONTEND_URL', '')
 
         export_key = None
+        expires_at = None
         if peer_id and name and url and public_key:
+            expires_at = (
+                datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(seconds=_REGISTRATION_KEY_TTL_SECONDS)
+            ).isoformat()
             card = {
                 'id': peer_id, 'name': name, 'url': url,
                 'frontend_url': frontend_url, 'jwt_public_key': public_key,
+                'expires_at': expires_at,
             }
             export_key = base64.b64encode(json.dumps(card).encode('utf-8')).decode('ascii')
 
@@ -103,6 +129,7 @@ def make_identity_admin_handlers(model, prefix: str) -> list:
             'algorithm': algorithm,
             'public_key': public_key,
             'export_key': export_key,
+            'export_key_expires_at': expires_at,
         }
 
     @get(f'{prefix}/ho_admin/peer')

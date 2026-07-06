@@ -443,7 +443,10 @@ def _make_auth_peers(model, prefix: str):
     via ..." buttons and decide whether to show the email/password form
     (HO_LOCAL_AUTH=none means a federation-only peer, no local sign-in).
     `id` is the peer's own HO_PEER_ID (uuid) — the actual delegation lookup
-    key (see ho_api/federation.py); `name` is display-only.
+    key (see ho_api/federation.py); `name` is display-only. `local_name` is
+    THIS peer's own HO_PEER_NAME (may be unset for a non-federated
+    project) — used to label the local sign-in form ("Sign in on
+    <local_name>") so it isn't confused with the "Sign in via <peer>" list.
     See ho_api/federation.py and planning/identite_federee.md.
     """
     @get(f'{prefix}/auth/peers')
@@ -455,6 +458,7 @@ def _make_auth_peers(model, prefix: str):
         return {
             'peers': rows,
             'local_auth_enabled': os.environ.get('HO_LOCAL_AUTH', 'db') != 'none',
+            'local_name': os.environ.get('HO_PEER_NAME') or None,
         }
     return auth_peers
 

@@ -146,6 +146,21 @@ echo -e "${GREEN}✓ Set HO_PEER_URL for federation${NC}"
 sed -i 's|^HO_PEER_NAME=$|HO_PEER_NAME=blog_demo|' ho_api/.env
 echo -e "${GREEN}✓ Set HO_PEER_NAME for federation${NC}"
 
+# `gen api --federation` always mints a FRESH RSA keypair + HO_PEER_ID —
+# fine normally (scaffolded once, `.env` never overwritten), but `cleanup()`
+# above deletes the whole project dir, so a full `make demo-blog` rebuild
+# would otherwise get a new keypair every time: every session token already
+# in a browser tab fails signature verification against the new public key,
+# forcing a re-login on every rebuild (same class of problem as the
+# HO_JWT_SECRET instability fixed earlier for the non-federated case).
+# Fix: pin a fixed, dev-only keypair + HO_PEER_ID across rebuilds — never
+# do this for a real deployment, only for a demo that gets wiped and
+# regenerated on every test iteration.
+cp "$FIXTURES_DIR/blog_demo_private_key.pem" ho_api/private_key.pem
+cp "$FIXTURES_DIR/blog_demo_public_key.pem" ho_api/public_key.pem
+sed -i 's|^HO_PEER_ID=.*$|HO_PEER_ID=11111111-1111-1111-1111-111111111111|' ho_api/.env
+echo -e "${GREEN}✓ Pinned dev keypair + HO_PEER_ID (stable across rebuilds)${NC}"
+
 # HO_FRONTEND_URL is where /auth/login sends the browser when THIS peer is
 # the identity source for someone else's delegated login (the frontend
 # shows the ordinary login form, then forwards the resulting token). Both
@@ -318,7 +333,7 @@ from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
 from ho_api.local_auth import authenticate
 
 
-def _sign(user_id: str, roles: list[str]) -> str:
+def _sign(user_id: str, roles: list[str], name: str | None = None, email: str | None = None) -> str:
     algorithm = os.environ.get('HO_JWT_ALGORITHM', 'HS256')
     if algorithm == 'RS256':
         cur_dir = os.path.dirname(os.path.abspath(__file__))
@@ -327,7 +342,15 @@ def _sign(user_id: str, roles: list[str]) -> str:
             key = f.read()
     else:
         key = os.environ['HO_JWT_SECRET']
-    return jwt.encode({'sub': user_id, 'roles': roles}, key, algorithm=algorithm)
+    payload = {'sub': user_id, 'roles': roles}
+    # name/email are only used by a peer we later delegate to (federation_callback
+    # reads them to fill in a brand new "half_orm_meta.identity"."user" row it
+    # creates for someone it's never seen before) — harmless extra claims here.
+    if name:
+        payload['name'] = name
+    if email:
+        payload['email'] = email
+    return jwt.encode(payload, key, algorithm=algorithm)
 
 
 @post('/auth/signup')
@@ -355,7 +378,7 @@ async def signup(data: dict) -> dict:
     role_name = 'admin' if not admin_exists else 'connected'
     await api.user_role()(user_id=user_id, role_name=role_name).ho_ainsert()
 
-    return {'token': _sign(user_id, [role_name])}
+    return {'token': _sign(user_id, [role_name], name, email)}
 
 
 @post('/auth/login')
@@ -368,10 +391,13 @@ async def login(data: dict) -> dict:
     user_id = await authenticate(MODEL, email, password)
     if not user_id:
         raise HTTPException(status_code=401, detail='Invalid email or password')
+    identity = HoIdentityModels(MODEL)
+    user_rows = await identity.user()(id=user_id).ho_aselect('name')
+    name = user_rows[0]['name'] if user_rows else None
     api = HoApiModels(MODEL)
     role_rows = await api.user_role()(user_id=user_id).ho_aselect('role_name')
     roles = [r['role_name'] for r in role_rows] or ['connected']
-    return {'token': _sign(user_id, roles)}
+    return {'token': _sign(user_id, roles, name, email)}
 
 
 @get('/ho_users')

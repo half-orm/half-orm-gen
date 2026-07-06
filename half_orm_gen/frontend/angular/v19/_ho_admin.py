@@ -30,6 +30,7 @@ interface PeerInfo {{ id: string; name: string; url: string; frontend_url: strin
 interface SelfPeerInfo {{
   id: string; name: string; url: string; frontend_url: string | null;
   algorithm: string; public_key: string | null; export_key: string | null;
+  export_key_expires_at: string | null;
 }}
 type Catalog = Record<string, ResourceInfo>;
 
@@ -118,6 +119,9 @@ const VERB_COLOR: Record<string, string> = {{
                       class="w-full text-[10px] text-blue-600 hover:text-blue-800 font-semibold border border-blue-200 rounded py-1 hover:bg-blue-50 transition-colors">
                 {{{{ copiedSelfKey() ? 'Copied!' : 'Copy registration key' }}}}
               </button>
+              <div class="text-[9px] text-gray-400">
+                Valid 30 min from copy — send it to the other admin by email, chat, etc.
+              </div>
             }} @else if (sp.algorithm === 'RS256') {{
               <div class="text-[10px] text-amber-500">Set HO_PEER_NAME and HO_PEER_URL to enable</div>
             }} @else {{
@@ -160,18 +164,41 @@ const VERB_COLOR: Record<string, string> = {{
               <button (click)="showNewPeer.set(false)" class="text-gray-400 hover:text-gray-600 leading-none text-lg">✕</button>
             </div>
             <p class="text-sm text-gray-500 mb-4">
-              Paste the registration key from the other peer's own "This peer" card
-              (its <code class="text-xs bg-gray-100 px-1 rounded">/ho_bo/admin</code> page) — it carries
-              that peer's name, URL and public key, nothing to type by hand.
+              Paste the registration key the other peer's admin sent you (email, chat, …) —
+              copied from their own "This peer" card
+              (<code class="text-xs bg-gray-100 px-1 rounded">/ho_bo/admin</code> on their side). It carries
+              that peer's name, URL and public key, nothing to type by hand — but it expires
+              30 minutes after being copied, so ask for a fresh one if this fails.
             </p>
             <textarea [value]="newPeerRegistrationKey()" (input)="newPeerRegistrationKey.set($any($event.target).value)"
                       placeholder="Paste registration key…" rows="6"
                       class="w-full text-xs border rounded px-3 py-2 font-mono mb-3"></textarea>
+
+            @if (newPeerRegistrationKey().trim() && !decodedPeerCard()) {{
+              <p class="text-sm text-red-500 mb-3">Doesn't look like a valid registration key.</p>
+            }} @else if (decodedPeerCard(); as card) {{
+              <div class="border rounded-lg p-3 mb-3 bg-gray-50 text-sm space-y-1">
+                <div class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                  You are about to register
+                </div>
+                <div><span class="text-gray-400">Name</span> — <span class="font-semibold text-gray-800">{{{{ card.name }}}}</span></div>
+                <div><span class="text-gray-400">URL</span> — <span class="font-mono text-xs text-gray-700">{{{{ card.url }}}}</span></div>
+                @if (card.frontend_url) {{
+                  <div><span class="text-gray-400">Frontend</span> — <span class="font-mono text-xs text-gray-700">{{{{ card.frontend_url }}}}</span></div>
+                }}
+                <div><span class="text-gray-400">Id</span> — <span class="font-mono text-xs text-gray-700">{{{{ card.id }}}}</span></div>
+                @if (decodedPeerCardExpired()) {{
+                  <div class="text-red-500 text-xs font-semibold pt-1">⚠ Expired — ask for a fresh key</div>
+                }}
+              </div>
+            }}
+
             @if (newPeerError()) {{
               <p class="text-sm text-red-500 mb-3">{{{{ newPeerError() }}}}</p>
             }}
             <button (click)="createPeer()"
-                    class="bg-blue-600 text-white text-sm rounded px-4 py-2 hover:bg-blue-700 transition-colors">
+                    [disabled]="!decodedPeerCard() || decodedPeerCardExpired()"
+                    class="bg-blue-600 text-white text-sm rounded px-4 py-2 hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
               Register peer
             </button>
           </div>
@@ -430,6 +457,24 @@ export class HoAdminComponent implements OnInit {{
   readonly newPeerRegistrationKey = signal('');
   readonly newPeerError          = signal('');
 
+  readonly decodedPeerCard = computed<{{
+    id?: string; name?: string; url?: string; frontend_url?: string; expires_at?: string;
+  }} | null>(() => {{
+    const raw = this.newPeerRegistrationKey().trim();
+    if (!raw) return null;
+    try {{
+      const card = JSON.parse(atob(raw));
+      return (card && typeof card === 'object' && card.id && card.name && card.url) ? card : null;
+    }} catch {{
+      return null;
+    }}
+  }});
+
+  readonly decodedPeerCardExpired = computed<boolean>(() => {{
+    const expiresAt = this.decodedPeerCard()?.expires_at;
+    return !!expiresAt && new Date(expiresAt).getTime() < Date.now();
+  }});
+
   readonly verbs = ['GET', 'POST', 'PUT', 'DELETE'] as const;
 
   readonly catalogEntries = computed(() => {{
@@ -534,6 +579,11 @@ export class HoAdminComponent implements OnInit {{
   }}
 
   async copySelfExportKey(): Promise<void> {{
+    // Refetch right before copying — export_key's expiry starts from when
+    // it was generated, not when it's copied, so a card loaded long ago
+    // (tab left open) would otherwise already be burning down its 30 min.
+    const res = await fetch('{version_prefix}/ho_admin/peer/self', {{headers: this._hdrs}});
+    if (res.ok) this.selfPeer.set(await res.json() as SelfPeerInfo);
     const key = this.selfPeer()?.export_key;
     if (!key) return;
     await navigator.clipboard.writeText(key);

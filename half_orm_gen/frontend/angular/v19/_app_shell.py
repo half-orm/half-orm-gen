@@ -52,6 +52,7 @@ export class AuthService {{
 
   readonly peers             = signal<{{ id: string; name: string; url: string }}[]>([]);
   readonly localAuthEnabled  = signal<boolean>(true);
+  readonly localPeerName     = signal<string | null>(null);
 
   readonly userId = computed<string | null>(() => {{
     const t = this.token();
@@ -204,9 +205,13 @@ export class AuthService {{
     try {{
       const res = await fetch('{version_prefix}/auth/peers');
       if (res.ok) {{
-        const data = await res.json() as {{ peers: {{ id: string; name: string; url: string }}[]; local_auth_enabled: boolean }};
+        const data = await res.json() as {{
+          peers: {{ id: string; name: string; url: string }}[];
+          local_auth_enabled: boolean; local_name: string | null;
+        }};
         this.peers.set(data.peers ?? []);
         this.localAuthEnabled.set(data.local_auth_enabled ?? true);
+        this.localPeerName.set(data.local_name ?? null);
       }}
     }} catch {{}}
   }}
@@ -806,41 +811,34 @@ import { AuthService } from '../../core/auth.service';
       @if (auth.token()) {
         <p class="text-gray-500">Signed in as <span class="font-semibold text-gray-700">{{ auth.displayName() }}</span></p>
         <p class="text-gray-400">Select a resource from the sidebar.</p>
-      } @else {
+      } @else if (auth.hasAdmin() === false) {
         <div class="w-80 bg-white border rounded-lg shadow-sm p-5">
-          @if (auth.hasAdmin() === false) {
-            <p class="text-sm font-semibold text-gray-700 mb-3">Create admin account</p>
-            <input (input)="signupName.set($any($event).target.value)"
-                   [value]="signupName()" placeholder="Name"
-                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            <input (input)="signupEmail.set($any($event).target.value)"
-                   [value]="signupEmail()" placeholder="Email" type="email"
-                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            <input (input)="signupPassword.set($any($event).target.value)"
-                   [value]="signupPassword()" placeholder="Password" type="password"
-                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            @if (authError()) {
-              <p class="text-xs text-red-500 mb-1">{{ authError() }}</p>
-            }
-            <button (click)="doSignup()"
-                    class="w-full text-sm bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
-              Create account
-            </button>
-          } @else {
-            @if (auth.peers().length > 0) {
-              <p class="text-sm font-semibold text-gray-700 mb-2">Sign in via</p>
-              <div class="space-y-1 mb-4">
-                @for (p of auth.peers(); track p.id) {
-                  <a [href]="auth.loginUrlForPeer(p.id)"
-                     class="block w-full text-sm text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
-                    {{ p.name }}
-                  </a>
-                }
-              </div>
-            }
-            @if (auth.localAuthEnabled()) {
+          <p class="text-sm font-semibold text-gray-700 mb-3">Create admin account</p>
+          <input (input)="signupName.set($any($event).target.value)"
+                 [value]="signupName()" placeholder="Name"
+                 class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+          <input (input)="signupEmail.set($any($event).target.value)"
+                 [value]="signupEmail()" placeholder="Email" type="email"
+                 class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+          <input (input)="signupPassword.set($any($event).target.value)"
+                 [value]="signupPassword()" placeholder="Password" type="password"
+                 class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+          @if (authError()) {
+            <p class="text-xs text-red-500 mb-1">{{ authError() }}</p>
+          }
+          <button (click)="doSignup()"
+                  class="w-full text-sm bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
+            Create account
+          </button>
+        </div>
+      } @else {
+        <div class="w-full max-w-2xl flex flex-col sm:flex-row gap-6 items-start justify-center px-4">
+          @if (auth.localAuthEnabled()) {
+            <div class="order-1 w-full sm:w-80 bg-white border rounded-lg shadow-sm p-5">
               @if (!showSignup()) {
-                <p class="text-sm font-semibold text-gray-700 mb-3">Sign in</p>
+                <p class="text-sm font-semibold text-gray-700 mb-3">
+                  {{ auth.localPeerName() ? 'Sign in on ' + auth.localPeerName() : 'Sign in' }}
+                </p>
                 <input (input)="loginEmail.set($any($event).target.value)"
                        [value]="loginEmail()" placeholder="Email" type="email"
                        class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
@@ -882,7 +880,20 @@ import { AuthService } from '../../core/auth.service';
                   Back to sign in
                 </button>
               }
-            }
+            </div>
+          }
+          @if (auth.peers().length > 0) {
+            <div class="order-2 w-full sm:w-64 bg-white border rounded-lg shadow-sm p-5">
+              <p class="text-sm font-semibold text-gray-700 mb-2">Sign in via</p>
+              <div class="space-y-1">
+                @for (p of auth.peers(); track p.id) {
+                  <a [href]="auth.loginUrlForPeer(p.id)"
+                     class="block w-full text-sm text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
+                    {{ p.name }}
+                  </a>
+                }
+              </div>
+            </div>
           }
         </div>
       }
