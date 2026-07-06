@@ -263,13 +263,20 @@ HO_IDENTITY_DDL = """\
 CREATE SCHEMA IF NOT EXISTS "half_orm_meta.identity";
 
 CREATE TABLE IF NOT EXISTS "half_orm_meta.identity".peer (
-  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name           text NOT NULL UNIQUE,
+  id             uuid PRIMARY KEY,
+  name           text NOT NULL,
   url            text NOT NULL,
+  frontend_url   text,
   jwt_public_key text,
   trusted        boolean NOT NULL DEFAULT TRUE,
   created_at     timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- id: NOT locally generated (no DEFAULT) — it's the peer's OWN self-declared
+-- HO_PEER_ID, received via its registration card (planning/identite_federee.md
+-- section 4bis), so it can be used as the lookup key in delegation URLs
+-- without depending on the free-text `name` this admin happened to type.
+-- frontend_url: this peer's frontend base URL (no API version prefix),
+-- used for cross-site navigation — distinct from `url`, the API base.
 
 CREATE TABLE IF NOT EXISTS "half_orm_meta.identity"."user" (
   id             uuid PRIMARY KEY,

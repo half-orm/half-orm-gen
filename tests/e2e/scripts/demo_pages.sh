@@ -106,6 +106,11 @@ half_orm gen api --litestar --federation
 sed -i 's|^HO_PEER_URL=$|HO_PEER_URL=http://localhost:8001/v0|' ho_api/.env
 echo -e "${GREEN}✓ Set HO_PEER_URL for federation${NC}"
 
+# HO_PEER_NAME is this project's own self-declared name — see demo_blog.sh
+# for the same convention (planning/identite_federee.md section 4bis).
+sed -i 's|^HO_PEER_NAME=$|HO_PEER_NAME=pages_demo|' ho_api/.env
+echo -e "${GREEN}✓ Set HO_PEER_NAME for federation${NC}"
+
 # HO_FRONTEND_URL is where /auth/login sends the browser when THIS peer is
 # the identity source for someone else's delegated login. Angular (port
 # 4300 here) is the frontend used as the federation entry point — see

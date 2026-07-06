@@ -314,15 +314,24 @@ demo-federate:  ## Enregistre blog_demo et pages_demo comme peers de confiance m
 	@# psql only performs :'var' substitution on statements it *reads* (stdin/-f) —
 	@# not on a -c argument (that's fed straight to the server, unparsed) — so the
 	@# SQL is piped in via stdin rather than passed with -c.
-	@# url must include the API version prefix (/v0, `gen api`'s default
-	@# api_version) — federation.py's routes are mounted under it like every
-	@# other route, so a bare origin here 404s on the cross-peer redirect.
-	@BLOG_KEY=$$(cat $(DEMO_DIR)/ho_api/public_key.pem); \
-	printf '%s\n' "INSERT INTO \"half_orm_meta.identity\".peer (name, url, jwt_public_key) VALUES ('blog_demo', :'blog_url', :'blog_key') ON CONFLICT (name) DO UPDATE SET url = EXCLUDED.url, jwt_public_key = EXCLUDED.jwt_public_key;" \
-	  | psql pages_demo -v blog_key="$$BLOG_KEY" -v blog_url='http://localhost:8000/v0'
-	@PAGES_KEY=$$(cat $(PAGES_DEMO_DIR)/ho_api/public_key.pem); \
-	printf '%s\n' "INSERT INTO \"half_orm_meta.identity\".peer (name, url, jwt_public_key) VALUES ('pages_demo', :'pages_url', :'pages_key') ON CONFLICT (name) DO UPDATE SET url = EXCLUDED.url, jwt_public_key = EXCLUDED.jwt_public_key;" \
-	  | psql blog_demo -v pages_key="$$PAGES_KEY" -v pages_url='http://localhost:8001/v0'
+	@# id/name/url/frontend_url come straight from each project's own .env —
+	@# never hardcoded — since peer.id has no DEFAULT: it must be the OTHER
+	@# project's own HO_PEER_ID, not a locally generated uuid, and name is
+	@# self-declared (HO_PEER_NAME), not chosen here (identite_federee.md §4bis).
+	@BLOG_ID=$$(grep '^HO_PEER_ID=' $(DEMO_DIR)/ho_api/.env | cut -d= -f2-); \
+	BLOG_NAME=$$(grep '^HO_PEER_NAME=' $(DEMO_DIR)/ho_api/.env | cut -d= -f2-); \
+	BLOG_URL=$$(grep '^HO_PEER_URL=' $(DEMO_DIR)/ho_api/.env | cut -d= -f2-); \
+	BLOG_FRONTEND_URL=$$(grep '^HO_FRONTEND_URL=' $(DEMO_DIR)/ho_api/.env | cut -d= -f2-); \
+	BLOG_KEY=$$(cat $(DEMO_DIR)/ho_api/public_key.pem); \
+	printf '%s\n' "INSERT INTO \"half_orm_meta.identity\".peer (id, name, url, frontend_url, jwt_public_key) VALUES (:'blog_id', :'blog_name', :'blog_url', :'blog_frontend_url', :'blog_key') ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, url = EXCLUDED.url, frontend_url = EXCLUDED.frontend_url, jwt_public_key = EXCLUDED.jwt_public_key;" \
+	  | psql pages_demo -v blog_id="$$BLOG_ID" -v blog_name="$$BLOG_NAME" -v blog_url="$$BLOG_URL" -v blog_frontend_url="$$BLOG_FRONTEND_URL" -v blog_key="$$BLOG_KEY"
+	@PAGES_ID=$$(grep '^HO_PEER_ID=' $(PAGES_DEMO_DIR)/ho_api/.env | cut -d= -f2-); \
+	PAGES_NAME=$$(grep '^HO_PEER_NAME=' $(PAGES_DEMO_DIR)/ho_api/.env | cut -d= -f2-); \
+	PAGES_URL=$$(grep '^HO_PEER_URL=' $(PAGES_DEMO_DIR)/ho_api/.env | cut -d= -f2-); \
+	PAGES_FRONTEND_URL=$$(grep '^HO_FRONTEND_URL=' $(PAGES_DEMO_DIR)/ho_api/.env | cut -d= -f2-); \
+	PAGES_KEY=$$(cat $(PAGES_DEMO_DIR)/ho_api/public_key.pem); \
+	printf '%s\n' "INSERT INTO \"half_orm_meta.identity\".peer (id, name, url, frontend_url, jwt_public_key) VALUES (:'pages_id', :'pages_name', :'pages_url', :'pages_frontend_url', :'pages_key') ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, url = EXCLUDED.url, frontend_url = EXCLUDED.frontend_url, jwt_public_key = EXCLUDED.jwt_public_key;" \
+	  | psql blog_demo -v pages_id="$$PAGES_ID" -v pages_name="$$PAGES_NAME" -v pages_url="$$PAGES_URL" -v pages_frontend_url="$$PAGES_FRONTEND_URL" -v pages_key="$$PAGES_KEY"
 	@echo "Registered blog_demo <-> pages_demo as trusted peers"
 	psql pages_demo -f fixtures/pages_demo_data.sql
 	@echo "Loaded fixtures/pages_demo_data.sql (pre-seeded identities + wiki pages)"

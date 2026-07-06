@@ -26,8 +26,11 @@ interface ResourceInfo {{
   access: Record<string, Record<string, AccessEntry>>;
 }}
 interface RoleInfo {{ name: string; deletable: boolean; kind: 'system' | 'dynamic' | 'user'; parent_name: string | null; }}
-interface PeerInfo {{ id: string; name: string; url: string; jwt_public_key: string | null; trusted: boolean; }}
-interface SelfPeerInfo {{ url: string; algorithm: string; public_key: string | null; }}
+interface PeerInfo {{ id: string; name: string; url: string; frontend_url: string | null; jwt_public_key: string | null; trusted: boolean; }}
+interface SelfPeerInfo {{
+  id: string; name: string; url: string; frontend_url: string | null;
+  algorithm: string; public_key: string | null; export_key: string | null;
+}}
 type Catalog = Record<string, ResourceInfo>;
 
 const VERB_COLOR: Record<string, string> = {{
@@ -108,32 +111,18 @@ const VERB_COLOR: Record<string, string> = {{
         @if (selfPeer(); as sp) {{
           <div class="px-3 py-2 border-b bg-gray-50 space-y-1">
             <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">This peer</div>
+            <div class="text-[10px] text-gray-700 truncate" [title]="sp.name">{{{{ sp.name || '(HO_PEER_NAME not set)' }}}}</div>
             <div class="text-[10px] text-gray-500 truncate" [title]="sp.url">{{{{ sp.url || '(HO_PEER_URL not set)' }}}}</div>
-            @if (sp.algorithm === 'RS256' && sp.public_key) {{
-              <div class="flex items-center justify-between">
-                <span class="text-[10px] text-gray-400">Public key — share with trusted peers</span>
-                <button (click)="copySelfPublicKey()" class="text-[10px] text-blue-600 hover:text-blue-800 font-semibold">
-                  {{{{ copiedSelfKey() ? 'Copied!' : 'Copy' }}}}
-                </button>
-              </div>
-              <textarea readonly rows="3" (click)="$any($event.target).select()"
-                        class="w-full text-[9px] border rounded px-2 py-1 font-mono bg-white text-gray-500">{{{{ sp.public_key }}}}</textarea>
+            @if (sp.export_key) {{
+              <button (click)="copySelfExportKey()"
+                      class="w-full text-[10px] text-blue-600 hover:text-blue-800 font-semibold border border-blue-200 rounded py-1 hover:bg-blue-50 transition-colors">
+                {{{{ copiedSelfKey() ? 'Copied!' : 'Copy registration key' }}}}
+              </button>
+            }} @else if (sp.algorithm === 'RS256') {{
+              <div class="text-[10px] text-amber-500">Set HO_PEER_NAME and HO_PEER_URL to enable</div>
             }} @else {{
               <div class="text-[10px] text-amber-500">HS256 — no federation key (set HO_JWT_ALGORITHM=RS256 to federate)</div>
             }}
-          </div>
-        }}
-        @if (showNewPeer()) {{
-          <div class="px-3 py-2 border-b bg-gray-50 space-y-1.5">
-            <input [value]="newPeerName()" (input)="newPeerName.set($any($event.target).value)"
-                   placeholder="Peer name" class="w-full text-xs border rounded px-2 py-1" />
-            <input [value]="newPeerUrl()" (input)="newPeerUrl.set($any($event.target).value)"
-                   placeholder="https://peer.example.com" class="w-full text-xs border rounded px-2 py-1" />
-            <textarea [value]="newPeerPublicKey()" (input)="newPeerPublicKey.set($any($event.target).value)"
-                      placeholder="-----BEGIN PUBLIC KEY-----" rows="3"
-                      class="w-full text-xs border rounded px-2 py-1 font-mono"></textarea>
-            <button (click)="createPeer()"
-                    class="w-full text-xs bg-blue-600 text-white rounded py-1 hover:bg-blue-700">Register peer</button>
           </div>
         }}
         <div class="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-1">
@@ -162,9 +151,31 @@ const VERB_COLOR: Record<string, string> = {{
 
       </div>
 
-      <!-- Centre: access matrix with inline field editors -->
+      <!-- Centre: access matrix with inline field editors, or the peer registration panel -->
       <div class="flex-1 overflow-y-auto p-6">
-        @if (!selectedRole()) {{
+        @if (showNewPeer()) {{
+          <div class="max-w-xl">
+            <div class="flex items-center justify-between mb-5">
+              <h1 class="text-xl font-bold">Register a peer</h1>
+              <button (click)="showNewPeer.set(false)" class="text-gray-400 hover:text-gray-600 leading-none text-lg">✕</button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">
+              Paste the registration key from the other peer's own "This peer" card
+              (its <code class="text-xs bg-gray-100 px-1 rounded">/ho_bo/admin</code> page) — it carries
+              that peer's name, URL and public key, nothing to type by hand.
+            </p>
+            <textarea [value]="newPeerRegistrationKey()" (input)="newPeerRegistrationKey.set($any($event.target).value)"
+                      placeholder="Paste registration key…" rows="6"
+                      class="w-full text-xs border rounded px-3 py-2 font-mono mb-3"></textarea>
+            @if (newPeerError()) {{
+              <p class="text-sm text-red-500 mb-3">{{{{ newPeerError() }}}}</p>
+            }}
+            <button (click)="createPeer()"
+                    class="bg-blue-600 text-white text-sm rounded px-4 py-2 hover:bg-blue-700 transition-colors">
+              Register peer
+            </button>
+          </div>
+        }} @else if (!selectedRole()) {{
           <p class="text-gray-400 text-sm mt-16 text-center">Select a role to manage its access rights.</p>
         }} @else if (loading()) {{
           <p class="text-gray-400 text-sm mt-16 text-center">Loading…</p>
@@ -412,13 +423,12 @@ export class HoAdminComponent implements OnInit {{
   readonly newRoleName  = signal('');
   readonly newRoleParent = signal('connected');
 
-  readonly peers            = signal<PeerInfo[]>([]);
-  readonly selfPeer         = signal<SelfPeerInfo | null>(null);
-  readonly copiedSelfKey    = signal(false);
-  readonly showNewPeer      = signal(false);
-  readonly newPeerName      = signal('');
-  readonly newPeerUrl       = signal('');
-  readonly newPeerPublicKey = signal('');
+  readonly peers                 = signal<PeerInfo[]>([]);
+  readonly selfPeer              = signal<SelfPeerInfo | null>(null);
+  readonly copiedSelfKey         = signal(false);
+  readonly showNewPeer           = signal(false);
+  readonly newPeerRegistrationKey = signal('');
+  readonly newPeerError          = signal('');
 
   readonly verbs = ['GET', 'POST', 'PUT', 'DELETE'] as const;
 
@@ -523,8 +533,8 @@ export class HoAdminComponent implements OnInit {{
     if (res.ok) this.peers.set(await res.json() as PeerInfo[]);
   }}
 
-  async copySelfPublicKey(): Promise<void> {{
-    const key = this.selfPeer()?.public_key;
+  async copySelfExportKey(): Promise<void> {{
+    const key = this.selfPeer()?.export_key;
     if (!key) return;
     await navigator.clipboard.writeText(key);
     this.copiedSelfKey.set(true);
@@ -532,20 +542,19 @@ export class HoAdminComponent implements OnInit {{
   }}
 
   async createPeer(): Promise<void> {{
-    const name = this.newPeerName().trim();
-    const url  = this.newPeerUrl().trim();
-    if (!name || !url) return;
-    await fetch('{version_prefix}/ho_admin/peer', {{
+    const registration_key = this.newPeerRegistrationKey().trim();
+    if (!registration_key) return;
+    this.newPeerError.set('');
+    const res = await fetch('{version_prefix}/ho_admin/peer', {{
       method: 'POST',
       headers: {{...this._hdrs, 'Content-Type': 'application/json'}},
-      body: JSON.stringify({{
-        name, url,
-        jwt_public_key: this.newPeerPublicKey().trim() || null,
-      }}),
+      body: JSON.stringify({{registration_key}}),
     }});
-    this.newPeerName.set('');
-    this.newPeerUrl.set('');
-    this.newPeerPublicKey.set('');
+    if (!res.ok) {{
+      this.newPeerError.set(((await res.json()) as any).detail ?? 'Registration failed');
+      return;
+    }}
+    this.newPeerRegistrationKey.set('');
     this.showNewPeer.set(false);
     await this._loadPeers();
   }}

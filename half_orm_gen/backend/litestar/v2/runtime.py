@@ -437,11 +437,13 @@ def _make_ho_access(access_map_holder: list, parent_map_holder: list, model, pre
 
 
 def _make_auth_peers(model, prefix: str):
-    """Return trusted peers (name, url) + whether local DB auth is enabled.
+    """Return trusted peers (id, name, url) + whether local DB auth is enabled.
 
     Public, unauthenticated — used by the login page to render "sign in
     via ..." buttons and decide whether to show the email/password form
     (HO_LOCAL_AUTH=none means a federation-only peer, no local sign-in).
+    `id` is the peer's own HO_PEER_ID (uuid) — the actual delegation lookup
+    key (see ho_api/federation.py); `name` is display-only.
     See ho_api/federation.py and planning/identite_federee.md.
     """
     @get(f'{prefix}/auth/peers')
@@ -449,7 +451,7 @@ def _make_auth_peers(model, prefix: str):
         import os
         from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
         identity = HoIdentityModels(model)
-        rows = await identity.peer()(trusted=True).ho_aselect('name', 'url')
+        rows = await identity.peer()(trusted=True).ho_aselect('id', 'name', 'url')
         return {
             'peers': rows,
             'local_auth_enabled': os.environ.get('HO_LOCAL_AUTH', 'db') != 'none',

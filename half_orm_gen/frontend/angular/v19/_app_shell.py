@@ -50,7 +50,7 @@ export class AuthService {{
   readonly simulatedAccess = signal<Record<string, any> | null>(null);
   readonly effectiveAccess = computed(() => this.simulatedAccess() ?? this.access());
 
-  readonly peers             = signal<{{ name: string; url: string }}[]>([]);
+  readonly peers             = signal<{{ id: string; name: string; url: string }}[]>([]);
   readonly localAuthEnabled  = signal<boolean>(true);
 
   readonly userId = computed<string | null>(() => {{
@@ -204,16 +204,16 @@ export class AuthService {{
     try {{
       const res = await fetch('{version_prefix}/auth/peers');
       if (res.ok) {{
-        const data = await res.json() as {{ peers: {{ name: string; url: string }}[]; local_auth_enabled: boolean }};
+        const data = await res.json() as {{ peers: {{ id: string; name: string; url: string }}[]; local_auth_enabled: boolean }};
         this.peers.set(data.peers ?? []);
         this.localAuthEnabled.set(data.local_auth_enabled ?? true);
       }}
     }} catch {{}}
   }}
 
-  loginUrlForPeer(name: string): string {{
+  loginUrlForPeer(peerId: string): string {{
     const returnTo = `${{window.location.origin}}/auth/callback`;
-    return `{version_prefix}/auth/login?peer=${{encodeURIComponent(name)}}&return_to=${{encodeURIComponent(returnTo)}}`;
+    return `{version_prefix}/auth/login?peer=${{encodeURIComponent(peerId)}}&return_to=${{encodeURIComponent(returnTo)}}`;
   }}
 
   async _reloadAccess(resource?: string): Promise<void> {{
@@ -830,8 +830,8 @@ import { AuthService } from '../../core/auth.service';
             @if (auth.peers().length > 0) {
               <p class="text-sm font-semibold text-gray-700 mb-2">Sign in via</p>
               <div class="space-y-1 mb-4">
-                @for (p of auth.peers(); track p.name) {
-                  <a [href]="auth.loginUrlForPeer(p.name)"
+                @for (p of auth.peers(); track p.id) {
+                  <a [href]="auth.loginUrlForPeer(p.id)"
                      class="block w-full text-sm text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
                     {{ p.name }}
                   </a>
