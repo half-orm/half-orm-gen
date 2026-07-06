@@ -322,102 +322,30 @@ const API_BASE = '{api_base}';
             </div>
           }}
           <div class="flex items-center gap-2 shrink-0">
-          <div class="relative shrink-0">
-            <button (click)="menuOpen = !menuOpen; $event.stopPropagation()"
-                    [class]="'flex items-center gap-1 text-xs px-3 py-1 rounded-full border transition-colors ' +
-                             (auth.token() ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                                          : 'border-gray-300 text-gray-500 hover:bg-gray-50')">
-              {{{{ auth.displayName() }}}}
-              <span class="opacity-60">{{{{ menuOpen ? '▲' : '▼' }}}}</span>
-            </button>
-            @if (menuOpen) {{
-              <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 w-64 p-3"
-                   (click)="$event.stopPropagation()">
-                @if (auth.token()) {{
+          @if (auth.token()) {{
+            <div class="relative shrink-0">
+              <button (click)="menuOpen = !menuOpen; $event.stopPropagation()"
+                      class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border transition-colors border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">
+                {{{{ auth.displayName() }}}}
+                <span class="opacity-60">{{{{ menuOpen ? '▲' : '▼' }}}}</span>
+              </button>
+              @if (menuOpen) {{
+                <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 w-64 p-3"
+                     (click)="$event.stopPropagation()">
                   <p class="text-xs text-gray-500 mb-2">Signed in as <strong>{{{{ auth.displayName() }}}}</strong></p>
                   <button (click)="logout()"
                           class="w-full text-left px-2 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded transition-colors">
                     Sign out
                   </button>
-                }} @else if (auth.hasAdmin() === false) {{
-                  <p class="text-xs font-semibold text-gray-700 mb-3">Create admin account</p>
-                  <input (input)="signupName.set($any($event).target.value)"
-                         [value]="signupName()" placeholder="Name"
-                         class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                  <input (input)="signupEmail.set($any($event).target.value)"
-                         [value]="signupEmail()" placeholder="Email" type="email"
-                         class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                  <input (input)="signupPassword.set($any($event).target.value)"
-                         [value]="signupPassword()" placeholder="Password" type="password"
-                         class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                  @if (authError()) {{
-                    <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
-                  }}
-                  <button (click)="doSignup()"
-                          class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
-                    Create account
-                  </button>
-                }} @else {{
-                  @if (auth.peers().length > 0) {{
-                    <p class="text-xs font-semibold text-gray-700 mb-2">Sign in via</p>
-                    <div class="space-y-1 mb-3">
-                      @for (p of auth.peers(); track p.name) {{
-                        <a [href]="auth.loginUrlForPeer(p.name)"
-                           class="block w-full text-xs text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
-                          {{{{ p.name }}}}
-                        </a>
-                      }}
-                    </div>
-                  }}
-                  @if (auth.localAuthEnabled()) {{
-                    @if (!showSignup()) {{
-                      <p class="text-xs font-semibold text-gray-700 mb-3">Sign in</p>
-                      <input (input)="loginEmail.set($any($event).target.value)"
-                             [value]="loginEmail()" placeholder="Email" type="email"
-                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                      <input (input)="loginPassword.set($any($event).target.value)"
-                             [value]="loginPassword()" placeholder="Password" type="password"
-                             (keydown.enter)="doLogin()"
-                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                      @if (authError()) {{
-                        <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
-                      }}
-                      <button (click)="doLogin()"
-                              class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
-                        Sign in
-                      </button>
-                      <button (click)="showSignup.set(true); authError.set('')"
-                              class="w-full text-xs text-blue-500 hover:underline">
-                        Create account
-                      </button>
-                    }} @else {{
-                      <p class="text-xs font-semibold text-gray-700 mb-3">Create account</p>
-                      <input (input)="signupName.set($any($event).target.value)"
-                             [value]="signupName()" placeholder="Name"
-                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                      <input (input)="signupEmail.set($any($event).target.value)"
-                             [value]="signupEmail()" placeholder="Email" type="email"
-                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                      <input (input)="signupPassword.set($any($event).target.value)"
-                             [value]="signupPassword()" placeholder="Password" type="password"
-                             class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                      @if (authError()) {{
-                        <p class="text-xs text-red-500 mb-1">{{{{ authError() }}}}</p>
-                      }}
-                      <button (click)="doSignup()"
-                              class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
-                        Create account
-                      </button>
-                      <button (click)="showSignup.set(false); authError.set('')"
-                              class="w-full text-xs text-gray-400 hover:underline">
-                        Back to sign in
-                      </button>
-                    }}
-                  }}
-                }}
-              </div>
-            }}
-          </div>
+                </div>
+              }}
+            </div>
+          }} @else {{
+            <a routerLink="/login"
+               class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border border-gray-300 text-gray-500 hover:bg-gray-50 transition-colors">
+              Sign in
+            </a>
+          }}
           @if (totalNewCount() > 0) {{
             <div class="relative shrink-0">
               <button (click)="newItemsMenuOpen = !newItemsMenuOpen; $event.stopPropagation()"
@@ -502,13 +430,6 @@ export class AppComponent implements OnInit {{
   navFilter  = signal('');
   menuOpen   = false;
   newItemsMenuOpen = false;
-  showSignup = signal(false);
-  loginEmail = signal('');
-  loginPassword = signal('');
-  signupName = signal('');
-  signupEmail = signal('');
-  signupPassword = signal('');
-  authError  = signal('');
 
   searchTerm     = signal('');
   searchResource = signal('all');
@@ -571,7 +492,6 @@ export class AppComponent implements OnInit {{
   }}
 
   ngOnInit(): void {{
-    this.menuOpen = !this.auth.token();
     void this.registry.init(API_BASE);
     void this.auth._fetchAccess();
     void this.auth._fetchRoles();
@@ -581,32 +501,9 @@ export class AppComponent implements OnInit {{
     this.auth.connectWs();
   }}
 
-  async doLogin(): Promise<void> {{
-    this.authError.set('');
-    try {{
-      await this.auth.loginWithEmail(this.loginEmail(), this.loginPassword());
-      this.menuOpen = false;
-      this.loginEmail.set(''); this.loginPassword.set('');
-    }} catch (e: any) {{
-      this.authError.set(e.message ?? 'Login failed');
-    }}
-  }}
-
-  async doSignup(): Promise<void> {{
-    this.authError.set('');
-    try {{
-      await this.auth.signupUser(this.signupName(), this.signupEmail(), this.signupPassword());
-      this.menuOpen = false;
-      this.signupName.set(''); this.signupEmail.set(''); this.signupPassword.set('');
-    }} catch (e: any) {{
-      this.authError.set(e.message ?? 'Signup failed');
-    }}
-  }}
-
   logout(): void {{
     this.auth.logout();
-    this.menuOpen = true;
-    this.showSignup.set(false);
+    this.menuOpen = false;
     void this.router.navigate(['/']);
   }}
 
@@ -897,25 +794,132 @@ def _app_routes(resources: list, first_route: str, *, include_admin: bool = Fals
 
 def _login_component(version_prefix: str) -> str:
     return """\
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
 
 @Component({
   selector: 'app-login',
   standalone: true,
   template: `
-    <div class="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
+    <div class="flex flex-col items-center justify-center h-full text-sm gap-2">
       @if (auth.token()) {
-        <p>Logged in as <span class="font-semibold text-gray-700">{{ auth.displayName() }}</span></p>
-        <p>Select a resource from the sidebar.</p>
+        <p class="text-gray-500">Signed in as <span class="font-semibold text-gray-700">{{ auth.displayName() }}</span></p>
+        <p class="text-gray-400">Select a resource from the sidebar.</p>
       } @else {
-        <p>Sign in using the button in the top right corner.</p>
+        <div class="w-80 bg-white border rounded-lg shadow-sm p-5">
+          @if (auth.hasAdmin() === false) {
+            <p class="text-sm font-semibold text-gray-700 mb-3">Create admin account</p>
+            <input (input)="signupName.set($any($event).target.value)"
+                   [value]="signupName()" placeholder="Name"
+                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <input (input)="signupEmail.set($any($event).target.value)"
+                   [value]="signupEmail()" placeholder="Email" type="email"
+                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <input (input)="signupPassword.set($any($event).target.value)"
+                   [value]="signupPassword()" placeholder="Password" type="password"
+                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            @if (authError()) {
+              <p class="text-xs text-red-500 mb-1">{{ authError() }}</p>
+            }
+            <button (click)="doSignup()"
+                    class="w-full text-sm bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
+              Create account
+            </button>
+          } @else {
+            @if (auth.peers().length > 0) {
+              <p class="text-sm font-semibold text-gray-700 mb-2">Sign in via</p>
+              <div class="space-y-1 mb-4">
+                @for (p of auth.peers(); track p.name) {
+                  <a [href]="auth.loginUrlForPeer(p.name)"
+                     class="block w-full text-sm text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
+                    {{ p.name }}
+                  </a>
+                }
+              </div>
+            }
+            @if (auth.localAuthEnabled()) {
+              @if (!showSignup()) {
+                <p class="text-sm font-semibold text-gray-700 mb-3">Sign in</p>
+                <input (input)="loginEmail.set($any($event).target.value)"
+                       [value]="loginEmail()" placeholder="Email" type="email"
+                       class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                <input (input)="loginPassword.set($any($event).target.value)"
+                       [value]="loginPassword()" placeholder="Password" type="password"
+                       (keydown.enter)="doLogin()"
+                       class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                @if (authError()) {
+                  <p class="text-xs text-red-500 mb-1">{{ authError() }}</p>
+                }
+                <button (click)="doLogin()"
+                        class="w-full text-sm bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+                  Sign in
+                </button>
+                <button (click)="showSignup.set(true); authError.set('')"
+                        class="w-full text-sm text-blue-500 hover:underline">
+                  Create account
+                </button>
+              } @else {
+                <p class="text-sm font-semibold text-gray-700 mb-3">Create account</p>
+                <input (input)="signupName.set($any($event).target.value)"
+                       [value]="signupName()" placeholder="Name"
+                       class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                <input (input)="signupEmail.set($any($event).target.value)"
+                       [value]="signupEmail()" placeholder="Email" type="email"
+                       class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                <input (input)="signupPassword.set($any($event).target.value)"
+                       [value]="signupPassword()" placeholder="Password" type="password"
+                       class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+                @if (authError()) {
+                  <p class="text-xs text-red-500 mb-1">{{ authError() }}</p>
+                }
+                <button (click)="doSignup()"
+                        class="w-full text-sm bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+                  Create account
+                </button>
+                <button (click)="showSignup.set(false); authError.set('')"
+                        class="w-full text-sm text-gray-400 hover:underline">
+                  Back to sign in
+                </button>
+              }
+            }
+          }
+        </div>
       }
     </div>
   `
 })
 export class LoginComponent {
-  protected auth = inject(AuthService);
+  protected auth   = inject(AuthService);
+  private   router = inject(Router);
+
+  showSignup     = signal(false);
+  loginEmail     = signal('');
+  loginPassword  = signal('');
+  signupName     = signal('');
+  signupEmail    = signal('');
+  signupPassword = signal('');
+  authError      = signal('');
+
+  async doLogin(): Promise<void> {
+    this.authError.set('');
+    try {
+      await this.auth.loginWithEmail(this.loginEmail(), this.loginPassword());
+      void this.router.navigate(['/ho_bo']);
+    } catch (e: any) {
+      this.authError.set(e.message ?? 'Login failed');
+    }
+  }
+
+  async doSignup(): Promise<void> {
+    this.authError.set('');
+    try {
+      await this.auth.signupUser(this.signupName(), this.signupEmail(), this.signupPassword());
+      void this.router.navigate(['/ho_bo']);
+    } catch (e: any) {
+      this.authError.set(e.message ?? 'Signup failed');
+    }
+  }
 }
 """
 

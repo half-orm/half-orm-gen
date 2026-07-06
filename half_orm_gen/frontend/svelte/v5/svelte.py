@@ -352,15 +352,103 @@ if (typeof window !== 'undefined') {{
 def _login_page(version_prefix: str) -> str:
     return """\
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { auth } from '$lib/auth.svelte.ts';
+
+  let showSignup     = $state(false);
+  let loginEmail     = $state('');
+  let loginPassword  = $state('');
+  let signupName     = $state('');
+  let signupEmail    = $state('');
+  let signupPassword = $state('');
+  let authError      = $state('');
+
+  async function doLogin() {
+    authError = '';
+    try {
+      await auth.loginWithEmail(loginEmail, loginPassword);
+      void goto('/ho_bo');
+    } catch (e: any) { authError = e.message ?? 'Login failed'; }
+  }
+
+  async function doSignup() {
+    authError = '';
+    try {
+      await auth.signupUser(signupName, signupEmail, signupPassword);
+      void goto('/ho_bo');
+    } catch (e: any) { authError = e.message ?? 'Signup failed'; }
+  }
 </script>
 
-<div class="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
+<div class="flex flex-col items-center justify-center h-full text-sm gap-2">
   {#if auth.token}
-    <p>Signed in as <span class="font-semibold text-gray-700">{auth.displayName}</span></p>
-    <p>Select a resource from the sidebar.</p>
+    <p class="text-gray-500">Signed in as <span class="font-semibold text-gray-700">{auth.displayName}</span></p>
+    <p class="text-gray-400">Select a resource from the sidebar.</p>
   {:else}
-    <p>Sign in using the button in the top right corner.</p>
+    <div class="w-80 bg-white border rounded-lg shadow-sm p-5">
+      {#if auth.hasAdmin === false}
+        <p class="text-sm font-semibold text-gray-700 mb-3">Create admin account</p>
+        <input bind:value={signupName} placeholder="Name"
+               class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+        <input bind:value={signupEmail} placeholder="Email" type="email"
+               class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+        <input bind:value={signupPassword} placeholder="Password" type="password"
+               class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+        {#if authError}<p class="text-xs text-red-500 mb-1">{authError}</p>{/if}
+        <button onclick={doSignup}
+                class="w-full text-sm bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
+          Create account
+        </button>
+      {:else}
+        {#if auth.peers.length > 0}
+          <p class="text-sm font-semibold text-gray-700 mb-2">Sign in via</p>
+          <div class="space-y-1 mb-4">
+            {#each auth.peers as p}
+              <a href={auth.loginUrlForPeer(p.name)}
+                 class="block w-full text-sm text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
+                {p.name}
+              </a>
+            {/each}
+          </div>
+        {/if}
+        {#if auth.localAuthEnabled}
+          {#if !showSignup}
+            <p class="text-sm font-semibold text-gray-700 mb-3">Sign in</p>
+            <input bind:value={loginEmail} placeholder="Email" type="email"
+                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <input bind:value={loginPassword} placeholder="Password" type="password"
+                   onkeydown={(e) => { if (e.key === 'Enter') doLogin(); }}
+                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            {#if authError}<p class="text-xs text-red-500 mb-1">{authError}</p>{/if}
+            <button onclick={doLogin}
+                    class="w-full text-sm bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+              Sign in
+            </button>
+            <button onclick={() => { showSignup = true; authError = ''; }}
+                    class="w-full text-sm text-blue-500 hover:underline">
+              Create account
+            </button>
+          {:else}
+            <p class="text-sm font-semibold text-gray-700 mb-3">Create account</p>
+            <input bind:value={signupName} placeholder="Name"
+                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <input bind:value={signupEmail} placeholder="Email" type="email"
+                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <input bind:value={signupPassword} placeholder="Password" type="password"
+                   class="w-full text-sm border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            {#if authError}<p class="text-xs text-red-500 mb-1">{authError}</p>{/if}
+            <button onclick={doSignup}
+                    class="w-full text-sm bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
+              Create account
+            </button>
+            <button onclick={() => { showSignup = false; authError = ''; }}
+                    class="w-full text-sm text-gray-400 hover:underline">
+              Back to sign in
+            </button>
+          {/if}
+        {/if}
+      {/if}
+    </div>
   {/if}
 </div>
 """
@@ -725,15 +813,8 @@ def _layout(resources: list, version_prefix: str = '') -> str:
 
   let {{ children }} = $props();
   let navFilter  = $state('');
-  let menuOpen   = $state(!auth.token);
+  let menuOpen   = $state(false);
   let newItemsMenuOpen = $state(false);
-  let showSignup = $state(false);
-  let loginEmail = $state('');
-  let loginPassword = $state('');
-  let signupName = $state('');
-  let signupEmail = $state('');
-  let signupPassword = $state('');
-  let authError  = $state('');
 
   let searchTerm     = $state('');
   let searchResource = $state('all');
@@ -744,28 +825,7 @@ def _layout(resources: list, version_prefix: str = '') -> str:
 
   function logout() {{
     auth.logout();
-    menuOpen = true;
-    showSignup = false;
-    loginEmail = ''; loginPassword = '';
-    authError = '';
-  }}
-
-  async function doLogin() {{
-    try {{
-      authError = '';
-      await auth.loginWithEmail(loginEmail, loginPassword);
-      menuOpen = false;
-      loginEmail = ''; loginPassword = '';
-    }} catch (e: any) {{ authError = e.message; }}
-  }}
-
-  async function doSignup() {{
-    try {{
-      authError = '';
-      await auth.signupUser(signupName, signupEmail, signupPassword);
-      menuOpen = false;
-      signupName = ''; signupEmail = ''; signupPassword = '';
-    }} catch (e: any) {{ authError = e.message; }}
+    menuOpen = false;
   }}
 
   function onSearchInput(val: string) {{
@@ -924,89 +984,32 @@ def _layout(resources: list, version_prefix: str = '') -> str:
       </div>
     {{/if}}
     <div class="flex items-center gap-2 shrink-0">
-    <div class="relative auth-menu shrink-0">
-      <button onclick={{(e) => {{ e.stopPropagation(); menuOpen = !menuOpen; }}}}
-              class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border
-                     {{auth.token ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}}
-                     transition-colors">
-        {{auth.displayName}}
-        <span class="opacity-60">{{menuOpen ? '▲' : '▼'}}</span>
-      </button>
-      {{#if menuOpen}}
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 w-64 p-3"
-             onclick={{(e) => e.stopPropagation()}}>
-          {{#if auth.token}}
+    {{#if auth.token}}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="relative auth-menu shrink-0">
+        <button onclick={{(e) => {{ e.stopPropagation(); menuOpen = !menuOpen; }}}}
+                class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
+          {{auth.displayName}}
+          <span class="opacity-60">{{menuOpen ? '▲' : '▼'}}</span>
+        </button>
+        {{#if menuOpen}}
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 w-64 p-3"
+               onclick={{(e) => e.stopPropagation()}}>
             <p class="text-xs text-gray-500 mb-2">Signed in as <strong>{{auth.displayName}}</strong></p>
             <button onclick={{logout}}
                     class="w-full text-left px-2 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded transition-colors">
               Sign out
             </button>
-          {{:else if auth.hasAdmin === false}}
-            <p class="text-xs font-semibold text-gray-700 mb-3">Create admin account</p>
-            <input bind:value={{signupName}} placeholder="Name"
-                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            <input bind:value={{signupEmail}} placeholder="Email" type="email"
-                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            <input bind:value={{signupPassword}} placeholder="Password" type="password"
-                   class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-            {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
-            <button onclick={{doSignup}}
-                    class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">
-              Create account
-            </button>
-          {{:else}}
-            {{#if auth.peers.length > 0}}
-              <p class="text-xs font-semibold text-gray-700 mb-2">Sign in via</p>
-              <div class="space-y-1 mb-3">
-                {{#each auth.peers as p}}
-                  <a href={{auth.loginUrlForPeer(p.name)}}
-                     class="block w-full text-xs text-center border rounded px-2 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors">
-                    {{p.name}}
-                  </a>
-                {{/each}}
-              </div>
-            {{/if}}
-            {{#if auth.localAuthEnabled}}
-              {{#if !showSignup}}
-                <p class="text-xs font-semibold text-gray-700 mb-3">Sign in</p>
-                <input bind:value={{loginEmail}} placeholder="Email" type="email"
-                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                <input bind:value={{loginPassword}} placeholder="Password" type="password"
-                       onkeydown={{(e) => {{ if (e.key === 'Enter') doLogin(); }}}}
-                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
-                <button onclick={{doLogin}}
-                        class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
-                  Sign in
-                </button>
-                <button onclick={{() => {{ showSignup = true; authError = ''; }}}}
-                        class="w-full text-xs text-blue-500 hover:underline">
-                  Create account
-                </button>
-              {{:else}}
-                <p class="text-xs font-semibold text-gray-700 mb-3">Create account</p>
-                <input bind:value={{signupName}} placeholder="Name"
-                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                <input bind:value={{signupEmail}} placeholder="Email" type="email"
-                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                <input bind:value={{signupPassword}} placeholder="Password" type="password"
-                       class="w-full text-xs border rounded px-2 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-                {{#if authError}}<p class="text-xs text-red-500 mb-1">{{authError}}</p>{{/if}}
-                <button onclick={{doSignup}}
-                        class="w-full text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors mb-2">
-                  Create account
-                </button>
-                <button onclick={{() => {{ showSignup = false; authError = ''; }}}}
-                        class="w-full text-xs text-gray-400 hover:underline">
-                  Back to sign in
-                </button>
-              {{/if}}
-            {{/if}}
-          {{/if}}
-        </div>
-      {{/if}}
-    </div>
+          </div>
+        {{/if}}
+      </div>
+    {{:else}}
+      <a href="/login"
+         class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border border-gray-300 text-gray-500 hover:bg-gray-50 transition-colors">
+        Sign in
+      </a>
+    {{/if}}
     {{#if totalNewCount > 0}}
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
       <div class="relative new-items-menu shrink-0" onclick={{(e) => e.stopPropagation()}}>
