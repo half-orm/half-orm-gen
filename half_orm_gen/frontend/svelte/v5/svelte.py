@@ -396,6 +396,7 @@ def _auth_delegate_page(version_prefix: str) -> str:
     return f"""\
 <script lang="ts">
   import {{ page }} from '$app/state';
+  import {{ auth }} from '$lib/auth.svelte.ts';
 
   let email = $state('');
   let password = $state('');
@@ -405,8 +406,22 @@ def _auth_delegate_page(version_prefix: str) -> str:
 
   const redirectUri = page.url.searchParams.get('redirect_uri') ?? '';
   const csrfState = page.url.searchParams.get('csrf_state') ?? '';
+
+  function redirectWithToken(token: string) {{
+    redirecting = true;
+    const sep = redirectUri.includes('?') ? '&' : '?';
+    window.location.href = `${{redirectUri}}${{sep}}token=${{encodeURIComponent(token)}}&csrf_state=${{encodeURIComponent(csrfState)}}`;
+  }}
+
   if (!redirectUri || !csrfState) {{
     error = 'Missing redirect_uri or csrf_state — this page must be reached via a peer login redirect.';
+  }} else if (auth.token) {{
+    // Already signed in on this peer, in this browser tab (sessionStorage) —
+    // forward that existing token instead of asking for credentials again.
+    // Same trust level as a fresh login: it's the same signed token either
+    // way. Not a real cross-tab/cross-device SSO, just a same-tab shortcut —
+    // see docs/internals/federation-protocol.md.
+    redirectWithToken(auth.token);
   }}
 
   async function submit() {{
@@ -424,9 +439,7 @@ def _auth_delegate_page(version_prefix: str) -> str:
         return;
       }}
       const {{ token }} = (await res.json()) as {{ token: string }};
-      redirecting = true;
-      const sep = redirectUri.includes('?') ? '&' : '?';
-      window.location.href = `${{redirectUri}}${{sep}}token=${{encodeURIComponent(token)}}&csrf_state=${{encodeURIComponent(csrfState)}}`;
+      redirectWithToken(token);
     }} finally {{
       submitting = false;
     }}
@@ -434,13 +447,13 @@ def _auth_delegate_page(version_prefix: str) -> str:
 </script>
 
 <div class="flex flex-col items-center justify-center h-full text-sm gap-3">
-  <p class="text-gray-500">Sign in to continue to the requesting site.</p>
   {{#if error}}
     <p class="text-red-500">{{error}}</p>
   {{/if}}
   {{#if redirecting}}
-    <p class="text-gray-400">Redirecting…</p>
+    <p class="text-gray-400">Already signed in — redirecting…</p>
   {{:else}}
+    <p class="text-gray-500">Sign in to continue to the requesting site.</p>
     <form onsubmit={{(e: Event) => {{ e.preventDefault(); void submit(); }}}} class="flex flex-col gap-2 w-64">
       <input bind:value={{email}} type="email" placeholder="Email" class="border rounded px-2 py-1 text-sm" />
       <input bind:value={{password}} type="password" placeholder="Password" class="border rounded px-2 py-1 text-sm" />
