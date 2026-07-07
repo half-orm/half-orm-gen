@@ -15,6 +15,16 @@ export interface HoUser {
   is_admin: boolean;
 }
 
+export interface RoleInfo {
+  name: string;
+  // Set only for a dynamic role (registered via @ho_api_role on that
+  // resource's class) — null means a normal (static) role, valid for every
+  // resource. Non-null is what makes it "dynamic": only relevant, and only
+  // offered as configurable, in the context of that one resource.
+  schema_name: string | null;
+  table_name: string | null;
+}
+
 export interface CatalogFilterInfo { id: string; name: string; }
 export interface CatalogFkDep { fields: string[]; target: string; target_fields: string[]; }
 export interface CatalogAccessEntry {
@@ -48,7 +58,7 @@ export class AuthService {
     typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
   );
   readonly access               = signal<Record<string, any>>({});
-  readonly roles                = signal<string[]>([]);
+  readonly roles                = signal<RoleInfo[]>([]);
   readonly users                = signal<HoUser[]>([]);
   readonly hasAdmin             = signal<boolean | null>(null);
   readonly accessVersion        = signal<number>(0);

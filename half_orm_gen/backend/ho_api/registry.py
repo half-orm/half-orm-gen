@@ -50,7 +50,10 @@ async def discover_and_register(model, classes) -> None:
             if role_name:
                 _ROLE_REGISTRY[(schema, table, role_name)] = attr
                 if not await Role()(name=role_name).ho_aselect('name'):
-                    await Role()(name=role_name, deletable=True).ho_ainsert()
+                    await Role()(
+                        name=role_name, deletable=True,
+                        schemaname=schema, relname=table,
+                    ).ho_ainsert()
             filter_name = getattr(attr, '_ho_api_filter', None)
             if filter_name:
                 _FILTER_REGISTRY[(schema, table, filter_name)] = attr

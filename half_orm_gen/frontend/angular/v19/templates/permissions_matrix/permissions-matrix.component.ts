@@ -278,10 +278,20 @@ export class PermissionsMatrixComponent implements OnInit {
     return t ? { Authorization: `Bearer $${t}` } : {};
   }
 
-  // Every declared role must always appear as a row — including roles with
-  // zero access to this resource yet — so an admin can grant access from
-  // scratch, not just toggle roles that already have some grant.
-  readonly allRoles = computed<string[]>(() => [...this.auth.roles()].sort());
+  // Every declared *static* role must always appear as a row — including
+  // roles with zero access to this resource yet — so an admin can grant
+  // access from scratch, not just toggle roles that already have some
+  // grant. A *dynamic* role (schema_name set — see RoleInfo) only makes
+  // sense for the one resource it was registered on (e.g. `post_author`
+  // for blog.post): offering it as a row on an unrelated resource's matrix
+  // would be meaningless, so it's filtered out everywhere else.
+  readonly allRoles = computed<string[]>(() => {
+    const [schemaName, tableName] = this.resource().split('/');
+    return this.auth.roles()
+      .filter(r => !r.schema_name || (r.schema_name === schemaName && r.table_name === tableName))
+      .map(r => r.name)
+      .sort();
+  });
 
   hasAccess(role: string, verb: string): boolean {
     return !!this.catalogEntry()?.access[verb]?.[role];

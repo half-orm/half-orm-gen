@@ -19,6 +19,7 @@ from litestar.logging import LoggingConfig
 from half_orm_gen.backend.ho_api.loader import (
     load_crud_access,
     load_role_parents,
+    load_roles_info,
     ensure_system_roles,
     reconcile_catalog,
 )
@@ -421,7 +422,8 @@ def _make_ho_meta(model, prefix: str):
 
 
 def _make_ho_roles(roles_holder: list, prefix: str):
-    """roles_holder[0] is the roles list, populated at startup."""
+    """roles_holder[0] is [{name, schema_name, table_name}, ...], populated at
+    startup — schema_name/table_name set only for dynamic roles."""
     @get(f'{prefix}/ho_roles')
     async def ho_roles() -> list:
         return roles_holder[0]
@@ -618,7 +620,7 @@ def build_crud_app(
     all_fields_by_res: dict[str, list]   = {}
     access_map_holder: list  = [{}]   # access_map_holder[0]  = actual map
     parent_map_holder: list  = [{}]   # parent_map_holder[0]  = {role: parent_name}
-    roles_holder: list       = [[]]   # roles_holder[0]       = sorted roles list
+    roles_holder: list       = [[]]   # roles_holder[0]       = sorted [{name, schema_name, table_name}, ...]
 
     ws_rmap: dict = {}
     classes_by_res: dict[str, type] = {}
@@ -731,7 +733,7 @@ def build_crud_app(
 
         access_map_holder[0] = access_map
         parent_map_holder[0] = await load_role_parents(model)
-        roles_holder[0] = sorted(parent_map_holder[0])
+        roles_holder[0] = sorted(await load_roles_info(model), key=lambda r: r['name'])
 
     async def _startup() -> None:
         global _HO_WARN_SHOWN

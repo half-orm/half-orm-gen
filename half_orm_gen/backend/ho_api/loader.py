@@ -104,6 +104,22 @@ async def load_role_parents(model) -> dict[str, str | None]:
     return {r['name']: r['parent_name'] for r in rows}
 
 
+async def load_roles_info(model) -> list[dict]:
+    """Return [{name, schema_name, table_name}, ...] for all roles.
+
+    schema_name/table_name are None for a normal (static) role, and set for a
+    dynamic one (registered via @ho_api_role on that resource's class — see
+    registry.py) — that's what makes it dynamic, and what a client uses to
+    know which resource's permissions matrix should offer it as a row.
+    """
+    api = HoApiModels(model)
+    rows = await api.role()().ho_aselect('name', 'schemaname', 'relname')
+    return [
+        {'name': r['name'], 'schema_name': r['schemaname'], 'table_name': r['relname']}
+        for r in rows
+    ]
+
+
 async def reconcile_catalog(model) -> None:
     """Sync routes/fields with pg_catalog: insert new, flag deprecated, unflag restored."""
     api  = HoApiModels(model)
@@ -128,6 +144,16 @@ async def reconcile_catalog(model) -> None:
     live_relations.add(('half_orm_meta.identity', 'user'))
     for fname in model._fields_metadata(identity_user_sfqrn):
         live_fields.add(('half_orm_meta.identity', 'user', fname))
+
+    # ── Resources ───────────────────────────────────────────────────────────
+    # Must run before Routes/Fields below — both reference resource(schemaname,
+    # relname) via FK.
+    db_resources = {
+        (r['schemaname'], r['relname'])
+        for r in await api.resource()().ho_aselect()
+    }
+    for schema, table in live_relations - db_resources:
+        await api.resource()(schemaname=schema, relname=table).ho_ainsert()
 
     # ── Routes ──────────────────────────────────────────────────────────────
     db_routes = {

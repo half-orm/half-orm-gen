@@ -5,11 +5,39 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 
 CREATE SCHEMA IF NOT EXISTS "half_orm_meta.api";
 
+CREATE TABLE IF NOT EXISTS "half_orm_meta.api".resource (
+  schemaname text NOT NULL,
+  relname    text NOT NULL,
+  PRIMARY KEY (schemaname, relname)
+);
+
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".role (
   name        text PRIMARY KEY,
   deletable   boolean NOT NULL DEFAULT TRUE,
-  parent_name text REFERENCES "half_orm_meta.api".role(name)
+  parent_name text REFERENCES "half_orm_meta.api".role(name),
+  schemaname  text,
+  relname     text
 );
+
+ALTER TABLE "half_orm_meta.api".role
+  ADD COLUMN IF NOT EXISTS schemaname text,
+  ADD COLUMN IF NOT EXISTS relname text;
+-- Set only for dynamic roles (registered via @ho_api_role on a resource
+-- class — half_orm_gen/backend/ho_api/registry.py). NULL means a normal
+-- (static) role, valid for every resource. Non-NULL *is* what makes a role
+-- "dynamic": it only makes sense — and should only be offered as
+-- configurable — in the context of that one resource (e.g. `post_author`
+-- has no business appearing as a row in blog.comment's permissions matrix).
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'role_resource_fkey'
+  ) THEN
+    ALTER TABLE "half_orm_meta.api".role
+      ADD CONSTRAINT role_resource_fkey FOREIGN KEY (schemaname, relname)
+      REFERENCES "half_orm_meta.api".resource(schemaname, relname);
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION "half_orm_meta.api".check_role_deletable()
 RETURNS TRIGGER AS $$
@@ -73,6 +101,16 @@ CREATE TABLE IF NOT EXISTS "half_orm_meta.api".route (
   PRIMARY KEY (schema_name, table_name, verb)
 );
 
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'route_resource_fkey'
+  ) THEN
+    ALTER TABLE "half_orm_meta.api".route
+      ADD CONSTRAINT route_resource_fkey FOREIGN KEY (schema_name, table_name)
+      REFERENCES "half_orm_meta.api".resource(schemaname, relname);
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".field (
   schema_name  text NOT NULL,
   table_name   text NOT NULL,
@@ -87,6 +125,16 @@ ALTER TABLE "half_orm_meta.api".field
 -- NULL = not a label field. 0, 1, 2... = concatenation order for the
 -- resource's display label (used by the FK select combobox and the
 -- global search result formatter).
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'field_resource_fkey'
+  ) THEN
+    ALTER TABLE "half_orm_meta.api".field
+      ADD CONSTRAINT field_resource_fkey FOREIGN KEY (schema_name, table_name)
+      REFERENCES "half_orm_meta.api".resource(schemaname, relname);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".access (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),

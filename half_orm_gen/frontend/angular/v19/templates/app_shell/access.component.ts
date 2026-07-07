@@ -19,12 +19,12 @@ const VERB_COLOR: Record<string, string> = {
           <p class="text-gray-400 text-sm">Loading…</p>
         } @else {
           <div class="space-y-1">
-            @for (role of roles(); track role) {
+            @for (role of roles(); track role.name) {
               <div class="w-full text-left px-3 py-2 rounded text-sm"
-                   [class]="auth.userRoles().includes(role)
+                   [class]="auth.userRoles().includes(role.name)
                      ? 'bg-blue-100 text-blue-700 font-semibold'
                      : 'text-gray-700'">
-                {{ role }}
+                {{ role.name }}
               </div>
             }
           </div>

@@ -12,6 +12,9 @@ class HoApiModels:
     def _rel(self, table: str):
         return self._model.get_relation_class(f'"{self._SCHEMA}".{table}')
 
+    def resource(self):
+        return self._rel('resource')
+
     def role(self):
         return self._rel('role')
 

@@ -174,13 +174,17 @@ import {{ clearAllStates, clearStateForKey }} from '$lib/stateRegistry';
 
 export type WsEvent = {{ event: 'create' | 'update' | 'delete' | 'access_reload'; resource: string; id: unknown }};
 export type HoUser = {{ id: string; name: string; is_admin: boolean }};
+// schema_name/table_name set only for a dynamic role (registered via
+// @ho_api_role on that resource's class) — null means a normal (static)
+// role, valid for every resource.
+export type RoleInfo = {{ name: string; schema_name: string | null; table_name: string | null }};
 
 class AuthState {{
     token         = $state<string | null>(
         typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
     );
     access                = $state<Record<string, any>>({{}});
-    roles                 = $state<string[]>([]);
+    roles                 = $state<RoleInfo[]>([]);
     users                 = $state<HoUser[]>([]);
     hasAdmin              = $state<boolean | null>(null);
     lastEvent             = $state<WsEvent | null>(null);
@@ -632,8 +636,8 @@ def _access_page(version_prefix: str) -> str:
       <div class="space-y-1">
         {{#each auth.roles as role}}
           <div class="w-full text-left px-3 py-2 rounded text-sm
-                      {{auth.userRoles.includes(role) ? 'bg-blue-100 text-blue-700 font-semibold' : 'text-gray-700'}}">
-            {{role}}
+                      {{auth.userRoles.includes(role.name) ? 'bg-blue-100 text-blue-700 font-semibold' : 'text-gray-700'}}">
+            {{role.name}}
           </div>
         {{/each}}
       </div>
