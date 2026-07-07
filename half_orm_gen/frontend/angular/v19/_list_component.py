@@ -1,4 +1,5 @@
 from ._helpers import _selector, _title, _field_type_category
+from ._templates import _tpl
 
 
 def _list_component(
@@ -14,20 +15,14 @@ def _list_component(
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
     # Table headers (sortable)
-    th_cols = '\n            '.join(
-        f'@if (!silo.inaccessibleFields().has(\'{f}\')) {{'
-        f'<th (click)="sortBy(\'{f}\')"'
-        f' class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200 text-gray-600">'
-        f'{f} {{{{ silo.sortField() === \'{f}\' ? (silo.sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
-        f'}}'
-        for f in out_names
-    )
+    th_col_tpl = _tpl('list/th_col.html')
+    th_cols = '\n            '.join(th_col_tpl.substitute(f=f) for f in out_names)
     action_th = '<th class="px-2 py-2 w-16"></th>' if pk_field else ''
 
     # Filter row (one input per column, hidden when embedded)
-    _filter_help_html = ''.join(
-        f'<li class="flex gap-1.5"><code class="shrink-0 rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-800">{code}</code>'
-        f'<span>{desc}</span></li>'
+    filter_help_item_tpl = _tpl('list/filter_help_item.html')
+    filter_help_html = ''.join(
+        filter_help_item_tpl.substitute(code=code, desc=desc)
         for code, desc in [
             ('text', 'starts with'),
             ('*text', 'anywhere in the field'),
@@ -35,25 +30,9 @@ def _list_component(
             ('&gt;=A&lt;=B', 'range'),
         ]
     )
+    filter_input_tpl = _tpl('list/filter_input.html')
     filter_inputs = '\n              '.join(
-        f'@if (!silo.inaccessibleFields().has(\'{f}\') && silo.searchableFields().includes(\'{f}\')) {{'
-        f'<th class="px-2 py-1">'
-        f'<div class="relative">'
-        f'<input [value]="localFilters()[\'{f}\'] || \'\'"'
-        f' (input)="setFilter(\'{f}\', $any($event).target.value)"'
-        f' placeholder="…"'
-        f' class="w-full text-xs border rounded pl-2 pr-5 py-1" />'
-        f'<div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">'
-        f'<ho-tooltip align="right">'
-        f'<span ho-tooltip-trigger class="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-gray-200 text-[9px] font-semibold text-gray-500 cursor-help select-none leading-none">?</span>'
-        f'<ul class="space-y-1">{_filter_help_html}</ul>'
-        f'</ho-tooltip>'
-        f'</div>'
-        f'</div>'
-        f'</th>'
-        f'}} @else if (!silo.inaccessibleFields().has(\'{f}\')) {{'
-        f'<th class="px-2 py-1"></th>'
-        f'}}'
+        filter_input_tpl.substitute(f=f, filter_help_html=filter_help_html)
         for f in out_names
     )
     action_filter_th = (
@@ -66,100 +45,50 @@ def _list_component(
         '</ho-tooltip>'
         '</th>'
     ) if pk_field else ''
-    filter_row = (
-        f'\n          @if (!embedded()) {{\n'
-        f'          <tr class="bg-white border-b">\n'
-        f'              {action_filter_th}\n'
-        f'              {filter_inputs}\n'
-        f'          </tr>\n'
-        f'          }}'
+    filter_row = _tpl('list/filter_row.html').substitute(
+        action_filter_th=action_filter_th, filter_inputs=filter_inputs,
     )
 
+    td_fk_tpl = _tpl('list/td_fk.html')
+    td_plain_tpl = _tpl('list/td_plain.html')
+
     def _td(f: str) -> str:
-        inacc = f'silo.inaccessibleFields().has(\'{f}\')'
+        inacc = f"silo.inaccessibleFields().has('{f}')"
         if f in fk_map:
             rs, rt = fk_map[f]
-            return (
-                f'@if (!{inacc}) {{'
-                f'<td class="px-4 py-2 text-sm">'
-                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item[\'{f}\'])]" (click)="$event.stopPropagation()"'
-                f' class="text-blue-500 hover:underline font-mono text-xs truncate block" [class.max-w-xs]="!embedded()"'
-                f' [title]="cellTitle(item[\'{f}\'])">{{{{ fmtCell(item[\'{f}\']) }}}}</a>'
-                f'</td>'
-                f'}}'
-            )
-        return (
-            f'@if (!{inacc}) {{'
-            f'<td class="px-4 py-2 text-sm" (click)="cellClick($event, $any(item)[\'{f}\'])">'
-            f'<div class="truncate" [class.max-w-xs]="!embedded()" [title]="cellTitle(item[\'{f}\'])"'
-            f' [class.text-blue-600]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'"'
-            f' [class.cursor-pointer]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'">'
-            f'{{{{ fmtCell(item[\'{f}\']) }}}}</div>'
-            f'</td>'
-            f'}}'
-        )
+            return td_fk_tpl.substitute(inacc=inacc, rs=rs, rt=rt, f=f)
+        return td_plain_tpl.substitute(inacc=inacc, f=f)
 
     td_cols = '\n              '.join(_td(f) for f in out_names)
 
-    row_click = (
-        f' (click)="selectAndNavigate(getPkId(item))"'
-        if pk_field else ''
-    )
+    row_click = ' (click)="selectAndNavigate(getPkId(item))"' if pk_field else ''
     cursor = ' cursor-pointer' if pk_field else ''
 
-    action_td = ''
-    if pk_field:
-        action_td = (
-            '\n              <td class="px-2 py-2">\n'
-            '                <div class="flex items-center gap-1.5">\n'
-            '                @if (silo.isNew(getPkId(item))) {\n'
-            '                  <span class="inline-block w-2 h-2 rounded-full bg-blue-500 shrink-0" title="New"></span>\n'
-            '                }\n'
-            '                @if (silo.canAccess("DELETE", getPkId(item))) {\n'
-            f'                  <button (click)="handleDelete(getPkId(item), $event)"\n'
-            '                          class="text-red-600 hover:underline text-sm">Delete</button>\n'
-            '                }\n'
-            '                </div>\n'
-            '              </td>'
-        )
+    action_td = _tpl('list/action_td.html').substitute() if pk_field else ''
 
-    new_btn = ''
-    if has_post:
-        new_btn = (
-            f'\n        @if (silo.canCreateWithFilters(filters())) {{\n'
-            f'          <a [routerLink]="[\'/ho_bo/{schema_name}/{table_name}/new\']"\n'
-            f'             [queryParams]="fkNewQueryParams()"\n'
-            f'             class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
-            f'            New\n          </a>\n        }}'
-        )
+    new_btn = (
+        _tpl('list/new_btn.html').substitute(schema_name=schema_name, table_name=table_name)
+        if has_post else ''
+    )
 
     new_items_badge = (
         '<app-new-items-badge [count]="contextualNewCount()" [active]="showNewOnly()" '
         '(toggle)="toggleShowNewOnly()" />'
     ) if pk_extractor else ''
 
-
-    delete_fn = ''
-    if pk_field:
-        delete_fn = (
-            f'\n  handleDelete(id: string, e: Event): void {{\n'
-            f'    e.stopPropagation();\n'
-            f"    if (confirm('Delete this item?')) {{\n"
-            f'      this.silo.remove(id).subscribe(() => this.silo.removeItem(String(id)));\n'
-            f'    }}\n'
-            f'  }}'
+    embedded_actions = ''
+    if new_btn or new_items_badge:
+        embedded_actions = (
+            f'\n  <div class="flex justify-end items-center gap-3 py-1 pr-1">{new_items_badge}{new_btn}'
+            f'\n  </div>'
         )
 
-    select_fn = ''
-    if pk_field:
-        select_fn = (
-            f'\n  selectAndNavigate(id: string): void {{\n'
-            f'    this.silo.selectedId.set(id);\n'
-            f"    this.router.navigate(['/ho_bo/{schema_name}/{table_name}', id]);\n"
-            f'  }}\n'
-        )
+    delete_fn = _tpl('list/delete_fn.ts').substitute() if pk_field else ''
 
-    ws_effect = ''  # Store handles WS updates; list just reads reactively from store signals
+    select_fn = (
+        _tpl('list/select_fn.ts').substitute(schema_name=schema_name, table_name=table_name)
+        if pk_field else ''
+    )
 
     needs_router_link = has_post or bool(fk_deps)
 
@@ -182,16 +111,9 @@ def _list_component(
         f"'{fname}': '{_field_type_category(all_fields[fname])}'"
         for fname in out_names if fname in all_fields
     )
-    field_types_map = f"""
-  private readonly fieldTypes: Record<string, FieldType> = {{
-    {field_types_entries}
-  }};"""
+    field_types_map = _tpl('list/field_types_map.ts').substitute(field_types_entries=field_types_entries)
 
-    _new_only_filter = (
-        '\n    if (this.showNewOnly()) {\n'
-        '      items = items.filter(item => this.silo.isNew(this.getPkId(item)));\n'
-        '    }'
-    ) if pk_extractor else ''
+    _new_only_filter = _tpl('list/new_only_filter.ts').substitute() if pk_extractor else ''
 
     _contextual_new_count = (
         '\n\n  // "New" count scoped to this list\'s own context (parent FK filter + local\n'
@@ -202,34 +124,13 @@ def _list_component(
         '  );'
     ) if pk_extractor else ''
 
-    displayItems_block = f"""\
-  readonly contextItems = computed(() => {{
-    const hasFilters = Object.keys(this.filters()).length > 0;
-    let items: Row[] = hasFilters
-      ? {_fk_items_src}
-      : this.silo.items();
-    const lf = this.localFilters();
-    if (Object.values(lf).some(v => v))
-      items = items.filter(item =>
-        Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
-    return items;
-  }});{_contextual_new_count}
+    display_items_block = _tpl('list/display_items_block.ts').substitute(
+        fk_items_src=_fk_items_src,
+        contextual_new_count=_contextual_new_count,
+        new_only_filter=_new_only_filter,
+    )
 
-  readonly displayItems = computed(() => {{
-    let items: Row[] = this.contextItems();{_new_only_filter}
-    const sf = this.silo.sortField();
-    if (sf) {{
-      const asc = this.silo.sortAsc();
-      items = [...items].sort((a, b) => {{
-        const av = String((a as any)[sf] ?? '');
-        const bv = String((b as any)[sf] ?? '');
-        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
-      }});
-    }}
-    return items;
-  }});"""
-
-    router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
+    router_link_es = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
     _comp_imports = ['PermissionsMatrixComponent', 'HoTooltipComponent', 'NewItemsBadgeComponent']
     if needs_router_link:
         _comp_imports.insert(0, 'RouterLink')
@@ -247,263 +148,20 @@ def _list_component(
         pk_id_line = ''
         highlight_attrs = ''
 
-    html = f"""\
-@if (!embedded()) {{
-  <div class="flex justify-between items-center mb-4">
-    <h1 class="text-2xl font-bold">{title}</h1>
-    <div class="flex items-center gap-3">{new_items_badge}{new_btn}</div>
-  </div>
-  @if (auth.isAdmin()) {{
-    <app-permissions-matrix [catalogEntry]="auth.catalog()['{map_key}'] ?? null" />
-  }}
-}} @else {{{(new_btn or new_items_badge) and f'''
-  <div class="flex justify-end items-center gap-3 py-1 pr-1">{new_items_badge}{new_btn}
-  </div>''' or ''}}}
-<div [class]="embedded() ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
-  <table class="w-full border-collapse">
-    <thead [class]="embedded() ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
-      <tr>
-        {action_th}
-        {th_cols}
-      </tr>{filter_row}
-    </thead>
-    <tbody>
-      @for (item of displayItems(); track $index) {{
-        <tr #dataRow class="border-t hover:bg-gray-50{cursor}"{row_click}{highlight_attrs}>
-          {action_td}
-          {td_cols}
-        </tr>
-      }}
-      @if (silo.isLoading()) {{
-        <tr><td colspan="100" class="text-center py-4 text-gray-500">Loading...</td></tr>
-      }}
-    </tbody>
-  </table>
-</div>
-@if (jsonDialogContent() !== null) {{
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-       (click)="jsonDialogContent.set(null)">
-    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
-         (click)="$event.stopPropagation()">
-      <div class="flex justify-between items-center mb-3">
-        <h3 class="font-semibold text-gray-800">JSON</h3>
-        <button (click)="jsonDialogContent.set(null)"
-                class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
-      </div>
-      <pre class="text-xs bg-gray-50 rounded p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap">{{{{ jsonDialogContent() }}}}</pre>
-    </div>
-  </div>
-}}
-"""
+    html = _tpl('list/list.component.html').substitute(
+        title=title, new_items_badge=new_items_badge, new_btn=new_btn,
+        map_key=map_key, embedded_actions=embedded_actions,
+        action_th=action_th, th_cols=th_cols, filter_row=filter_row,
+        cursor=cursor, row_click=row_click, highlight_attrs=highlight_attrs,
+        action_td=action_td, td_cols=td_cols,
+    )
 
-    ts = f"""\
-import {{ Component, computed, effect, inject, input, signal, untracked, DestroyRef, afterNextRender, ViewChildren, QueryList, ElementRef }} from '@angular/core';
-import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
-import {{ filter }} from 'rxjs';
-{router_link_es}import {{ Router, ActivatedRoute }} from '@angular/router';
-import {{ Location }} from '@angular/common';
-import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
-import type {{ Row }} from '../../../generated/resource.silo';
-import {{ AuthService }} from '../../../core/auth.service';
-import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
-import type {{ FieldType }} from '../../../generated/stores/filters';
-import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
-import {{ HoTooltipComponent }} from '../../../generated/ho-tooltip.component';
-import {{ NewItemsBadgeComponent }} from '../../../generated/new-items-badge.component';
-@Component({{
-  selector: '{_selector(schema_name, table_name, 'list')}',
-  standalone: true,
-  imports: [{imports_str}],
-  templateUrl: './list.component.html',
-  styleUrl: './list.component.css',
-}})
-export class {iname}ListComponent {{
-  protected silo   = inject(SiloRegistry).get('{map_key}');
-  protected auth   = inject(AuthService);
-  protected router = inject(Router);
-  private route = inject(ActivatedRoute);
-  private location = inject(Location);
-  protected String = String;  // For template use
-  protected Object = Object;  // For template use
-  protected matchFilter = matchFilter;  // For template use
-  protected fmtCell = fmtCell;  // For template use
-  protected cellTitle = cellTitle;  // For template use{pk_id_line}
-  private destroyRef = inject(DestroyRef);
-
-  @ViewChildren('dataRow') dataRows!: QueryList<ElementRef<HTMLTableRowElement>>;
-  private observer?: IntersectionObserver;
-  private currentLastElement?: Element;
-  private filterDebounceTimer?: number;
-  private hadFilters = false;
-
-  readonly filters  = input<Partial<Row>>({{}});
-  readonly embedded = input(false);
-
-  localFilters = signal<Record<string, string>>({{}});
-  showNewOnly  = signal(false);
-{field_types_map}
-{displayItems_block}
-
-  toggleShowNewOnly(): void {{
-    this.showNewOnly.update(v => !v);
-  }}
-
-  constructor() {{
-    // Initialize filters from URL or store before loading data
-    this.initFiltersFromUrl();
-
-    effect(() => {{
-      const _token = this.auth.token();
-      const _v    = this.auth.accessVersion();
-      const _rv   = this.auth.resourceAccessVersion()['{map_key}'];
-      const _sim  = this.auth.simulatedRole();
-      this.silo.list(this.filters());
-    }});{ws_effect}
-
-    // Set up observer
-    this.observer = new IntersectionObserver(
-      (entries) => {{
-        if (entries[0].isIntersecting && this.silo.hasMore() && !this.silo.isLoading()) {{
-          this.silo.loadMore(this.filters());
-        }}
-      }},
-      {{ rootMargin: '0px 0px 400px 0px' }}
-    );
-
-    // Re-observe when items change (must be in constructor for injection context)
-    effect(() => {{
-      this.silo.items().length;  // Track changes
-      untracked(() => {{
-        setTimeout(() => this.updateObservedElement(), 0);
-      }});
-    }});
-
-    // Initial observation after render
-    afterNextRender(() => {{
-      this.updateObservedElement();
-    }});
-
-    this.destroyRef.onDestroy(() => {{
-      this.observer?.disconnect();
-    }});
-  }}
-
-  private updateObservedElement() {{
-    if (this.currentLastElement) this.observer?.unobserve(this.currentLastElement);
-    const rows = this.dataRows.toArray();
-    if (rows.length > 0) {{
-      const lastElement = rows[rows.length - 1].nativeElement;
-      this.currentLastElement = lastElement;
-      this.observer?.observe(lastElement);
-    }}
-  }}
-
-  sortBy(f: string): void {{
-    if (this.silo.sortField() === f) this.silo.sortAsc.set(!this.silo.sortAsc());
-    else {{ this.silo.sortField.set(f); this.silo.sortAsc.set(true); }}
-  }}
-  setFilter(f: string, v: string): void {{
-    const updated = {{ ...this.localFilters(), [f]: v }};
-    this.localFilters.set(updated);
-
-    // Apply filters on backend with debounce
-    if (this.filterDebounceTimer) clearTimeout(this.filterDebounceTimer);
-    this.filterDebounceTimer = window.setTimeout(() => {{
-      // Convert local filters to backend search query (q=col1:val1,col2:val2)
-      // Only include valid filters based on field type
-      const filterPairs: string[] = [];
-      Object.entries(updated).forEach(([key, val]) => {{
-        if (val && isValidFilterValue(key, val, this.fieldTypes)) {{
-          const normalizedVal = normalizeFilterValue(key, val, this.fieldTypes);
-          filterPairs.push(`${{key}}:${{normalizedVal}}`);
-        }}
-      }});
-      const hasFiltersNow = filterPairs.length > 0;
-
-      // Update URL with current filters
-      this.syncFiltersToUrl(updated);
-
-      // Only trigger if we have filters now, or we had filters before (to clear them)
-      if (hasFiltersNow || this.hadFilters) {{
-        this.hadFilters = hasFiltersNow;
-        // Reset pagination state and clear loaded filters cache
-        this.silo.resetFilterState();
-        const searchParams = hasFiltersNow ? {{ q: filterPairs.join(',') }} as any : {{}};
-        this.silo.list(searchParams, 0);
-      }}
-    }}, 600);
-  }}
-  jsonDialogContent = signal<string | null>(null);
-  showJson(v: unknown): void {{ this.jsonDialogContent.set(JSON.stringify(v, null, 2)); }}
-  cellClick(e: Event, v: unknown): void {{
-    if (v != null && typeof v === 'object') {{ e.stopPropagation(); this.showJson(v); }}
-  }}
-
-  private initFiltersFromUrl(): void {{
-    if (this.embedded()) return; // Don't sync URL for embedded components
-
-    const params = this.route.snapshot.queryParams;
-    if (params['new'] === '1') this.showNewOnly.set(true);
-    const urlFilters = parseFiltersFromUrl(params, this.fieldTypes);
-
-    // If URL has filters, use them (priority)
-    if (Object.keys(urlFilters).length > 0) {{
-      this.localFilters.set(urlFilters);
-      this.silo.filters.set(urlFilters);
-    }} else {{
-      // Otherwise, try to restore from store
-      const storeFilters = this.silo.filters();
-      if (Object.keys(storeFilters).length > 0) {{
-        this.localFilters.set(storeFilters);
-        // Update URL to reflect store filters
-        this.syncFiltersToUrl(storeFilters);
-      }}
-    }}
-  }}
-
-  private syncFiltersToUrl(filters: Record<string, string>): void {{
-    if (this.embedded()) return; // Don't sync URL for embedded components
-
-    // Update store with current filters
-    this.silo.filters.set(filters);
-
-    const queryParams: Record<string, string> = {{}};
-
-    // Preserve non-filter params
-    Object.entries(this.route.snapshot.queryParams).forEach(([key, value]) => {{
-      if (!key.startsWith('f_') && typeof value === 'string') {{
-        queryParams[key] = value;
-      }}
-    }});
-
-    // Add filter params (using shared function)
-    const filterParams = encodeFiltersToUrlParams(filters, this.fieldTypes);
-    Object.assign(queryParams, filterParams);
-
-    // Use replaceState to avoid polluting browser history
-    const urlTree = this.router.createUrlTree([], {{
-      relativeTo: this.route,
-      queryParams,
-      queryParamsHandling: '' // Replace all params
-    }});
-
-    this.location.replaceState(urlTree.toString());
-  }}
-
-  clearAllFilters(): void {{
-    this.localFilters.set({{}});
-    this.syncFiltersToUrl({{}});
-  }}
-
-  fkNewQueryParams(): Record<string, string> {{
-    const fkAuto = this.silo.fkAutoFields('POST');
-    const f = this.filters();
-    const params: Record<string, string> = {{}};
-    for (const [field, rule] of Object.entries(fkAuto)) {{
-      if (rule === 'context' && f[field] != null) params[field] = String(f[field]);
-    }}
-    return params;
-  }}{select_fn}{delete_fn}
-}}
-"""
+    ts = _tpl('list/list.component.ts').substitute(
+        router_link_es=router_link_es,
+        selector=_selector(schema_name, table_name, 'list'),
+        imports_str=imports_str, iname=iname, map_key=map_key,
+        pk_id_line=pk_id_line, field_types_map=field_types_map,
+        display_items_block=display_items_block,
+        select_fn=select_fn, delete_fn=delete_fn,
+    )
     return ts, html, ''

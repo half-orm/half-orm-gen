@@ -1,0 +1,1 @@
+  { path: 'ho_bo/$sn/$tn/:id', loadComponent: () => import('$base/detail.component').then(m => m.${cn}DetailComponent) },

@@ -1,0 +1,12 @@
+
+              <td class="px-2 py-2">
+                <div class="flex items-center gap-1.5">
+                @if (silo.isNew(getPkId(item))) {
+                  <span class="inline-block w-2 h-2 rounded-full bg-blue-500 shrink-0" title="New"></span>
+                }
+                @if (silo.canAccess("DELETE", getPkId(item))) {
+                  <button (click)="handleDelete(getPkId(item), $$event)"
+                          class="text-red-600 hover:underline text-sm">Delete</button>
+                }
+                </div>
+              </td>

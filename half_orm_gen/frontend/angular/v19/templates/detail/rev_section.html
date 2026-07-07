@@ -1,0 +1,15 @@
+
+<div class="mt-4 bg-white rounded-lg shadow overflow-hidden">
+  <div class="px-6 pt-5 pb-3 flex items-center justify-between">
+    <a routerLink="/ho_bo/$rs/$rt" class="text-lg font-semibold hover:underline hover:text-blue-700">$rt_title</a>
+    <span class="flex items-center gap-1 text-xs text-gray-400">
+      <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>
+      </svg>
+      $fk_field = {{ item()?.['$pk_field'] }}
+    </span>
+  </div>
+  @if (item()) {
+    <$list_sel [filters]="{ $fk_field: String(item()!['$pk_field']) }" [embedded]="true" />
+  }
+</div>

@@ -1,0 +1,23 @@
+@if (silo.fkAutoFields('POST')['$f'] === 'select') {
+      <div class="relative">
+        <label class="block text-sm font-medium text-gray-700 mb-1">$f$req_mark</label>
+        <input type="hidden" [(ngModel)]="form['$f']" name="$f"$req_attr />
+        <input type="text" placeholder="Type to search…"
+               [value]="fkComboText()['$f'] ?? ''"
+               (input)="onFkComboInput('$f', '$target_key', $$any($$event.target).value)"
+               (focus)="openFkCombo('$f')" (blur)="closeFkCombo('$f')"
+               class="w-full border rounded px-3 py-2 text-sm" />
+        @if (fkComboOpen()['$f']) {
+        <div class="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-56 overflow-y-auto">
+          @for (opt of fkOptions('$target_key'); track opt.id) {
+            <div (mousedown)="selectFkOption('$f', opt)"
+                 class="px-3 py-1.5 text-sm hover:bg-blue-50 cursor-pointer">{{ opt.label }}</div>
+          } @empty {
+            <div class="px-3 py-1.5 text-sm text-gray-400">No match</div>
+          }
+        </div>
+        }
+      </div>
+    } @else {
+      $default_field
+    }

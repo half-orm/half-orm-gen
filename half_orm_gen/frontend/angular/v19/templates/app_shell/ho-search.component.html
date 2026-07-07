@@ -1,0 +1,34 @@
+<div class="px-4 py-6 max-w-3xl mx-auto">
+  <h1 class="text-xl font-bold mb-1">Search results</h1>
+  @if (searchTerm) {
+    <p class="text-sm text-gray-500 mb-4">
+      for "<span class="font-medium text-gray-700">{{ searchTerm }}</span>"
+      @if (searchResource !== 'all') {
+        in <span class="font-medium text-gray-700">{{ searchResource.replace('/', '.') }}</span>
+      }
+    </p>
+  }
+  @if (loading()) {
+    <div class="text-gray-400 text-sm py-8 text-center">Searching…</div>
+  } @else if (searched() && resultEntries().length === 0) {
+    <div class="text-gray-400 text-sm py-8 text-center">No results found.</div>
+  } @else {
+    @for (entry of resultEntries(); track entry.resource) {
+      <div class="mb-6">
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+          <a [routerLink]="['/ho_bo/' + entry.resource]" class="hover:underline hover:text-blue-700">
+            {{ entry.resource.replace('/', '.') }}
+          </a>
+        </h2>
+        <div class="bg-white rounded-lg shadow overflow-hidden divide-y">
+          @for (row of entry.data; track $$index) {
+            <div (click)="goToDetail(entry.resource, row)"
+                 class="px-4 py-3 hover:bg-blue-50 cursor-pointer text-sm text-gray-700">
+              {{ formatResult(row, entry.resource, entry.searchable_fields) }}
+            </div>
+          }
+        </div>
+      </div>
+    }
+  }
+</div>

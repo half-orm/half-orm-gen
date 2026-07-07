@@ -1,0 +1,1 @@
+  { path: 'ho_bo/$sn/$tn/new', loadComponent: () => import('$base/create.component').then(m => m.${cn}CreateComponent) },

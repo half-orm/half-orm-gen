@@ -1,0 +1,44 @@
+@if (!embedded()) {
+  <div class="flex justify-between items-center mb-4">
+    <h1 class="text-2xl font-bold">$title</h1>
+    <div class="flex items-center gap-3">$new_items_badge$new_btn</div>
+  </div>
+  @if (auth.isAdmin()) {
+    <app-permissions-matrix [catalogEntry]="auth.catalog()['$map_key'] ?? null" />
+  }
+} @else {$embedded_actions}
+<div [class]="embedded() ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
+  <table class="w-full border-collapse">
+    <thead [class]="embedded() ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
+      <tr>
+        $action_th
+        $th_cols
+      </tr>$filter_row
+    </thead>
+    <tbody>
+      @for (item of displayItems(); track $$index) {
+        <tr #dataRow class="border-t hover:bg-gray-50$cursor"$row_click$highlight_attrs>
+          $action_td
+          $td_cols
+        </tr>
+      }
+      @if (silo.isLoading()) {
+        <tr><td colspan="100" class="text-center py-4 text-gray-500">Loading...</td></tr>
+      }
+    </tbody>
+  </table>
+</div>
+@if (jsonDialogContent() !== null) {
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+       (click)="jsonDialogContent.set(null)">
+    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
+         (click)="$$event.stopPropagation()">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-semibold text-gray-800">JSON</h3>
+        <button (click)="jsonDialogContent.set(null)"
+                class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+      </div>
+      <pre class="text-xs bg-gray-50 rounded p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap">{{ jsonDialogContent() }}</pre>
+    </div>
+  </div>
+}

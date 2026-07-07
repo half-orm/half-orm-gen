@@ -23,7 +23,7 @@ from half_orm_gen.backend.crud_routes import (
 from half_orm_gen.frontend.base import StoreGenerator
 
 from ._static import (
-    _PACKAGE_JSON, _ANGULAR_JSON, _TSCONFIG, _TSCONFIG_APP, _INDEX_HTML,
+    _package_json, _angular_json, _TSCONFIG, _TSCONFIG_APP, _index_html,
     _STYLES_CSS, _LATEX_PIPE, _TAILWIND_CONFIG, _POSTCSS_CONFIG, _MAIN_TS,
     _APP_CONFIG_TS, _STATE_REGISTRY, _proxy_conf, _GITIGNORE,
 )
@@ -112,9 +112,9 @@ class AngularAppGenerator(StoreGenerator):
         # --- static files ---
         self._write(output_dir / '.gitignore', _GITIGNORE)
         self._write(output_dir / 'package.json',
-                    _PACKAGE_JSON.format(project_name=project_name))
+                    _package_json(project_name))
         self._write(output_dir / 'angular.json',
-                    _ANGULAR_JSON.format(project_name=project_name))
+                    _angular_json(project_name))
         self._write(output_dir / 'tsconfig.json',     _TSCONFIG)
         self._write(output_dir / 'tsconfig.app.json', _TSCONFIG_APP)
         self._write(output_dir / 'tailwind.config.js', _TAILWIND_CONFIG)
@@ -122,7 +122,7 @@ class AngularAppGenerator(StoreGenerator):
         self._write(output_dir / 'proxy.conf.json',
                     _proxy_conf(version_prefix))
         self._write(output_dir / 'src' / 'index.html',
-                    _INDEX_HTML.format(project_title=project_title))
+                    _index_html(project_title))
         self._write(output_dir / 'src' / 'styles.css',  _STYLES_CSS)
         self._write(output_dir / 'src' / 'main.ts',     _MAIN_TS)
 
