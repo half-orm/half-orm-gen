@@ -486,3 +486,20 @@ l'upsert dans `half_orm_meta.identity.user`, probablement), et s'il doit
 être un rôle "système" par peer (créé automatiquement à l'enregistrement
 d'un peer) ou une convention de nommage simple sans entrée dans
 `half_orm_meta.api.role`.
+
+## 23. Amélioration — navigation anonyme, paramétrable depuis Admin/Peers
+
+**Constat (2026-07-07)** : impossible de naviguer anonymement sur le
+backoffice généré — on tombe systématiquement sur la page d'authentification
+si on n'est pas connecté, même si le rôle `anonymous` a du GET configuré sur
+certaines ressources (ce que le backend permet déjà : `anonymous` est un
+rôle réel comme les autres, cf. `_ROLE_REGISTRY`/`half_orm_meta.api.role`).
+
+**Demande** : rendre ça éventuellement paramétrable (site "Intranet
+uniquement" vs navigation anonyme autorisée), configuré depuis la page
+Admin/Peers (`/ho_bo/admin/peers`, `AdminPeersComponent` — carte "This
+peer"). Pas urgent, explicitement différé — noté ici pour ne pas le
+perdre. À creuser le moment venu : probablement un flag stocké côté
+`half_orm_meta.identity.peer` (la ligne "self") ou une variable d'env,
+plus le retrait du guard qui force la redirection vers `/login` quand
+`auth.token()` est vide sur les routes où `anonymous` a effectivement accès.

@@ -49,11 +49,25 @@ async def discover_and_register(model, classes) -> None:
             role_name = getattr(attr, '_ho_api_role', None)
             if role_name:
                 _ROLE_REGISTRY[(schema, table, role_name)] = attr
-                if not await Role()(name=role_name).ho_aselect('name'):
+                existing = await Role()(name=role_name).ho_aselect('deletable', 'schemaname', 'relname')
+                if not existing:
+                    # deletable=False: this role is hardcoded via @ho_api_role on
+                    # the resource class — deleting the DB row would be pointless,
+                    # discover_and_register re-creates it on every startup anyway.
                     await Role()(
-                        name=role_name, deletable=True,
+                        name=role_name, deletable=False,
                         schemaname=schema, relname=table,
                     ).ho_ainsert()
+                elif (
+                    existing[0]['deletable']
+                    or existing[0]['schemaname'] != schema
+                    or existing[0]['relname'] != table
+                ):
+                    # Self-heal a row created before this deletable=False /
+                    # schemaname+relname fix landed.
+                    await Role()(name=role_name).ho_aupdate(
+                        deletable=False, schemaname=schema, relname=table,
+                    )
             filter_name = getattr(attr, '_ho_api_filter', None)
             if filter_name:
                 _FILTER_REGISTRY[(schema, table, filter_name)] = attr
