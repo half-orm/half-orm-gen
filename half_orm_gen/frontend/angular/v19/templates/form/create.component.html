@@ -3,18 +3,27 @@
     <app-permissions-matrix [catalogEntry]="auth.catalog()['$schema_name/$table_name'] ?? null" resource="$schema_name/$table_name" />
   </div>
 }
-<div class="max-w-lg mx-auto p-6 bg-white rounded-lg shadow mt-6">
-  <h1 class="text-2xl font-bold mb-6">New $title</h1>
-  @if (error()) { <p class="text-red-600 mb-4">{{ error() }}</p> }
-  <form #ngForm="ngForm" (ngSubmit)="handleSubmit()" class="space-y-4">
-    $form_fields
-    <div class="flex gap-3 pt-2">
-      <button type="submit" [disabled]="ngForm.invalid"
-              class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-        Create
-      </button>
-      <a routerLink="/ho_bo/$schema_name/$table_name"
-         class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</a>
+@if (silo.canCreate()) {
+  <div class="max-w-lg mx-auto p-6 bg-white rounded-lg shadow mt-6">
+    <h1 class="text-2xl font-bold mb-6">New $title</h1>
+    @if (error()) { <p class="text-red-600 mb-4">{{ error() }}</p> }
+    <form #ngForm="ngForm" (ngSubmit)="handleSubmit()" class="space-y-4">
+      $form_fields
+      <div class="flex gap-3 pt-2">
+        <button type="submit" [disabled]="ngForm.invalid"
+                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+          Create
+        </button>
+        <a routerLink="/ho_bo/$schema_name/$table_name"
+           class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</a>
+      </div>
+    </form>
+  </div>
+} @else {
+  <div class="max-w-lg mx-auto p-6 bg-white rounded-lg shadow mt-6 text-center text-sm text-gray-500">
+    You don't have permission to create a new $title.
+    <div class="mt-3">
+      <a routerLink="/ho_bo/$schema_name/$table_name" class="text-blue-600 hover:underline">← Back</a>
     </div>
-  </form>
-</div>
+  </div>
+}

@@ -5,7 +5,7 @@
 }
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
   <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
-    @if (item()) {
+    @if (item() && silo.canAccess('GET', id())) {
       <div class="p-6 bg-white rounded-lg shadow">
         <div class="flex justify-between items-start mb-6">
           <h1 class="text-2xl font-bold"><a routerLink="/ho_bo/$schema_name/$table_name" class="hover:underline hover:text-blue-700">$title</a></h1>
@@ -14,6 +14,13 @@
           </div>
         </div>
         $edit_section_tmpl
+      </div>
+    } @else if (!silo.canAccess('GET', id())) {
+      <div class="p-6 bg-white rounded-lg shadow text-center text-sm text-gray-500">
+        You don't have permission to view this $title.
+        <div class="mt-3">
+          <a routerLink="/ho_bo/$schema_name/$table_name" class="text-blue-600 hover:underline">← Back</a>
+        </div>
       </div>
     }
   </div>

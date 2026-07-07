@@ -1,4 +1,4 @@
-@if (!editing()) {
+@if (!editing() || !silo.canAccess('PUT', id())) {
   <$fields_selector [item]="item()!" />
 } @else {
   @if (error()) { <p class="text-red-600 mb-4">{{ error() }}</p> }
