@@ -365,7 +365,7 @@ def generate_crud_routes(
         if pk_info and (module_str, 'GET') not in covered and 'GET' in crud_access:
             handler_name = f'{handler_prefix}_get'
             if pk_is_composite:
-                param_type = 'Path' if templates.FRAMEWORK == 'fastapi' else 'Parameter'
+                param_type = 'Parameter'
                 pk_type_annotation = f'Annotated[str, {param_type}(pattern=_COMPOSITE_PK_PATTERN)]'
             else:
                 pk_type_annotation = pk_py_type
@@ -418,7 +418,7 @@ def generate_crud_routes(
                 decl_blocks.append('\n' + templates.typedict_block(put_in_class, put_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_update'
                 if pk_is_composite:
-                    param_type = 'Path' if templates.FRAMEWORK == 'fastapi' else 'Parameter'
+                    param_type = 'Parameter'
                     pk_type_annotation = f'Annotated[str, {param_type}(pattern=_COMPOSITE_PK_PATTERN)]'
                 else:
                     pk_type_annotation = pk_py_type
@@ -440,7 +440,7 @@ def generate_crud_routes(
             if (module_str, 'DELETE') not in covered and 'DELETE' in crud_access:
                 handler_name = f'{handler_prefix}_delete'
                 if pk_is_composite:
-                    param_type = 'Path' if templates.FRAMEWORK == 'fastapi' else 'Parameter'
+                    param_type = 'Parameter'
                     pk_type_annotation = f'Annotated[str, {param_type}(pattern=_COMPOSITE_PK_PATTERN)]'
                 else:
                     pk_type_annotation = pk_py_type

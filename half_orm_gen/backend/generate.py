@@ -1,7 +1,7 @@
 """
 API generator for halfORM projects.
 
-Scaffolds ho_api/ and boots dynamic runtime (Litestar or FastAPI).
+Scaffolds ho_api/ and boots the dynamic Litestar runtime.
 Also ensures the "half_orm_meta.api" schema exists in the database.
 """
 
@@ -30,7 +30,7 @@ def _ensure_ho_api_schema(model) -> None:
 
 class GenApi:
     """
-    Scaffold ``ho_api/`` for a halfORM project.
+    Scaffold ``ho_api/`` for a halfORM project (Litestar backend).
 
     Parameters
     ----------
@@ -43,14 +43,10 @@ class GenApi:
         Root directory of the project (``ho_api/`` is created inside it).
     api_version:
         Integer API version (written as ``/vN/`` prefix in routes).
-    framework:
-        ``'litestar'`` (default) or ``'fastapi'``.
     federation:
-        When True (Litestar only), scaffold an RS256 keypair instead of
-        the default HS256 shared secret, for projects that will register
-        with a federation of trusted peers (see
-        ``planning/identite_federee.md``). Ignored for FastAPI, which has
-        no auth scaffolding at all yet.
+        When True, scaffold an RS256 keypair instead of the default HS256
+        shared secret, for projects that will register with a federation
+        of trusted peers (see ``planning/identite_federee.md``).
     """
 
     def __init__(
@@ -60,7 +56,6 @@ class GenApi:
         module_name: str | None = None,
         base_dir: str | None = None,
         api_version: int | None = None,
-        framework: str = 'litestar',
         federation: bool = False,
     ):
         self._model = repo.model if repo is not None else None
@@ -76,7 +71,6 @@ class GenApi:
             self._base_dir = Path(base_dir)
 
         self._api_version = api_version
-        self._framework = framework
         self._federation = federation
         self._api_dir = self._base_dir / 'ho_api'
         self._generate()
@@ -85,23 +79,15 @@ class GenApi:
         os.environ.setdefault('API_GEN_MODE', '1')
         if self._model is not None:
             _ensure_ho_api_schema(self._model)
-        framework_label = f' ({self._framework})' if self._framework != 'litestar' else ''
-        print(f'\nScaffolding {self._api_dir}{framework_label} ...')
-        if self._framework == 'fastapi':
-            from half_orm_gen.backend.fastapi.v0.scaffold import scaffold_api_dir
-            runtime_mod = 'half_orm_gen.backend.fastapi.v0.runtime'
-            scaffold_api_dir(
-                self._api_dir,
-                module_name=self._module_name,
-                api_version=self._api_version,
-            )
-        else:
-            from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
-            runtime_mod = 'half_orm_gen.backend.litestar.v2.runtime'
-            scaffold_api_dir(
-                self._api_dir,
-                module_name=self._module_name,
-                api_version=self._api_version,
-                federation=self._federation,
-            )
-        print(f'\nDone. Routes are loaded dynamically at startup via {runtime_mod}.')
+        print(f'\nScaffolding {self._api_dir} ...')
+        from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
+        scaffold_api_dir(
+            self._api_dir,
+            module_name=self._module_name,
+            api_version=self._api_version,
+            federation=self._federation,
+        )
+        print(
+            '\nDone. Routes are loaded dynamically at startup via '
+            'half_orm_gen.backend.litestar.v2.runtime.'
+        )

@@ -2,10 +2,10 @@
 
 ## Overview
 
-> General principles (silo pattern, route cache, WebSocket): [frontend/architecture.md](../frontend/architecture.md)  
-> Angular equivalent: [angular/silo-architecture.md](../angular/silo-architecture.md)  
-> Backend API: [backend/litestar/architecture.md](../backend/litestar/architecture.md)  
-> Access control (signals, buttons, FK auto-resolve): [access-control.md](access-control.md)  
+> General principles (silo pattern, route cache, WebSocket): [frontend-architecture.md](frontend-architecture.md)  
+> Angular equivalent: [angular-silo-architecture.md](angular-silo-architecture.md)  
+> Backend API: [litestar-architecture.md](litestar-architecture.md)  
+> Access control (signals, buttons, FK auto-resolve): [svelte/access-control.md](../svelte/access-control.md)  
 > Looking for the full `ResourceSilo` member list instead of internals? [frontend/resource-silo-reference.md](../frontend/resource-silo-reference.md)
 
 The Svelte frontend uses a **silo-per-resource** pattern: one `ResourceSilo` instance per
@@ -22,7 +22,7 @@ created per-relation in generated code; only the silo assets and the per-relatio
 Singleton (module-level `const registry`). Initialised once on app boot by calling
 `registry.init(apiBase)`, which:
 
-1. Fetches `GET /ho_meta` (→ [backend-architecture.md — Special endpoints](backend-architecture.md#special-endpoints)) → receives a `HoMeta` JSON object (one entry per relation).
+1. Fetches `GET /ho_meta` (→ [litestar-architecture.md — Special endpoints](litestar-architecture.md#special-endpoints)) → receives a `HoMeta` JSON object (one entry per relation).
 2. Creates one `ResourceSilo` per entry and stores it in an internal `Map<key, ResourceSilo>`.
 3. Sets `_ready = true` — subsequent calls to `init()` are no-ops.
 
@@ -161,7 +161,7 @@ guard for filtered calls.
 
 ## WebSocket live updates
 
-> Backend reference: [backend-architecture.md — WebSocket live updates](backend-architecture.md#websocket-live-updates)
+> Backend reference: [litestar-architecture.md — WebSocket live updates](litestar-architecture.md#websocket-live-updates)
 
 `AuthState._connectWs()` opens a WebSocket to `/v0/ws`. Each message sets
 `auth.lastEvent = { event, resource, id }`. Every `ResourceSilo` registers a

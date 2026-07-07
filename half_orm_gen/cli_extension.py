@@ -50,8 +50,6 @@ def add_commands(main_group):
     )
     @click.option('--litestar', 'framework', flag_value='litestar',
                   help='Generate a Litestar app.')
-    @click.option('--fastapi', 'framework', flag_value='fastapi',
-                  help='Generate a FastAPI app (no @api_* support).')
     @click.option(
         '--federation', is_flag=True, default=False,
         help='Scaffold an RS256 keypair for cross-project identity federation '
@@ -97,11 +95,7 @@ def add_commands(main_group):
             sys.exit(1)
 
         if not framework:
-            click.echo('Error: specify --litestar or --fastapi.', err=True)
-            sys.exit(1)
-
-        if federation and framework != 'litestar':
-            click.echo('Error: --federation requires --litestar.', err=True)
+            click.echo('Error: specify --litestar.', err=True)
             sys.exit(1)
 
         api_version = _read_api_version()
@@ -123,11 +117,8 @@ def add_commands(main_group):
             return
 
         click.echo(f'Generating {framework} API for project: {repo.name} (v{api_version})')
-        GenApi(repo, api_version=api_version, framework=framework, federation=federation)
-        if framework == 'litestar':
-            click.echo('\nTo run:  litestar --app ho_api.app:application run --reload')
-        else:
-            click.echo('\nTo run:  uvicorn ho_api.app:application --reload')
+        GenApi(repo, api_version=api_version, federation=federation)
+        click.echo('\nTo run:  litestar --app ho_api.app:application run --reload')
 
     @gen.command('frontend')
     @click.option('--svelte',   'framework', flag_value='svelte',

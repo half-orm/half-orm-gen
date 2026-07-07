@@ -1,8 +1,8 @@
 # halfORM Backoffice — Generated frontend code organization
 
-> See also: [architecture.md](architecture.md) for runtime principles,
-> [../svelte/silo-architecture.md](../svelte/silo-architecture.md) and
-> [../angular/silo-architecture.md](../angular/silo-architecture.md) for silo details.
+> See also: [../internals/frontend-architecture.md](../internals/frontend-architecture.md) for runtime principles,
+> [../internals/svelte-silo-architecture.md](../internals/svelte-silo-architecture.md) and
+> [../internals/angular-silo-architecture.md](../internals/angular-silo-architecture.md) for silo details.
 
 Generated with:
 ```
@@ -152,6 +152,9 @@ There is one generated `ResourceSilo` class per app (`resource.silo.ts` /
 same class, parameterized by its schema. The full reactive API it exposes
 (state, access control, data operations) is documented once, for every
 table, in [resource-silo-reference.md](resource-silo-reference.md).
+
+The scaffolded (not regenerated) `auth.service.ts` / `auth.svelte.ts` referenced above is
+documented in full in [auth-service-reference.md](auth-service-reference.md).
 
 Custom components can read from and write to any resource silo without going through a
 generated component:

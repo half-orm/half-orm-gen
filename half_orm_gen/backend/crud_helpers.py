@@ -1,5 +1,5 @@
 """
-Framework-agnostic CRUD helpers shared between Litestar and FastAPI runtimes.
+Framework-agnostic CRUD helpers used by the Litestar runtime.
 
 Functions here must not import from any specific web framework.
 """

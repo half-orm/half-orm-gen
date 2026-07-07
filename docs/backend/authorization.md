@@ -1,7 +1,8 @@
 # Authorization
 
 > Role declaration and CRUD_ACCESS: [crud-access.md](crud-access.md)  
-> Backend runtime internals: [litestar/architecture.md](litestar/architecture.md)
+> Backend runtime internals: [../internals/litestar-architecture.md](../internals/litestar-architecture.md)  
+> How the JWT this page consumes gets minted in the first place: [../authentication/overview.md](../authentication/overview.md)
 
 ---
 
@@ -187,24 +188,27 @@ HTTP 403 Admin access required (current roles: ['connected', 'anonymous'])
 
 ## Blog demo example
 
-The blog demo uses **yes-auth** (authentication always succeeds) with real JWT to
-demonstrate the full stack end-to-end.
+`blog_demo` demonstrates real local authentication end-to-end: signup/login
+routes backed by bcrypt password hashes in
+`half_orm_meta.identity."user"`, real JWTs, and (since it's generated with
+`--federation`) an RS256 keypair shared with `pages_demo` — see
+[authentication/local-auth.md](../authentication/local-auth.md) and
+[authentication/federation.md](../authentication/federation.md) for the
+full mechanism these routes rely on.
 
 ```
-POST /auth/signup  {name, email}  →  create user; first signup becomes admin
-POST /auth/login   {email}        →  yes-auth; user must exist; returns JWT
-GET  /ho_users                    →  list users with is_admin flag
+POST /auth/signup  {name, email, password}  →  create user; first signup becomes admin
+POST /auth/login   {email, password}        →  checks password via local_auth.authenticate()
+GET  /ho_users                              →  list users with is_admin flag
 ```
 
-The JWT is signed with `HO_JWT_SECRET` from `ho_api/.env`:
+These routes (and the `_sign` helper signing with `HO_JWT_SECRET`/the RS256
+private key depending on `HO_JWT_ALGORITHM`) are written by `demo_blog.sh`
+(step 11) into `ho_api/custom/routes.py` — never hand-edit that generated
+demo file; edit the script and regenerate (`make demo-blog`).
 
-```python
-jwt.encode({'sub': user_id, 'roles': ['admin']}, secret, algorithm='HS256')
-```
-
-The admin user and FK constraint are set up by `fixtures/blog_demo_data.sql`.
-The yes-auth routes are written by `demo_blog.sh` (step 11) into
-`ho_api/custom/routes.py`.
+Fixture accounts and the `author_id` FK constraint are set up by
+`fixtures/blog_demo_data.sql`.
 
 The `post_author` dynamic role is declared in `blog_demo/blog/post.py` (injected by
 `demo_blog.sh` step 11a) and allows post authors to edit their own posts.

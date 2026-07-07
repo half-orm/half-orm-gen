@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict J0ByJagdf7LziHradJZ033fNOdOKzhaQkeAnZOCjftWVGC0RX928euNxFsxzy5J
+\restrict bdQ30moMhypUjBuPQraFNulyNviA8wzfaFT7rnLHtge3Eh7EOXKvFk8lS4U33cY
 
 -- Dumped from database version 17.10 (Debian 17.10-0+deb13u1)
 -- Dumped by pg_dump version 17.10 (Debian 17.10-0+deb13u1)
@@ -23,97 +23,73 @@ SET row_security = off;
 -- Data for Name: access; Type: TABLE DATA; Schema: half_orm_meta.api; Owner: halftest
 --
 
-INSERT INTO "half_orm_meta.api".access VALUES ('f85a3172-50b1-4cc0-ac43-df65229a0771', 'anonymous', 'actor', 'user', 'GET') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('279d1897-e942-4f0d-9c70-3259708b1acd', 'anonymous', 'blog', 'post', 'GET') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('582d7cdf-bff6-4bfb-8f32-5950d88bffbd', 'connected', 'blog', 'comment', 'GET') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'connected', 'blog', 'comment', 'POST') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('4755756b-815b-4d6f-84ab-c131059dc976', 'connected', 'blog', 'comment_type', 'GET') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'connected', 'blog', 'post', 'POST') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('2c96c11e-1953-46f3-afd7-ffbfe71bfd2e', 'admin', 'actor', 'user', 'DELETE') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('cf478536-c611-4c14-bfe8-d86c667eeeff', 'admin', 'blog', 'comment', 'DELETE') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('57c953b4-6c4d-4fd3-8cee-4eb730ee97d0', 'admin', 'blog', 'comment_type', 'DELETE') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('2be1e251-84e1-4f4a-b396-b5db5b71be7a', 'admin', 'blog', 'post', 'DELETE') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('4cbb2a6f-692f-4d4e-ad93-8d3ef9283ef2', 'connected', 'actor', 'user', 'GET') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('78950106-df0e-494a-b101-8fc2d17d58fb', 'connected', 'blog', 'post', 'GET') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'post_author', 'blog', 'post', 'PUT') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access VALUES ('b4d6bb8b-0ea6-4eb1-9c6f-ce0a23d04bd8', 'post_author', 'blog', 'post', 'DELETE') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".access VALUES ('7a3507bc-5f55-4bc5-83e4-9a9f1798f846', 'anonymous', 'blog', 'comment', 'GET') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".access VALUES ('6e833ab2-fd72-4b25-bdef-c020c489b7e0', 'anonymous', 'blog', 'comment_type', 'GET') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".access VALUES ('2001c0b8-6314-4863-b365-53856ea052d3', 'anonymous', 'blog', 'post', 'GET') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".access VALUES ('d3b60f38-a19b-4174-974b-a8c83a4bc9a2', 'anonymous', 'half_orm_meta.identity', 'user', 'GET') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".access VALUES ('dec2bf37-7807-4e72-8835-dff7af019b43', 'connected', 'blog', 'post', 'POST') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".access VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'connected', 'half_orm_meta.identity', 'user', 'POST') ON CONFLICT DO NOTHING;
 
 
 --
 -- Data for Name: field_access_fk_auto; Type: TABLE DATA; Schema: half_orm_meta.api; Owner: halftest
 --
 
-INSERT INTO "half_orm_meta.api".field_access_fk_auto VALUES ('663a288c-b5d2-4781-bc4e-2146c742a3a1', '950483a8-509c-4528-9cd9-69648107994f', 'post_id', 'context') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_fk_auto VALUES ('c108da7b-c29f-4588-b57f-a3813d57cc3d', '950483a8-509c-4528-9cd9-69648107994f', 'author_id', 'connected_user') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_fk_auto VALUES ('e675813d-109a-4136-b65c-0b6933a89293', '950483a8-509c-4528-9cd9-69648107994f', 'comment_type', 'select') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_fk_auto VALUES ('404ec704-fbc2-4393-b13f-8d4f4398b57f', 'fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'author_id', 'connected_user') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_fk_auto VALUES ('6bc5a593-6634-4a05-acac-25c047bc654a', 'f0238164-cc7d-4c91-a160-ebac673fc7b3', 'author_id', 'connected_user') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_fk_auto VALUES ('008cdf1a-b35a-4b31-a1e9-d4650930254c', 'dec2bf37-7807-4e72-8835-dff7af019b43', 'author_id', 'select') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_fk_auto VALUES ('92673a8f-dec3-4975-ad47-4a4cb3ec9edf', 'c038fc31-ead8-492e-a897-f49dc4364e8e', 'origin_peer_id', 'select') ON CONFLICT DO NOTHING;
 
 
 --
 -- Data for Name: field_access_in; Type: TABLE DATA; Schema: half_orm_meta.api; Owner: halftest
 --
 
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'author_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'comment_type') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'content') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'post_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'author_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'content') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'published') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'title') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'author_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'content') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'published') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_in VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'title') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_in VALUES ('dec2bf37-7807-4e72-8835-dff7af019b43', 'author_id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_in VALUES ('dec2bf37-7807-4e72-8835-dff7af019b43', 'content') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_in VALUES ('dec2bf37-7807-4e72-8835-dff7af019b43', 'published') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_in VALUES ('dec2bf37-7807-4e72-8835-dff7af019b43', 'title') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_in VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'email') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_in VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'origin_peer_id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_in VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_in VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'name') ON CONFLICT DO NOTHING;
 
 
 --
 -- Data for Name: field_access_out; Type: TABLE DATA; Schema: half_orm_meta.api; Owner: halftest
 --
 
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('f85a3172-50b1-4cc0-ac43-df65229a0771', 'id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('f85a3172-50b1-4cc0-ac43-df65229a0771', 'name') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('279d1897-e942-4f0d-9c70-3259708b1acd', 'id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('279d1897-e942-4f0d-9c70-3259708b1acd', 'author_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('279d1897-e942-4f0d-9c70-3259708b1acd', 'content') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('279d1897-e942-4f0d-9c70-3259708b1acd', 'published') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('279d1897-e942-4f0d-9c70-3259708b1acd', 'title') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('582d7cdf-bff6-4bfb-8f32-5950d88bffbd', 'id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('582d7cdf-bff6-4bfb-8f32-5950d88bffbd', 'author_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('582d7cdf-bff6-4bfb-8f32-5950d88bffbd', 'comment_type') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('582d7cdf-bff6-4bfb-8f32-5950d88bffbd', 'content') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('582d7cdf-bff6-4bfb-8f32-5950d88bffbd', 'post_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'author_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'comment_type') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'content') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('950483a8-509c-4528-9cd9-69648107994f', 'post_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('4755756b-815b-4d6f-84ab-c131059dc976', 'name') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'author_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'content') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'published') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('fcb7972e-5670-4daf-b7f1-1c2af8b5167d', 'title') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('4cbb2a6f-692f-4d4e-ad93-8d3ef9283ef2', 'email') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'author_id') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'content') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'published') ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_out VALUES ('f0238164-cc7d-4c91-a160-ebac673fc7b3', 'title') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('7a3507bc-5f55-4bc5-83e4-9a9f1798f846', 'id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('7a3507bc-5f55-4bc5-83e4-9a9f1798f846', 'content') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('7a3507bc-5f55-4bc5-83e4-9a9f1798f846', 'comment_type') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('7a3507bc-5f55-4bc5-83e4-9a9f1798f846', 'post_id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('7a3507bc-5f55-4bc5-83e4-9a9f1798f846', 'author_id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('6e833ab2-fd72-4b25-bdef-c020c489b7e0', 'name') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('2001c0b8-6314-4863-b365-53856ea052d3', 'id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('2001c0b8-6314-4863-b365-53856ea052d3', 'author_id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('2001c0b8-6314-4863-b365-53856ea052d3', 'title') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('2001c0b8-6314-4863-b365-53856ea052d3', 'content') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('2001c0b8-6314-4863-b365-53856ea052d3', 'published') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('d3b60f38-a19b-4174-974b-a8c83a4bc9a2', 'id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('d3b60f38-a19b-4174-974b-a8c83a4bc9a2', 'name') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('dec2bf37-7807-4e72-8835-dff7af019b43', 'id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'password_hash') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'email') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'origin_peer_id') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'last_seen_at') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'first_seen_at') ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_out VALUES ('c038fc31-ead8-492e-a897-f49dc4364e8e', 'name') ON CONFLICT DO NOTHING;
 
 
 --
 -- Data for Name: field_access_searchable; Type: TABLE DATA; Schema: half_orm_meta.api; Owner: halftest
 --
 
-INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('279d1897-e942-4f0d-9c70-3259708b1acd', 'content', NULL) ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('279d1897-e942-4f0d-9c70-3259708b1acd', 'title', NULL) ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('582d7cdf-bff6-4bfb-8f32-5950d88bffbd', 'content', NULL) ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('582d7cdf-bff6-4bfb-8f32-5950d88bffbd', 'comment_type', NULL) ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('4755756b-815b-4d6f-84ab-c131059dc976', 'name', NULL) ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('f85a3172-50b1-4cc0-ac43-df65229a0771', 'name', NULL) ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('4cbb2a6f-692f-4d4e-ad93-8d3ef9283ef2', 'email', NULL) ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('7a3507bc-5f55-4bc5-83e4-9a9f1798f846', 'content', NULL) ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('7a3507bc-5f55-4bc5-83e4-9a9f1798f846', 'comment_type', NULL) ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('6e833ab2-fd72-4b25-bdef-c020c489b7e0', 'name', NULL) ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('2001c0b8-6314-4863-b365-53856ea052d3', 'title', NULL) ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('2001c0b8-6314-4863-b365-53856ea052d3', 'content', NULL) ON CONFLICT DO NOTHING;
+INSERT INTO "half_orm_meta.api".field_access_searchable VALUES ('d3b60f38-a19b-4174-974b-a8c83a4bc9a2', 'name', NULL) ON CONFLICT DO NOTHING;
 
 
 --
@@ -127,11 +103,10 @@ INSERT INTO "half_orm_meta.api".user_role VALUES ('a0000000-0000-0000-0000-00000
 -- PostgreSQL database dump complete
 --
 
-\unrestrict J0ByJagdf7LziHradJZ033fNOdOKzhaQkeAnZOCjftWVGC0RX928euNxFsxzy5J
+\unrestrict bdQ30moMhypUjBuPQraFNulyNviA8wzfaFT7rnLHtge3Eh7EOXKvFk8lS4U33cY
 
-INSERT INTO "half_orm_meta.api".access_filter (access_id, filter_id) SELECT '279d1897-e942-4f0d-9c70-3259708b1acd'::uuid, f.id FROM "half_orm_meta.api".filter f WHERE f.schema_name='blog' AND f.table_name='post' AND f.name='published_posts' ON CONFLICT DO NOTHING;
-INSERT INTO "half_orm_meta.api".access_filter (access_id, filter_id) SELECT '78950106-df0e-494a-b101-8fc2d17d58fb'::uuid, f.id FROM "half_orm_meta.api".filter f WHERE f.schema_name='blog' AND f.table_name='post' AND f.name='published_posts' ON CONFLICT DO NOTHING;
-UPDATE "half_orm_meta.api".field SET label_order = 0 WHERE schema_name = 'blog' AND table_name = 'post' AND column_name = 'title';
+INSERT INTO "half_orm_meta.api".access_filter (access_id, filter_id) SELECT '2001c0b8-6314-4863-b365-53856ea052d3'::uuid, f.id FROM "half_orm_meta.api".filter f WHERE f.schema_name='blog' AND f.table_name='post' AND f.name='published_posts' ON CONFLICT DO NOTHING;
 UPDATE "half_orm_meta.api".field SET label_order = 0 WHERE schema_name = 'blog' AND table_name = 'comment' AND column_name = 'content';
 UPDATE "half_orm_meta.api".field SET label_order = 0 WHERE schema_name = 'blog' AND table_name = 'comment_type' AND column_name = 'name';
-UPDATE "half_orm_meta.api".field SET label_order = 0 WHERE schema_name = 'actor' AND table_name = 'user' AND column_name = 'name';
+UPDATE "half_orm_meta.api".field SET label_order = 0 WHERE schema_name = 'blog' AND table_name = 'post' AND column_name = 'title';
+UPDATE "half_orm_meta.api".field SET label_order = 0 WHERE schema_name = 'half_orm_meta.identity' AND table_name = 'user' AND column_name = 'name';

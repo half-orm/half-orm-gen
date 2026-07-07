@@ -2,7 +2,7 @@
 
 > CRUD_ACCESS, API_EXCLUDED_FIELDS, `@ho_api_filter`, `@tools.api_*`: [crud-access.md](crud-access.md)  
 > `@ho_api_role`: [authorization.md](authorization.md)  
-> Litestar runtime, `ho_api/custom/`: [litestar/architecture.md](litestar/architecture.md)
+> Litestar runtime, `ho_api/custom/`: [../internals/litestar-architecture.md](../internals/litestar-architecture.md)
 
 ---
 
@@ -38,7 +38,7 @@ fits that shape, it's a relation-class citizen.
 
 `ho_api/custom/middlewares/authorization.py` and `ho_api/custom/routes.py`
 are **never touched by the generator** — create them by hand
-(see [litestar/architecture.md](litestar/architecture.md#litestar-default)).
+(see [../internals/litestar-architecture.md](../internals/litestar-architecture.md#litestar-default)).
 That's where cross-cutting logic goes: authentication flows, request
 middleware, routes that join or orchestrate across several
 relations/silos, or anything that isn't naturally one relation's query or

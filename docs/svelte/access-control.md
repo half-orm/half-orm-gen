@@ -3,7 +3,7 @@
 ## Overview
 
 > Auth store and JWT: [backend/authorization.md](../backend/authorization.md)  
-> Silo architecture: [svelte/silo-architecture.md](silo-architecture.md)  
+> Silo architecture: [internals/svelte-silo-architecture.md](../internals/svelte-silo-architecture.md)  
 > Angular equivalent: [angular/access-control.md](../angular/access-control.md)
 
 Access control in the Svelte frontend is driven by the `/ho_access` endpoint, which returns
@@ -16,6 +16,9 @@ the effective access map for the current JWT. The `AuthState` singleton stores t
 ---
 
 ## Auth state (`AuthState`)
+
+> Full member list (session, WS, route guards):
+> [frontend/auth-service-reference.md](../frontend/auth-service-reference.md)
 
 | Field | Type | Description |
 |---|---|---|
@@ -40,8 +43,7 @@ These are `$derived` values computed from `auth.access`.
 |---|---|---|
 | `canCreate` | `boolean` (`$derived`) | True if POST is available for this resource. |
 | `inaccessibleFields(verb?)` | method → `Set<string>` | Fields to hide for `verb` (`'GET' \| 'POST' \| 'PUT'`, default `'GET'`). GET: not in the effective `out` list. POST: not in `in`, plus `fk_auto` fields of type `connected_user`/`context`. PUT: not in `in` (or a matching dynamic role's `put_in`), plus **all** `fk_auto` fields. |
-| `fkAutoPostFields` | `Record<string, string>` (`$derived`) | FK auto-resolve rules for POST: `{ field: 'connected_user' \| 'context' \| 'select' }`. |
-| `fkAutoPutFields` | `Record<string, string>` (`$derived`) | FK auto-resolve rules for PUT. |
+| `fkAutoFields(verb)` | method → `Record<string, string>` | FK auto-resolve rules for `verb` (`'POST' \| 'PUT'`, no default — always explicit): `{ field: 'connected_user' \| 'context' \| 'select' }`. |
 
 ### Per-row access (dynamic roles)
 
@@ -94,7 +96,7 @@ back in `handleSubmit`:
 
 ```typescript
 const urlParams = new URLSearchParams(window.location.search);
-for (const [field, rule] of Object.entries(silo.fkAutoPostFields)) {
+for (const [field, rule] of Object.entries(silo.fkAutoFields('POST'))) {
   if (rule === 'context') {
     const val = urlParams.get(field);
     if (val != null) payload[field] = val;
@@ -107,10 +109,17 @@ for (const [field, rule] of Object.entries(silo.fkAutoPostFields)) {
 Done server-side in the POST handler. The frontend never sends this field — it is stripped
 from the payload and replaced with `str(request.state.user)` (UUID from JWT `sub` claim).
 
-### `select` (not yet implemented)
+### `select`
 
-Planned: the create form renders a `<select>` dropdown populated from the target resource's
-list endpoint. The user picks the FK value explicitly.
+The create form renders a `<select>` populated from the target resource's own silo
+(`registry.get(targetKey).list()`, fetched once per form via a `fkAutoFields('POST')`-driven
+`$effect`). Options are labeled with the target resource's admin-configured label fields
+(see [ResourceSilo reference](../frontend/resource-silo-reference.md) and the Angular Admin
+UI's "Label fields" panel — Svelte has no Admin UI, per the note above), falling back to
+the raw PK if none are configured.
+
+Edit (PUT) forms don't support `select` yet — every `fk_auto` field is currently hidden in
+PUT regardless of type. Tracked as a fast-follow.
 
 ---
 

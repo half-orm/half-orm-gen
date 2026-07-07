@@ -2,24 +2,24 @@
 
 This document covers the principles shared by both the Svelte and Angular frontends.
 For framework-specific details see:
-- [../svelte/silo-architecture.md](../svelte/silo-architecture.md)
-- [../angular/silo-architecture.md](../angular/silo-architecture.md)
+- [svelte-silo-architecture.md](svelte-silo-architecture.md)
+- [angular-silo-architecture.md](angular-silo-architecture.md)
 
 For the generated file structure and reusable components see:
-- [code-organization.md](code-organization.md)
+- [../frontend/code-organization.md](../frontend/code-organization.md)
 
 For the backend that exposes the API consumed here see:
-- [../backend/litestar/architecture.md](../backend/litestar/architecture.md)
+- [litestar-architecture.md](litestar-architecture.md)
 
 For the full `ResourceSilo` reactive API (member-by-member reference, not
 internals) see:
-- [resource-silo-reference.md](resource-silo-reference.md)
+- [../frontend/resource-silo-reference.md](../frontend/resource-silo-reference.md)
 
 ---
 
 ## CRUD API
 
-> Backend reference: [backend-architecture.md — Route structure](backend-architecture.md#route-structure)
+> Backend reference: [litestar-architecture.md — Route structure](litestar-architecture.md#route-structure)
 
 The backend exposes one set of REST endpoints per database relation:
 
@@ -115,7 +115,7 @@ data inside each silo is flushed.
 
 ## Live updates — WebSocket
 
-> Backend reference: [backend-architecture.md — WebSocket live updates](backend-architecture.md#websocket-live-updates)
+> Backend reference: [litestar-architecture.md — WebSocket live updates](litestar-architecture.md#websocket-live-updates)
 
 The backend pushes mutation events over a WebSocket at `/v0/ws`:
 

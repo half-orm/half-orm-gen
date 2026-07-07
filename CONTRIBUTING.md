@@ -12,12 +12,13 @@ developers familiar with the frameworks it targets.
 | **Angular** | Improve generated components (list, detail, create, fields), routing, state management with signals, accessibility, UX polish |
 | **SvelteKit** | Improve generated stores (silo pattern), layouts, page components, Svelte 5 runes adoption |
 | **Litestar** | Improve the dynamic runtime (`backend/litestar/v2/runtime.py`): middleware, OpenAPI config, WebSocket handling, production hardening |
-| **FastAPI** | Improve the dynamic runtime (`backend/fastapi/v0/runtime.py`): Pydantic models, lifespan, middleware integration |
 | **Python / halfORM** | Route introspection (`backend/crud_routes.py`), CRUD_ACCESS logic, composite PK support |
 
-You do not need to know Python to contribute to the Angular or Svelte generators — the
-generated TypeScript templates live entirely in `frontend/angular/v19/` and
-`frontend/svelte/v5/` as Python string constants.
+You do not need to know Python to contribute templates to the Angular generator — the
+generated TypeScript/HTML lives as real `.ts`/`.html` files under
+`frontend/angular/v19/templates/`, with real syntax highlighting; the `.py` files
+next to them hold only the assembly logic. The Svelte generator hasn't had this
+split yet — its templates are still Python f-string constants in `frontend/svelte/v5/*.py`.
 
 ---
 
@@ -61,14 +62,10 @@ half_orm_gen/
 │   ├── api_routes.py          ← @api_* decorated method route builder
 │   ├── crud_routes.py         ← CRUD_ACCESS introspection → route definitions
 │   ├── generate.py            ← GenApi: orchestrates scaffolding
-│   ├── litestar/v2/
-│   │   ├── runtime.py         ← build_crud_app() — dynamic Litestar app
-│   │   ├── scaffold.py        ← writes ho_api/app.py
-│   │   └── templates.py       ← Litestar code-gen templates
-│   └── fastapi/v0/
-│       ├── runtime.py         ← build_crud_app() — dynamic FastAPI app
+│   └── litestar/v2/
+│       ├── runtime.py         ← build_crud_app() — dynamic Litestar app
 │       ├── scaffold.py        ← writes ho_api/app.py
-│       └── templates.py       ← FastAPI code-gen templates
+│       └── templates.py       ← Litestar code-gen templates
 └── frontend/
     ├── __init__.py            ← GenApp / GenStore
     ├── base.py                ← StoreGenerator base class
@@ -91,7 +88,7 @@ half_orm_gen/
 ### Key concepts
 
 **Backend**: `build_crud_app(model)` reads `CRUD_ACCESS` from each relation module at
-startup and registers Litestar/FastAPI route handlers dynamically — no per-relation code
+startup and registers Litestar route handlers dynamically — no per-relation code
 generation. The generated `ho_api/app.py` is always overwritten; developer customisations
 go in `ho_api/custom/` files that are never touched by the generator.
 
@@ -109,7 +106,7 @@ generated components.
 2. `runtime.py` must expose `build_crud_app(model, ...) -> <App>`.
 3. `scaffold.py` must expose `scaffold_api_dir(api_dir, module_name, api_version)` —
    writes `ho_api/app.py` with conditional imports for customisation.
-4. Wire it in `backend/generate.py` alongside the `litestar`/`fastapi` dispatch.
+4. Wire it in `backend/generate.py` alongside the existing `litestar` dispatch.
 
 ## Adding a new frontend framework
 
@@ -123,15 +120,21 @@ generated components.
 
 Detailed architecture documentation lives in `docs/`:
 
-- [backend/litestar/architecture.md](docs/backend/litestar/architecture.md) — runtime, CRUD_ACCESS, role system
+- [authentication/overview.md](docs/authentication/overview.md), [local-auth.md](docs/authentication/local-auth.md), [federation.md](docs/authentication/federation.md) — how identity/JWT signing works, local and cross-peer
 - [backend/crud-access.md](docs/backend/crud-access.md) — CRUD_ACCESS, @ho_api_filter, @tools.api_* reference
 - [backend/authorization.md](docs/backend/authorization.md) — JWT, roles, @ho_api_role
 - [backend/relation-class-guide.md](docs/backend/relation-class-guide.md) — what goes in a relation class vs. ho_api/custom/
-- [frontend/architecture.md](docs/frontend/architecture.md) — silo pattern, access map, WS
 - [frontend/code-organization.md](docs/frontend/code-organization.md) — generated file layout
 - [frontend/resource-silo-reference.md](docs/frontend/resource-silo-reference.md) — full ResourceSilo reactive API
-- [angular/silo-architecture.md](docs/angular/silo-architecture.md)
-- [svelte/silo-architecture.md](docs/svelte/silo-architecture.md)
+- [frontend/auth-service-reference.md](docs/frontend/auth-service-reference.md) — full AuthService/AuthState reference
+- [angular/access-control.md](docs/angular/access-control.md), [svelte/access-control.md](docs/svelte/access-control.md)
+
+`docs/internals/` — half-orm-gen's own implementation (for maintaining/extending the generator itself, not for using a generated project):
+
+- [internals/litestar-architecture.md](docs/internals/litestar-architecture.md) — runtime, CRUD_ACCESS, role system
+- [internals/frontend-architecture.md](docs/internals/frontend-architecture.md) — silo pattern, access map, WS
+- [internals/angular-silo-architecture.md](docs/internals/angular-silo-architecture.md)
+- [internals/svelte-silo-architecture.md](docs/internals/svelte-silo-architecture.md)
 
 ---
 

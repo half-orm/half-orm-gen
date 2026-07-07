@@ -3,7 +3,7 @@
 > Angular usage: [angular/access-control.md](../angular/access-control.md)  
 > Svelte usage: [svelte/access-control.md](../svelte/access-control.md)  
 > File layout: [code-organization.md](code-organization.md)  
-> Internals (dedup, WebSocket lifecycle): [angular/silo-architecture.md](../angular/silo-architecture.md), [svelte/silo-architecture.md](../svelte/silo-architecture.md)
+> Internals (dedup, WebSocket lifecycle): [internals/angular-silo-architecture.md](../internals/angular-silo-architecture.md), [internals/svelte-silo-architecture.md](../internals/svelte-silo-architecture.md)
 
 ---
 
@@ -61,7 +61,7 @@ canonical member list.
 |---|---|---|---|
 | `canCreate` | `Signal<boolean>` | `boolean` (`$derived`) | True if POST is available for this resource. |
 | `inaccessibleFields(verb?)` | method, `Set<string>` | method, `Set<string>` | Fields to hide for `verb` (`'GET' \| 'POST' \| 'PUT'`, default `'GET'`). GET: not in the effective `out` list. POST: not in `in`, plus `fk_auto` fields of type `connected_user`/`context`. PUT: not in `in` (falling back to a matching dynamic role's `put_in`), plus **all** `fk_auto` fields. |
-| `fkAutoPostFields` / `fkAutoPutFields` | `Signal<Record<string,string>>` | `Record<string,string>` (`$derived`) | FK auto-resolve rule per field: `'connected_user' \| 'context' \| 'select'`. |
+| `fkAutoFields(verb)` | method → `Record<string,string>` | method → `Record<string,string>` | FK auto-resolve rule per field for `verb` (`'POST' \| 'PUT'`, no default): `'connected_user' \| 'context' \| 'select'`. |
 | `searchableFields` | `Signal<string[]>` | `string[]` (`$derived`) | Fields the current role may filter on via `q=`. |
 | `canAccess(verb, id)` | method → `boolean` | method → `boolean` | True if static access grants `verb`, **or** a dynamic role grants `verb` for this row `id`. |
 | `canCreateWithFilters(filters)` | method → `boolean` | method → `boolean` | True if `canCreate` **and** every `context`-type FK field is present in `filters`. |
@@ -76,6 +76,10 @@ silo.inaccessibleFields()          // GET — same as inaccessibleFields('GET')
 silo.inaccessibleFields('POST')
 silo.inaccessibleFields('PUT')
 ```
+
+`fkAutoFields(verb)` has no such default — `fk_auto` only exists on the
+`POST`/`PUT` shape of the access map (there's no `in`/`fk_auto` concept for
+`GET`), so `verb` is always required: `fkAutoFields('POST')`.
 
 ---
 
@@ -113,11 +117,9 @@ silo.inaccessibleFields('PUT')
 
 ## Companion `AuthService`/`AuthState` members
 
-Read alongside a silo's access members, not instead of them — full list in
-[angular/access-control.md](../angular/access-control.md#auth-signals-authservice)
-/ [svelte/access-control.md](../svelte/access-control.md#auth-state-authstate):
-`token`, `resourceAccessVersion()[key]` (Angular) / equivalent invalidation
-in Svelte, `simulatedRole()`/simulation state, `accessVersion()`,
+Read alongside a silo's access members, not instead of them — full reference:
+[auth-service-reference.md](auth-service-reference.md). The members every
+silo itself reads: `token`, `resourceAccessVersion()[key]`, `accessVersion()`,
 `fetchedRoutes` (request dedup set shared across silos), `wsEvent$`/`lastEvent`
 (the live WebSocket event stream every silo subscribes to).
 

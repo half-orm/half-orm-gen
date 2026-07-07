@@ -11,14 +11,19 @@ INSERT INTO blog.comment_type (name) VALUES
 ON CONFLICT DO NOTHING;
 
 -- ── authors ──────────────────────────────────────────────────────────────────
+-- Registered in "half_orm_meta.identity"."user" (the shared federated
+-- identity table, planning/identite_federee.md), NOT a separate local
+-- actor.user table — blog_demo uses identity."user" as its only user store.
+-- password_hash is bcrypt("halform-demo") for every fixture account, so any
+-- of them can log in locally with that password.
 
-INSERT INTO actor."user" (id, name, email) VALUES
-    ('a0000000-0000-0000-0000-000000000000', 'Admin',          'admin@half-orm.org'),
-    ('a1000000-0000-0000-0000-000000000001', 'Alice Martin',   'alice@half-orm.org'),
-    ('a1000000-0000-0000-0000-000000000002', 'Bob Dupont',     'bob@half-orm.org'),
-    ('a1000000-0000-0000-0000-000000000003', 'Clara Nguyen',   'clara@half-orm.org'),
-    ('a1000000-0000-0000-0000-000000000004', 'David Leclerc',  'david@half-orm.org'),
-    ('a1000000-0000-0000-0000-000000000005', 'Eva Rossi',      'eva@half-orm.org');
+INSERT INTO "half_orm_meta.identity"."user" (id, name, email, password_hash) VALUES
+    ('a0000000-0000-0000-0000-000000000000', 'Admin',          'admin@half-orm.org', '$2b$12$KgqfQqm9ucmuTgZUt4ooA.wK.WU3/ujDvUJp14vrQSDIOnt6xbPAe'),
+    ('a1000000-0000-0000-0000-000000000001', 'Alice Martin',   'alice@half-orm.org', '$2b$12$KgqfQqm9ucmuTgZUt4ooA.wK.WU3/ujDvUJp14vrQSDIOnt6xbPAe'),
+    ('a1000000-0000-0000-0000-000000000002', 'Bob Dupont',     'bob@half-orm.org',   '$2b$12$KgqfQqm9ucmuTgZUt4ooA.wK.WU3/ujDvUJp14vrQSDIOnt6xbPAe'),
+    ('a1000000-0000-0000-0000-000000000003', 'Clara Nguyen',   'clara@half-orm.org', '$2b$12$KgqfQqm9ucmuTgZUt4ooA.wK.WU3/ujDvUJp14vrQSDIOnt6xbPAe'),
+    ('a1000000-0000-0000-0000-000000000004', 'David Leclerc',  'david@half-orm.org', '$2b$12$KgqfQqm9ucmuTgZUt4ooA.wK.WU3/ujDvUJp14vrQSDIOnt6xbPAe'),
+    ('a1000000-0000-0000-0000-000000000005', 'Eva Rossi',      'eva@half-orm.org',   '$2b$12$KgqfQqm9ucmuTgZUt4ooA.wK.WU3/ujDvUJp14vrQSDIOnt6xbPAe');
 
 -- ── posts ────────────────────────────────────────────────────────────────────
 
@@ -166,14 +171,16 @@ INSERT INTO blog.comment (id, content, post_id, author_id, comment_type) VALUES
      'noUncheckedIndexedAccess est douloureux au départ mais sauve de nombreux bugs à l''exécution.',
      'b2000000-0000-0000-0000-000000000010', 'a1000000-0000-0000-0000-000000000001', 'comment');
 
--- ── user_role FK → actor.user ────────────────────────────────────────────────
--- user_role was created by half_orm gen api (ddl.py); actor.user exists from the patch.
+-- ── user_role FK → half_orm_meta.identity."user" ────────────────────────────
+-- user_role was created by half_orm gen api (ddl.py) with no FK by default
+-- (it doesn't know which table represents "users" for a given project) —
+-- pin it explicitly to the shared identity table.
 
 ALTER TABLE "half_orm_meta.api".user_role
   DROP CONSTRAINT IF EXISTS user_role_user_id_fk;
 ALTER TABLE "half_orm_meta.api".user_role
   ADD CONSTRAINT user_role_user_id_fk
-  FOREIGN KEY (user_id) REFERENCES actor."user"(id) ON DELETE CASCADE;
+  FOREIGN KEY (user_id) REFERENCES "half_orm_meta.identity"."user"(id) ON DELETE CASCADE;
 
 -- ── user → role assignments ───────────────────────────────────────────────────
 
@@ -184,7 +191,7 @@ ON CONFLICT DO NOTHING;
 COMMIT;
 
 -- Vérification rapide
-SELECT 'authors' AS table_name, COUNT(*) FROM actor."user"
+SELECT 'authors' AS table_name, COUNT(*) FROM "half_orm_meta.identity"."user"
 UNION ALL
 SELECT 'posts',    COUNT(*) FROM blog.post
 UNION ALL

@@ -1,20 +1,17 @@
 # halfORM Backoffice — Backend architecture
 
-> Frontend consumption of this API: [frontend/architecture.md](../../frontend/architecture.md)  
-> Svelte silo details: [svelte/silo-architecture.md](../../svelte/silo-architecture.md)  
-> Angular silo details: [angular/silo-architecture.md](../../angular/silo-architecture.md)  
-> Authorization setup: [authorization.md](../authorization.md)
-
-Two API frameworks are supported, selected at generation time:
+> Frontend consumption of this API: [frontend-architecture.md](frontend-architecture.md)  
+> Svelte silo details: [svelte-silo-architecture.md](svelte-silo-architecture.md)  
+> Angular silo details: [angular-silo-architecture.md](angular-silo-architecture.md)  
+> Authorization setup: [../backend/authorization.md](../backend/authorization.md)
 
 ```
-half_orm gen api --litestar    # default — dynamic runtime, no per-relation code
-half_orm gen api --fastapi     # legacy  — generates api/app.py with all routes inline
+half_orm gen api --litestar    # dynamic runtime, no per-relation code
 ```
 
 ---
 
-## Litestar (default)
+## Litestar
 
 The backend is a **Litestar** application built dynamically at startup from a halfORM model.
 No code is generated per relation — routes are registered at runtime by reading
@@ -43,28 +40,6 @@ application = build_crud_app(MODEL, ..., middleware=_middleware, route_handlers=
 
 Developer-owned files (`custom/middlewares/authorization.py`, `custom/routes.py`) are never
 touched by the generator — create them manually when needed.
-
-## FastAPI
-
-`half_orm gen api --fastapi` also regenerates `ho_api/app.py` on every run.
-Custom routes are passed via `extra_routers`:
-
-```python
-try:
-    from ho_api.custom.routes import router as _custom_router
-    _extra_routers = [_custom_router]
-except ImportError:
-    pass
-
-application = build_crud_app(MODEL, ..., extra_routers=_extra_routers)
-```
-
-**File**: `half_orm_gen/backend/fastapi/v0/runtime.py`  
-**Entry point**: `build_crud_app(model, module_name, api_version, extra_routers, **fastapi_kwargs)`
-
-The FastAPI path uses `half_orm_gen/backend/crud_routes.py` (route builder) and
-`half_orm_gen/backend/fastapi/v0/templates.py` (code templates). These files are not
-involved in the Litestar path.
 
 ---
 
@@ -274,15 +249,3 @@ routes = [my_handler]
 
 `ho_api/app.py` imports this list conditionally — if the file is absent the import silently
 fails and no custom routes are added. The file is never touched by the generator.
-
-For FastAPI, expose an `APIRouter` as `router` instead:
-
-```python
-from fastapi import APIRouter
-
-router = APIRouter()
-
-@router.get('/my-custom-endpoint')
-async def my_handler() -> dict:
-    return {'hello': 'world'}
-```
