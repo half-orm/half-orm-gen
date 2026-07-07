@@ -4,17 +4,20 @@ import { RouterLink, Router, ActivatedRoute } from '@angular/router';
 import { SiloRegistry } from '../../../generated/silo-registry.service';
 import { formatLabel } from '../../../generated/silo-shared';
 import type { Row } from '../../../generated/resource.silo';
+import { AuthService } from '../../../core/auth.service';
+import { PermissionsMatrixComponent } from '../../../generated/permissions-matrix.component';
 
 @Component({
   selector: '$selector',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, PermissionsMatrixComponent],
   templateUrl: './create.component.html',
   styleUrl: './create.component.css',
 })
 export class ${iname}CreateComponent {
   protected registry = inject(SiloRegistry);
   protected silo = this.registry.get('$schema_name/$table_name');
+  protected auth = inject(AuthService);
   private router = inject(Router);
   private route  = inject(ActivatedRoute);
   private readonly fkTargets: Record<string, string> = {$fk_targets_ts};

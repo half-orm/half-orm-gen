@@ -53,7 +53,10 @@ def _app_routes(resources: list, first_route: str, *, include_admin: bool = Fals
     )
     if include_admin:
         lines.append(
-            "  { path: 'ho_bo/admin', loadComponent: () => import('./generated/ho_admin/ho_admin.component').then(m => m.HoAdminComponent), canActivate: [adminGuard] },"
+            "  { path: 'ho_bo/admin/roles', loadComponent: () => import('./generated/ho_admin/admin-roles.component').then(m => m.AdminRolesComponent), canActivate: [adminGuard] },"
+        )
+        lines.append(
+            "  { path: 'ho_bo/admin/peers', loadComponent: () => import('./generated/ho_admin/admin-peers.component').then(m => m.AdminPeersComponent), canActivate: [adminGuard] },"
         )
     route_list_tpl = _tpl('app_shell/route_list.ts')
     route_create_tpl = _tpl('app_shell/route_create.ts')

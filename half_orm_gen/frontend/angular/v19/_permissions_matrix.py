@@ -47,9 +47,5 @@ def _build_perm_data(
     return roles_ts, matrix_ts
 
 
-def _permissions_fields_component_ts() -> str:
-    return _tpl('permissions_matrix/permissions-fields.component.ts').substitute()
-
-
-def _permissions_matrix_component_ts() -> str:
-    return _tpl('permissions_matrix/permissions-matrix.component.ts').substitute()
+def _permissions_matrix_component_ts(version_prefix: str) -> str:
+    return _tpl('permissions_matrix/permissions-matrix.component.ts').substitute(version_prefix=version_prefix)

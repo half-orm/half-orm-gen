@@ -4,7 +4,7 @@
     <div class="flex items-center gap-3">$new_items_badge$new_btn</div>
   </div>
   @if (auth.isAdmin()) {
-    <app-permissions-matrix [catalogEntry]="auth.catalog()['$map_key'] ?? null" />
+    <app-permissions-matrix [catalogEntry]="auth.catalog()['$map_key'] ?? null" resource="$map_key" />
   }
 } @else {$embedded_actions}
 <div [class]="embedded() ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">

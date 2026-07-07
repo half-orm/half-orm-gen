@@ -731,7 +731,7 @@ def build_crud_app(
 
         access_map_holder[0] = access_map
         parent_map_holder[0] = await load_role_parents(model)
-        roles_holder[0] = sorted(k for k in parent_map_holder[0] if k != 'anonymous')
+        roles_holder[0] = sorted(parent_map_holder[0])
 
     async def _startup() -> None:
         global _HO_WARN_SHOWN

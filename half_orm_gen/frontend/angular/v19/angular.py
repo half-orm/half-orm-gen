@@ -32,16 +32,13 @@ from ._app_shell import (
     _login_component, _auth_callback_component, _auth_delegate_component, _access_component,
     _ho_search_component_ts, _ho_search_component_html,
 )
-from ._ho_admin import _ho_admin_component_ts
+from ._ho_admin import _admin_roles_component_ts, _admin_peers_component_ts
 from ._pages import _home_component_ts, _schema_component_ts
 from ._specs import _schema_component_spec_ts
 from ._list_component import _list_component
 from ._form_components import _create_component, _fields_component
 from ._detail_component import _detail_component
-from ._permissions_matrix import (
-    _permissions_matrix_component_ts,
-    _permissions_fields_component_ts,
-)
+from ._permissions_matrix import _permissions_matrix_component_ts
 
 
 # ---------------------------------------------------------------------------
@@ -263,10 +260,8 @@ class AngularAppGenerator(StoreGenerator):
             if src.exists():
                 shutil.copy2(src, generated_dir / fname)
                 print(f'  {generated_dir / fname}')
-        self._write(generated_dir / 'permissions-fields.component.ts',
-                    _permissions_fields_component_ts())
         self._write(generated_dir / 'permissions-matrix.component.ts',
-                    _permissions_matrix_component_ts())
+                    _permissions_matrix_component_ts(version_prefix))
 
         # --- static assets (served from public/ per angular.json) ---
         assets_src = Path(__file__).parents[3] / 'assets'
@@ -275,11 +270,13 @@ class AngularAppGenerator(StoreGenerator):
         for asset in ('logo.png', 'logo-chapeau.png', 'angular_200x200.png'):
             shutil.copy2(assets_src / asset, public_dir / asset)
 
-        # --- admin component (regenerated) ---
+        # --- admin components (regenerated) ---
         admin_dir = app_dir / 'generated' / 'ho_admin'
         admin_dir.mkdir(parents=True, exist_ok=True)
-        self._write(admin_dir / 'ho_admin.component.ts',
-                    _ho_admin_component_ts(version_prefix))
+        self._write(admin_dir / 'admin-roles.component.ts',
+                    _admin_roles_component_ts(version_prefix))
+        self._write(admin_dir / 'admin-peers.component.ts',
+                    _admin_peers_component_ts(version_prefix))
 
         # --- app routes + app component ---
         route_meta = [

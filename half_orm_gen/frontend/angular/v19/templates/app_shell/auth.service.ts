@@ -15,13 +15,29 @@ export interface HoUser {
   is_admin: boolean;
 }
 
+export interface CatalogFilterInfo { id: string; name: string; }
+export interface CatalogFkDep { fields: string[]; target: string; target_fields: string[]; }
+export interface CatalogAccessEntry {
+  id: string;
+  in: string[];
+  out: string[];
+  fk_auto: Record<string, 'connected_user' | 'context' | 'select'>;
+  active_filters: string[];
+  searchable: string[];
+  inherited_in: string[];
+  inherited_out: string[];
+  _searchable_only?: boolean;
+}
+
 export type CatalogEntry = {
   fields: string[];
+  label_fields: string[];
   pk_fields: string[];
   fields_with_defaults: string[];
+  fk_deps: CatalogFkDep[];
   dynamic_roles: string[];
-  filters: { id: string; name: string }[];
-  access: Record<string, Record<string, { id: string; out: string[]; in: string[]; active_filters: string[] }>>;
+  filters: CatalogFilterInfo[];
+  access: Record<string, Record<string, CatalogAccessEntry>>;
 };
 
 @Injectable({ providedIn: 'root' })

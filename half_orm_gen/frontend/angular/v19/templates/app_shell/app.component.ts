@@ -153,11 +153,24 @@ const API_BASE = '$version_prefix';
                 </nav>
               }
             </div>
+            @if (auth.isAdmin()) {
+              <div class="border-t shrink-0">
+                <button (click)="showAdminNav = !showAdminNav"
+                        class="w-full flex items-center justify-between gap-4 px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:bg-gray-50 transition-colors">
+                  Admin
+                  <span class="opacity-60">{{ showAdminNav ? '▲' : '▼' }}</span>
+                </button>
+                @if (showAdminNav) {
+                  <div class="px-2 pb-2 space-y-0.5">
+                    <a routerLink="/ho_bo/admin/roles" routerLinkActive="bg-gray-100 font-semibold"
+                       class="block px-3 py-1.5 rounded hover:bg-gray-100 text-sm text-gray-700">Roles</a>
+                    <a routerLink="/ho_bo/admin/peers" routerLinkActive="bg-gray-100 font-semibold"
+                       class="block px-3 py-1.5 rounded hover:bg-gray-100 text-sm text-gray-700">Peers</a>
+                  </div>
+                }
+              </div>
+            }
             <div class="px-4 py-3 border-t flex items-center justify-between">
-              @if (auth.isAdmin()) {
-                <a routerLink="/ho_bo/admin" routerLinkActive="text-blue-600"
-                   class="text-gray-400 hover:text-blue-600 transition-colors text-xs font-medium" title="Admin">⚙</a>
-              }
               <a routerLink="/schema" routerLinkActive="text-blue-600"
                  class="text-gray-400 hover:text-blue-600 transition-colors" title="Schema">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
@@ -201,6 +214,7 @@ export class AppComponent implements OnInit {
   newItemsMenuOpen = false;
   showFederationNav = false;
   showLocalNav      = true;
+  showAdminNav      = false;
 
   searchTerm     = signal('');
   searchResource = signal('all');
