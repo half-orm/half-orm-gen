@@ -44,6 +44,12 @@ publish: build
 # ---------------------------------------------------------------------------
 # Demo: blog_demo
 # ---------------------------------------------------------------------------
+# Always this project's own venv, never whatever $VIRTUAL_ENV the calling
+# shell happens to have active (or doesn't) — a demo run from a shell without
+# .venv activated silently fell back to a global `litestar`/`half_orm`
+# install, missing local editable-install patches (e.g. with_half_orm_meta).
+VENV_BIN := $(abspath .venv/bin)
+
 DEMO_SCRIPTS := tests/e2e/scripts
 DEMO_DIR     := $(DEMO_SCRIPTS)/demos/blog_demo
 DEMO_LOGS    := $(DEMO_DIR)/.run
@@ -51,11 +57,11 @@ DEMO_LOGS    := $(DEMO_DIR)/.run
 .PHONY: demo-blog
 demo-blog:  demo-blog-clean ## Régénère la demo blog_demo (drop DB + regen complet)
 	dropdb -f --if-exists blog_demo
-	cd $(DEMO_SCRIPTS) && yes | PATH="$${VIRTUAL_ENV:+$$VIRTUAL_ENV/bin:}$$PATH" bash demo_blog.sh
+	cd $(DEMO_SCRIPTS) && yes | PATH="$(VENV_BIN):$$PATH" bash demo_blog.sh
 
 .PHONY: demo-blog-clean
 demo-blog-clean:  demo-blog-stop ## Nettoie la demo (drop DB + suppression projet)
-	cd $(DEMO_SCRIPTS) && PATH="$${VIRTUAL_ENV:+$$VIRTUAL_ENV/bin:}$$PATH" bash demo_blog.sh --cleanup
+	cd $(DEMO_SCRIPTS) && PATH="$(VENV_BIN):$$PATH" bash demo_blog.sh --cleanup
 
 .PHONY: demo-blog-api
 demo-blog-api:  ## Régénère l'API
@@ -64,7 +70,7 @@ demo-blog-api:  ## Régénère l'API
 .PHONY: demo-blog-api-run
 demo-blog-api-run:  ## Lance l'API Litestar en tâche de fond puis suit les logs
 	@mkdir -p $(DEMO_LOGS)
-	@setsid nohup bash -c 'cd $(DEMO_DIR)/ho_api && PATH="$${VIRTUAL_ENV:+$$VIRTUAL_ENV/bin:}$$PATH" exec litestar run --debug' \
+	@setsid nohup bash -c 'cd $(DEMO_DIR)/ho_api && PATH="$(VENV_BIN):$$PATH" exec litestar run --debug' \
 		> $(DEMO_LOGS)/api.log 2>&1 & echo $$! > $(DEMO_LOGS)/api.pid
 	@echo "API   PID $$(cat $(DEMO_LOGS)/api.pid) — logs: $(DEMO_LOGS)/api.log"
 	@tail -f $(DEMO_LOGS)/api.log & echo $$! > $(DEMO_LOGS)/api.tail.pid
@@ -246,16 +252,16 @@ PAGES_DEMO_LOGS := $(PAGES_DEMO_DIR)/.run
 .PHONY: demo-pages
 demo-pages:  demo-pages-clean ## Régénère la demo pages_demo (drop DB + regen complet)
 	dropdb -f --if-exists pages_demo
-	cd $(DEMO_SCRIPTS) && yes | PATH="$${VIRTUAL_ENV:+$$VIRTUAL_ENV/bin:}$$PATH" bash demo_pages.sh
+	cd $(DEMO_SCRIPTS) && yes | PATH="$(VENV_BIN):$$PATH" bash demo_pages.sh
 
 .PHONY: demo-pages-clean
 demo-pages-clean:  demo-pages-stop ## Nettoie la demo (drop DB + suppression projet)
-	cd $(DEMO_SCRIPTS) && PATH="$${VIRTUAL_ENV:+$$VIRTUAL_ENV/bin:}$$PATH" bash demo_pages.sh --cleanup
+	cd $(DEMO_SCRIPTS) && PATH="$(VENV_BIN):$$PATH" bash demo_pages.sh --cleanup
 
 .PHONY: demo-pages-api-run
 demo-pages-api-run:  ## Lance l'API Litestar (port 8001) en tâche de fond puis suit les logs
 	@mkdir -p $(PAGES_DEMO_LOGS)
-	@setsid nohup bash -c 'cd $(PAGES_DEMO_DIR)/ho_api && PATH="$${VIRTUAL_ENV:+$$VIRTUAL_ENV/bin:}$$PATH" exec litestar run --debug --port 8001' \
+	@setsid nohup bash -c 'cd $(PAGES_DEMO_DIR)/ho_api && PATH="$(VENV_BIN):$$PATH" exec litestar run --debug --port 8001' \
 		> $(PAGES_DEMO_LOGS)/api.log 2>&1 & echo $$! > $(PAGES_DEMO_LOGS)/api.pid
 	@echo "API   PID $$(cat $(PAGES_DEMO_LOGS)/api.pid) — logs: $(PAGES_DEMO_LOGS)/api.log"
 	@tail -f $(PAGES_DEMO_LOGS)/api.log & echo $$! > $(PAGES_DEMO_LOGS)/api.tail.pid

@@ -52,6 +52,17 @@ bash demo_blog.sh           # create DB, generate everything
 bash demo_blog.sh --cleanup # drop DB and remove generated files
 ```
 
+Run these directly and the project's own `.venv` needs to already be
+activated in your shell (`source .venv/bin/activate`) — the scripts just
+call `half_orm`/`litestar` as found on `PATH`. The `make demo-*` targets
+(`demo-blog`, `demo-blog-api-run`, `demo-pages`, ...) don't have this
+requirement: they always prepend this project's own `.venv/bin`
+(`VENV_BIN` in the `Makefile`) regardless of what's active in the calling
+shell — this matters because half-orm-gen's `.venv` is where editable
+installs of sibling packages (`half_orm`, `half_orm_dev`) actually live;
+falling back to a different/global interpreter silently picks up a stale,
+non-patched version of those instead.
+
 ---
 
 ## Code structure

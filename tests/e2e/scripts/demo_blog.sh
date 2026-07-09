@@ -54,7 +54,8 @@ echo -e "${GREEN}=== INIT PROJECT ===${NC}"
 half_orm dev init "$PROJECT" \
     --git-origin "$GIT_BARE" \
     --user "$TEST_DB_USER" \
-    --password "$TEST_DB_PASSWORD"
+    --password "$TEST_DB_PASSWORD" \
+    --with-meta=half_orm_meta.identity.user
 
 cd "$PROJECT"
 

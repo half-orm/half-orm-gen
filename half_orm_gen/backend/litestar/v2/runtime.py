@@ -626,22 +626,38 @@ def build_crud_app(
     classes_by_res: dict[str, type] = {}
     relation_handlers: list = []
 
-    # "half_orm_meta.identity"."user" is invisible to model.classes() (halfORM
-    # itself skips every half_orm_meta-prefixed schema there) — by design, so
-    # it never gets full generic CRUD. But other resources hold real FKs to it
-    # (e.g. blog.post.author_id), and their forms need a working GET/list to
+    # "half_orm_meta.identity"."user" is invisible to model.classes() when the
+    # Model wasn't built with with_half_orm_meta=True (halfORM's default skips
+    # every half_orm_meta-prefixed schema there) — by design, so it never gets
+    # full generic CRUD. But other resources hold real FKs to it (e.g.
+    # blog.post.author_id), and their forms need a working GET/list to
     # populate a "select" FK dropdown and a "connected_user"/"context" auto-fill
-    # (planning/a_resoudre.md item 18) — so it's added back explicitly here,
-    # GET-only (no POST/PUT/DELETE handlers below), with password_hash always
+    # (planning/a_resoudre.md item 18) — so it's added back explicitly below,
+    # GET-only (no POST/PUT/DELETE handlers), with password_hash always
     # excluded regardless of what CRUD_ACCESS an admin configures for it.
+    #
+    # A Model built with with_half_orm_meta=True yields it natively through
+    # model.classes() instead — detected by (schema, table), not object
+    # identity, since it's then a different class instance than
+    # identity_user_cls below. Falling back to the manual injection only when
+    # it's NOT already present avoids registering the same route twice.
+    _IDENTITY_USER_RESOURCE = ('half_orm_meta.identity', 'user')
     identity_user_cls = HoIdentityModels(model).user()
 
     def _all_classes():
-        yield from model.classes()
-        yield identity_user_cls, 'r'
+        seen_resources: set[tuple[str, str]] = set()
+        for cls, kind in model.classes():
+            inst = cls()
+            seen_resources.add((inst._t_fqrn[1], inst._t_fqrn[2]))
+            yield cls, kind
+        if _IDENTITY_USER_RESOURCE not in seen_resources:
+            yield identity_user_cls, 'r'
 
     for cls, _kind in _all_classes():
-        is_identity_user = cls is identity_user_cls
+        inst    = cls()
+        schema  = inst._t_fqrn[1]
+        table   = inst._t_fqrn[2]
+        is_identity_user = (schema, table) == _IDENTITY_USER_RESOURCE
         if is_identity_user:
             api_excluded: list[str] = ['password_hash']
         else:
@@ -652,9 +668,6 @@ def build_crud_app(
             # API_EXCLUDED_FIELDS stays in Python modules
             api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', []) if mod else []
 
-        inst    = cls()
-        schema  = inst._t_fqrn[1]
-        table   = inst._t_fqrn[2]
         resource = f'{schema}/{table}'
         path     = f'{prefix}/{resource}'
         pk_info  = _pk_info(cls)
