@@ -121,10 +121,18 @@ async def load_roles_info(model) -> list[dict]:
 
 
 async def reconcile_catalog(model) -> None:
-    """Sync routes/fields with pg_catalog: insert new, flag deprecated, unflag restored."""
-    api  = HoApiModels(model)
-    meta = model.ho_meta()
+    """Sync resource/route/field catalogs with pg_catalog: insert new, flag
+    deprecated, unflag restored. Delegates to each table's own class — see
+    half_orm_gen.backend.ho_api.half_orm_meta (Resource.sync/Route.sync/
+    Field.sync). Callers must have already called half_orm_meta.register_all
+    (model) — reconcile_catalog itself doesn't, so it can run as many times
+    as needed (e.g. the SIGHUP live-reload path) without re-registering.
 
+    "half_orm_meta.identity"."user" needs no special-casing here anymore:
+    once with_half_orm_meta covers it, model.ho_meta() (like model.classes())
+    yields it like any other relation.
+    """
+    meta = model.ho_meta()
     live_relations = {(v['schema'], v['table']) for v in meta.values()}
     live_fields = {
         (v['schema'], v['table'], f['name'])
@@ -132,63 +140,11 @@ async def reconcile_catalog(model) -> None:
         for f in v.get('fields', [])
     }
 
-    # "half_orm_meta.identity"."user" is invisible to model.ho_meta() too —
-    # it delegates to pg_meta.desc(), which applies the exact same
-    # half_orm_meta-prefix skip as model.classes() (not just the Python-class
-    # exclusion runtime.py works around for routing). Without this, it would
-    # never get a "half_orm_meta.api".route row and so never appear in
-    # /ho_admin/catalog at all, even though build_crud_app already serves it
-    # GET-only (see planning/a_resoudre.md item 18).
-    from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
-    identity_user_sfqrn = HoIdentityModels(model).user()()._t_fqrn
-    live_relations.add(('half_orm_meta.identity', 'user'))
-    for fname in model._fields_metadata(identity_user_sfqrn):
-        live_fields.add(('half_orm_meta.identity', 'user', fname))
+    Resource = model.get_relation_class('"half_orm_meta.api".resource')
+    Route    = model.get_relation_class('"half_orm_meta.api".route')
+    Field    = model.get_relation_class('"half_orm_meta.api".field')
 
-    # ── Resources ───────────────────────────────────────────────────────────
-    # Must run before Routes/Fields below — both reference resource(schemaname,
-    # relname) via FK.
-    db_resources = {
-        (r['schemaname'], r['relname'])
-        for r in await api.resource()().ho_aselect()
-    }
-    for schema, table in live_relations - db_resources:
-        await api.resource()(schemaname=schema, relname=table).ho_ainsert()
-
-    # ── Routes ──────────────────────────────────────────────────────────────
-    db_routes = {
-        (r['schema_name'], r['table_name'], r['verb']): r['deprecated']
-        for r in await api.route()().ho_aselect()
-    }
-    db_relations = {(s, t) for s, t, _ in db_routes}
-
-    for schema, table in live_relations - db_relations:
-        for verb in ('GET', 'POST', 'PUT', 'DELETE'):
-            await api.route()(
-                schema_name=schema, table_name=table, verb=verb
-            ).ho_ainsert()
-
-    for (schema, table, verb), was_deprecated in db_routes.items():
-        should = (schema, table) not in live_relations
-        if was_deprecated != should:
-            await api.route()(
-                schema_name=schema, table_name=table, verb=verb
-            ).ho_aupdate(deprecated=should)
-
-    # ── Fields ───────────────────────────────────────────────────────────────
-    db_fields = {
-        (r['schema_name'], r['table_name'], r['column_name']): r['deprecated']
-        for r in await api.field()().ho_aselect()
-    }
-
-    for (schema, table, col) in live_fields - set(db_fields):
-        await api.field()(
-            schema_name=schema, table_name=table, column_name=col
-        ).ho_ainsert()
-
-    for (schema, table, col), was_deprecated in db_fields.items():
-        should = (schema, table, col) not in live_fields
-        if was_deprecated != should:
-            await api.field()(
-                schema_name=schema, table_name=table, column_name=col
-            ).ho_aupdate(deprecated=should)
+    # Resources first — Route/Field both FK-reference resource(schemaname, relname).
+    await Resource.sync(live_relations)
+    await Route.sync(live_relations)
+    await Field.sync(live_fields)

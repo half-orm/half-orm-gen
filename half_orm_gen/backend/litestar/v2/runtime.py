@@ -7,12 +7,13 @@ server startup by reading access configuration from "half_orm_meta.api" tables.
 """
 import asyncio
 import importlib
+import inspect
 import re
 import signal
 import sys
 from typing import Optional, List, Any
 
-from litestar import Litestar, Router, get, post, put, delete, websocket, Request, WebSocket
+from litestar import Litestar, Router, get, post, put, delete, patch, websocket, Request, WebSocket
 from litestar.exceptions import HTTPException
 from litestar.logging import LoggingConfig
 
@@ -23,7 +24,6 @@ from half_orm_gen.backend.ho_api.loader import (
     ensure_system_roles,
     reconcile_catalog,
 )
-from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
 from half_orm_gen.backend.crud_helpers import (
     _COMPOSITE_PK_PATTERN, _py_type_str,
     _get_roles, _get_role_filter, _get_active_filters,
@@ -598,12 +598,98 @@ _HO_WARN = """
 _HO_WARN_SHOWN = False
 
 
+# ---------------------------------------------------------------------------
+# @tools.api_* custom routes — discovered from methods marked by
+# half_orm_gen.tools (is_api_route/http_method/litestar_params/metadata),
+# built as real closures (no source-code generation). Lets a developer
+# enrich the CRUD API with routes that don't fit the generic verb/resource
+# shape — typically to guarantee atomicity of a multi-step operation that
+# CRUD alone can't (combine with @half_orm.relation.atransaction).
+# ---------------------------------------------------------------------------
+
+_CUSTOM_ROUTE_VERBS = {'GET': get, 'POST': post, 'PUT': put, 'DELETE': delete, 'PATCH': patch}
+
+
+def _resolve_guard(name: str, parent_map_holder: list, custom_guards: dict):
+    """Resolve one `guards=[...]` name to a real litestar Guard callable.
+
+    `custom_guards` (ho_api/custom/guards.py's `guards` dict, see scaffold.py)
+    is the escape hatch for checks that can't be expressed as local role
+    membership — e.g. querying another API for a group defined elsewhere.
+    Any name not found there falls back to a simple local-role check: the
+    caller must have `name` among their roles, expanded through the role
+    hierarchy — enough for "requires role X" without writing any code.
+    """
+    custom = custom_guards.get(name)
+    if custom is not None:
+        return custom
+
+    async def _guard(connection, _route_handler) -> None:
+        roles = _expand_roles(_get_roles(connection), parent_map_holder[0])
+        if name not in roles:
+            raise HTTPException(status_code=403, detail=f'Requires role: {name}')
+    return _guard
+
+
+def _discover_custom_api_routes(classes, prefix: str, parent_map_holder: list, custom_guards: dict) -> list:
+    """Scan relation classes for @tools.api_* methods and build real handlers.
+
+    A method qualifies when it carries the `is_api_route` marker (set by
+    half_orm_gen.tools.api_get/post/put/delete/patch) and is defined
+    directly on the class (not just inherited — avoids registering the
+    same route once per subclass sharing a common base).
+    """
+    seen: set = set()
+    handlers = []
+    for cls, _kind in classes:
+        api_methods = [
+            (name, method)
+            for name, method in inspect.getmembers(cls, predicate=inspect.isfunction)
+            if getattr(method, 'is_api_route', False) and name in cls.__dict__
+        ]
+        for name, method in api_methods:
+            key = (cls.__module__, cls.__qualname__, name)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            decorator = _CUSTOM_ROUTE_VERBS.get(method.http_method)
+            if decorator is None:
+                continue
+
+            litestar_params = dict(method.litestar_params)
+            path = litestar_params.pop('path', None)
+            if not path:
+                continue
+            guard_names = litestar_params.pop('guards', None) or []
+            if guard_names:
+                litestar_params['guards'] = [
+                    _resolve_guard(n, parent_map_holder, custom_guards) for n in guard_names
+                ]
+
+            sig = method.metadata.get('signature') or inspect.signature(method)
+            handler_sig = sig.replace(
+                parameters=[p for pname, p in sig.parameters.items() if pname != 'self']
+            )
+
+            def _make_handler(relation_cls=cls, bound_method=method, handler_sig=handler_sig):
+                async def _handler(**kwargs):
+                    return await bound_method(relation_cls(), **kwargs)
+                _handler.__signature__ = handler_sig
+                _handler.__name__ = f'{relation_cls.__name__}_{bound_method.__name__}'
+                return _handler
+
+            handlers.append(decorator(f'{prefix}{path}', **litestar_params)(_make_handler()))
+    return handlers
+
+
 def build_crud_app(
     model,
     module_name: str = '',
     api_version: int | None = None,
     middleware: list | None = None,
     route_handlers: list | None = None,
+    custom_guards: dict | None = None,
     **litestar_kwargs,
 ) -> Litestar:
     """
@@ -613,6 +699,15 @@ def build_crud_app(
     (roles, field restrictions) is loaded from "half_orm_meta.api" at startup.
     """
     prefix = f'/v{api_version}' if api_version is not None else ''
+
+    # Registers half_orm_meta's own hand-maintained Relation subclasses
+    # (half_orm_gen.backend.ho_api.half_orm_meta) against this model — after
+    # this, model.classes()/model.get_relation_class(...) transparently
+    # return them instead of a generic dynamically-built class. Must run
+    # before the class-enumeration loop below (idempotent — safe even if
+    # this model was already registered elsewhere).
+    from half_orm_gen.backend.ho_api import half_orm_meta
+    half_orm_meta.register_all(model)
 
     # Mutable containers populated at startup — handlers close over these refs
     crud_access_by_res: dict[str, dict]  = {}
@@ -626,47 +721,21 @@ def build_crud_app(
     classes_by_res: dict[str, type] = {}
     relation_handlers: list = []
 
-    # "half_orm_meta.identity"."user" is invisible to model.classes() when the
-    # Model wasn't built with with_half_orm_meta=True (halfORM's default skips
-    # every half_orm_meta-prefixed schema there) — by design, so it never gets
-    # full generic CRUD. But other resources hold real FKs to it (e.g.
-    # blog.post.author_id), and their forms need a working GET/list to
-    # populate a "select" FK dropdown and a "connected_user"/"context" auto-fill
-    # (planning/a_resoudre.md item 18) — so it's added back explicitly below,
-    # GET-only (no POST/PUT/DELETE handlers), with password_hash always
-    # excluded regardless of what CRUD_ACCESS an admin configures for it.
-    #
-    # A Model built with with_half_orm_meta=True yields it natively through
-    # model.classes() instead — detected by (schema, table), not object
-    # identity, since it's then a different class instance than
-    # identity_user_cls below. Falling back to the manual injection only when
-    # it's NOT already present avoids registering the same route twice.
-    _IDENTITY_USER_RESOURCE = ('half_orm_meta.identity', 'user')
-    identity_user_cls = HoIdentityModels(model).user()
-
-    def _all_classes():
-        seen_resources: set[tuple[str, str]] = set()
-        for cls, kind in model.classes():
-            inst = cls()
-            seen_resources.add((inst._t_fqrn[1], inst._t_fqrn[2]))
-            yield cls, kind
-        if _IDENTITY_USER_RESOURCE not in seen_resources:
-            yield identity_user_cls, 'r'
-
-    for cls, _kind in _all_classes():
+    for cls, _kind in model.classes():
         inst    = cls()
         schema  = inst._t_fqrn[1]
         table   = inst._t_fqrn[2]
-        is_identity_user = (schema, table) == _IDENTITY_USER_RESOURCE
-        if is_identity_user:
-            api_excluded: list[str] = ['password_hash']
-        else:
-            try:
-                mod = importlib.import_module(cls.__module__)
-            except ModuleNotFoundError:
-                mod = None
-            # API_EXCLUDED_FIELDS stays in Python modules
-            api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', []) if mod else []
+        try:
+            mod = importlib.import_module(cls.__module__)
+        except ModuleNotFoundError:
+            mod = None
+        # API_EXCLUDED_FIELDS / READ_ONLY are read the same way for every
+        # class, whether it's a generated business module or one of
+        # half_orm_meta's own hand-maintained modules (both real, importable
+        # modules once registered — e.g. half_orm_meta.identity.user sets
+        # API_EXCLUDED_FIELDS = ['password_hash'] and READ_ONLY = True).
+        api_excluded: list[str] = getattr(mod, 'API_EXCLUDED_FIELDS', []) if mod else []
+        read_only: bool = getattr(mod, 'READ_ONLY', False) if mod else False
 
         resource = f'{schema}/{table}'
         path     = f'{prefix}/{resource}'
@@ -685,7 +754,7 @@ def build_crud_app(
             relation_handlers.append(
                 _make_get_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info, parent_map_holder)
             )
-            if not is_identity_user:
+            if not read_only:
                 relation_handlers.append(
                     _make_post_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info[0][0], parent_map_holder)
                 )
@@ -708,6 +777,7 @@ def build_crud_app(
         _make_ws_handler(prefix),
         *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
         *make_identity_admin_handlers(model, prefix),
+        *_discover_custom_api_routes(model.classes(), prefix, parent_map_holder, custom_guards or {}),
     ]
 
     logging_config = LoggingConfig(
@@ -723,7 +793,7 @@ def build_crud_app(
         """
         access_map: dict = {}
 
-        for cls, _kind in _all_classes():
+        for cls, _kind in model.classes():
             inst     = cls()
             schema   = inst._t_fqrn[1]
             table    = inst._t_fqrn[2]

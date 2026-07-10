@@ -11,6 +11,7 @@ Files always regenerated:
 Files scaffolded once (never overwritten):
   ho_api/custom/middlewares/jwt_config.py — developer hook: enrich_state()
   ho_api/custom/local_auth.py.example     — documentation-only local-auth example (e.g. LDAP)
+  ho_api/custom/guards.py.example         — documentation-only custom-guard example (@tools.api_*)
   ho_api/.env                             — secret/key-file references (must be gitignored)
   ho_api/private_key.pem                  — RS256 private key (federation only, gitignored)
   ho_api/public_key.pem                   — RS256 public key (federation only — share with trusted peers)
@@ -88,12 +89,18 @@ try:
 except ImportError:
     pass
 
+try:
+    from ho_api.custom.guards import guards as _custom_guards
+except ImportError:
+    _custom_guards = {}
+
 application = build_crud_app(
     MODEL,
     module_name='{module_name}',
     api_version={api_version},
     middleware=_middleware,
     route_handlers=_route_handlers,
+    custom_guards=_custom_guards,
 )
 """
 
@@ -534,6 +541,50 @@ async def authenticate(model, email: str, password: str) -> str | None:
 """
 
 # ---------------------------------------------------------------------------
+# ho_api/custom/guards.py.example  (scaffolded once, documentation only —
+# never imported; copy to guards.py to actually define custom guards)
+# ---------------------------------------------------------------------------
+
+_CUSTOM_GUARDS_EXAMPLE = """\
+\"\"\"
+Example custom guards for @tools.api_* routes (half_orm_gen.tools).
+
+This file is NOT imported by default (note the .example suffix). Copy it
+to ho_api/custom/guards.py to define `guards`, a dict mapping the name
+strings used in a route's `guards=[...]` to a real litestar Guard callable
+— `async def guard(connection, route_handler) -> None`, raising to deny.
+
+Any name not found here falls back to a simple check: the caller must have
+that name among their roles (expanded through the role hierarchy) — enough
+for "requires role X" without writing any code. Define a guard here only
+when the check can't be expressed as local role membership — typically
+because it depends on something outside this project's own database, e.g.
+querying another API to check whether the connected user belongs to a
+group defined elsewhere.
+\"\"\"
+
+
+async def in_external_group(connection, route_handler) -> None:
+    \"\"\"Example: authorize via a group membership defined in another system.
+
+    from litestar.exceptions import NotAuthorizedException
+    import httpx
+
+    user_id = connection.state.user_id
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f'https://groups.example.com/members/{user_id}')
+    if resp.status_code != 200 or 'editors' not in resp.json().get('groups', []):
+        raise NotAuthorizedException('Not a member of the editors group')
+    \"\"\"
+    raise NotImplementedError
+
+
+guards = {
+    # 'in_external_group': in_external_group,
+}
+"""
+
+# ---------------------------------------------------------------------------
 # ho_api/custom/middlewares/jwt_config.py  (scaffolded once)
 # ---------------------------------------------------------------------------
 
@@ -668,3 +719,15 @@ def scaffold_api_dir(
         if not init.exists():
             init.write_text('', encoding='utf-8')
         print(f'  created  {local_auth_example}')
+
+    # custom/guards.py.example — scaffolded once, documentation only
+    # (the .example suffix means it's never imported; copy it to
+    # custom/guards.py to define guards for @tools.api_* routes)
+    guards_example = api_dir / 'custom' / 'guards.py.example'
+    if not guards_example.exists():
+        guards_example.parent.mkdir(parents=True, exist_ok=True)
+        guards_example.write_text(_CUSTOM_GUARDS_EXAMPLE, encoding='utf-8')
+        init = api_dir / 'custom' / '__init__.py'
+        if not init.exists():
+            init.write_text('', encoding='utf-8')
+        print(f'  created  {guards_example}')

@@ -12,11 +12,13 @@ from pathlib import Path
 def _ensure_ho_api_schema(model) -> None:
     """Create the "half_orm_meta.api"/"half_orm_meta.identity" schemas and seed system roles + catalog."""
     import asyncio
+    from half_orm_gen.backend.ho_api import half_orm_meta
     from half_orm_gen.backend.ho_api.ddl import HO_API_DDL, HO_IDENTITY_DDL
     from half_orm_gen.backend.ho_api.loader import ensure_system_roles, reconcile_catalog
     model.execute_query(HO_API_DDL)
     model.execute_query(HO_IDENTITY_DDL)
     model.reconnect(reload=True)
+    half_orm_meta.register_all(model)
 
     async def _run():
         await model.aconnect()
