@@ -66,37 +66,64 @@ git checkout ho-prod
 half_orm dev release create minor   # ho-release/0.1.0
 
 # ---------------------------------------------------------------------------
-# 4. Patch 1: wiki schema — no FK to half_orm_meta.identity yet, that schema
-#    doesn't exist until `half_orm gen api --federation` runs (step 6).
+# 4. Patch 1: half_orm_meta.api/.identity schema — must exist before the wiki
+#    schema below, since wiki.page.author_id references
+#    "half_orm_meta.identity"."user" directly in its CREATE TABLE (inline FK,
+#    not a separate ALTER TABLE patch afterward).
 # ---------------------------------------------------------------------------
-half_orm dev patch create 1-wiki-schema
+echo -e "${GREEN}=== GENERATE gen API SCHEMA ===${NC}"
 
-cat > "Patches/1-wiki-schema/01_wiki.sql" << 'SQL'
+half_orm dev patch create 1-gen-api-schema
+
+python3 -c "
+from half_orm_gen.backend.ho_api.ddl import HO_API_DDL, HO_IDENTITY_DDL
+open('Patches/1-gen-api-schema/01_schema.sql', 'w').write(HO_API_DDL + '\n' + HO_IDENTITY_DDL)
+"
+
+half_orm dev patch apply
+git add .
+git commit -m "Add half_orm_meta.api/.identity schema"
+half_orm dev patch merge
+
+# ---------------------------------------------------------------------------
+# 5. Patch 2: wiki schema — author_id references half_orm_meta.identity."user"
+#    directly, real referential integrity from the start.
+# ---------------------------------------------------------------------------
+half_orm dev patch create 2-wiki-schema
+
+cat > "Patches/2-wiki-schema/01_wiki.sql" << 'SQL'
 CREATE SCHEMA wiki;
 
 CREATE TABLE wiki.page (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title     TEXT NOT NULL,
     content   TEXT NOT NULL,
-    author_id UUID
+    author_id UUID references "half_orm_meta.identity"."user" on delete cascade
 );
 SQL
 
-echo -e "${GREEN}=== APPLY PATCH 1 ===${NC}"
+echo -e "${GREEN}=== APPLY PATCH 2 ===${NC}"
 half_orm dev patch apply
 
 git add .
-git commit -m "Add wiki schema" --no-verify
+git commit -m "Add wiki schema"
 half_orm dev patch merge
-half_orm dev release promote prod
 
 # ---------------------------------------------------------------------------
-# 5. Generate gen API — with federation (RS256 keypair, half_orm_meta.identity
-#    schema, ho_api/federation.py). Every rebuild gets a fresh keypair; peer
-#    trust (public keys) is re-registered by `make demo-federate` afterwards.
+# 6. Patch 3: generate ho_api + ho_frontend (federation), load fixtures,
+#    write the dynamic role — all inside one patch's create/.../merge cycle
+#    rather than as loose commits directly on the release branch (which
+#    breaks the next patch's ability to be created/replayed).
 # ---------------------------------------------------------------------------
-echo -e "${GREEN}=== GENERATE gen API ===${NC}"
+half_orm dev patch create 3-gen-api-and-frontend
+
+# File scaffolding only, no DB change — the DDL from patch 1 already created
+# the schemas, so _ensure_ho_api_schema's own execute_query calls are a no-op
+# (CREATE ... IF NOT EXISTS).
 half_orm gen api --litestar --federation
+half_orm gen frontend --angular
+half_orm gen frontend --svelte
+
 # scaffold_api_dir already writes an empty `HO_PEER_URL=` placeholder line —
 # replace it (sed) rather than appending a second one: the .env loader in
 # app.py uses os.environ.setdefault() per line, so the first (empty) HO_PEER_URL
@@ -129,47 +156,6 @@ echo -e "${GREEN}✓ Pinned dev keypair + HO_PEER_ID (stable across rebuilds)${N
 sed -i 's|^HO_FRONTEND_URL=$|HO_FRONTEND_URL=http://localhost:4300|' ho_api/.env
 echo -e "${GREEN}✓ Set HO_FRONTEND_URL for federation${NC}"
 
-# ---------------------------------------------------------------------------
-# 6. Patch 2: add the FK now that half_orm_meta.identity."user" exists —
-#    real referential integrity, not just a logically-linked UUID. Must run
-#    BEFORE `half_orm gen frontend` below, which introspects real FK
-#    constraints to detect author_id as a foreign key (combobox, link, etc.).
-#    A new patch requires being on a ho-release/X.Y.Z branch, not ho-prod
-#    (where `release promote prod` above left us) — create one first. It
-#    also requires a clean working tree — commit the files `gen api`
-#    wrote (app.py, federation.py, keys, .env) first; the original blog_demo
-#    script never needed to since it never created a second patch afterwards.
-# ---------------------------------------------------------------------------
-git checkout ho-prod
-half_orm dev release create patch   # ho-release/0.1.1
-
-git add .
-git commit -m "Generate ho_api (federation)" --no-verify
-git push origin ho-release/0.1.1
-
-half_orm dev patch create 2-wiki-author-fk
-
-cat > "Patches/2-wiki-author-fk/01_fk.sql" << 'SQL'
-ALTER TABLE wiki.page
-    ADD CONSTRAINT fk_page_author
-    FOREIGN KEY (author_id) REFERENCES "half_orm_meta.identity"."user"(id);
-SQL
-
-echo -e "${GREEN}=== APPLY PATCH 2 ===${NC}"
-half_orm dev patch apply
-
-git add .
-git commit -m "Add FK: wiki.page.author_id -> half_orm_meta.identity.user" --no-verify
-half_orm dev patch merge
-half_orm dev release promote prod
-
-# ---------------------------------------------------------------------------
-# 7. Generate frontends — after the FK above, so author_id is correctly
-#    detected as a foreign key (fk_deps) into half_orm_meta.identity."user".
-# ---------------------------------------------------------------------------
-half_orm gen frontend --angular
-half_orm gen frontend --svelte
-
 # half_orm-gen always generates dev servers pointed at port 8000 (the
 # generic default) — pages_demo's API runs on 8001 so it can coexist with
 # blog_demo (port 8000). Patch the generated proxy/dev-server config, not
@@ -185,6 +171,17 @@ sed -i 's|"dev": "vite dev"|"dev": "vite dev --port 5300"|' \
 sed -i 's|VITE_WS_BASE=http://localhost:8000|VITE_WS_BASE=http://localhost:8001|' \
     ho_frontend/svelte/.env.local
 echo -e "${GREEN}✓ Patched frontend dev-server ports (Angular 4300, Svelte 5300 → API 8001)${NC}"
+
+git add .
+git commit -m "Generate ho_api + ho_frontend (federation)"
+
+# ---------------------------------------------------------------------------
+# 7. Load fixtures (access rules + demo data)
+# ---------------------------------------------------------------------------
+echo -e "${GREEN}=== LOAD FIXTURES ===${NC}"
+psql "$PROJECT" \
+    -f "$FIXTURES_DIR/pages_demo_data.sql"
+echo -e "${GREEN}✓ Fixtures loaded${NC}"
 
 # ---------------------------------------------------------------------------
 # 8. Dynamic role: author on wiki.page (same pattern as blog_demo's post_author)
@@ -225,121 +222,10 @@ PYEOF
 
 echo -e "${GREEN}✓ Dynamic role written${NC}"
 
-# ---------------------------------------------------------------------------
-# 9. Real auth routes (not yes-auth like blog_demo) — exercises the actual
-#    generated local_auth.py (DB password check against
-#    half_orm_meta.identity."user".password_hash), rather than bypassing it.
-# ---------------------------------------------------------------------------
-echo -e "${GREEN}=== AUTH ROUTES (real local auth) ===${NC}"
-
-cat > ho_api/custom/routes.py << 'PYEOF'
-"""
-Real local-auth routes for the pages_demo demonstrator — exercises the
-generated ho_api/local_auth.py (DB password check), unlike blog_demo's
-simplified yes-auth example.
-
-  POST /auth/signup  {name, email, password}  → create user; first signup becomes admin
-  POST /auth/login   {email, password}        → checks password via local_auth.authenticate()
-  GET  /ho_users                              → list users with is_admin flag
-"""
-import os
-import uuid
-import bcrypt
-import jwt
-from litestar import get, post
-from litestar.exceptions import HTTPException
-
-from pages_demo import MODEL
-from half_orm_gen.backend.ho_api.models import HoApiModels
-from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
-from ho_api.local_auth import authenticate
-
-
-def _sign(user_id: str, roles: list[str], name: str | None = None, email: str | None = None) -> str:
-    algorithm = os.environ.get('HO_JWT_ALGORITHM', 'HS256')
-    if algorithm == 'RS256':
-        cur_dir = os.path.dirname(os.path.abspath(__file__))
-        key_file = os.path.join(cur_dir, os.pardir, os.environ['HO_JWT_PRIVATE_KEY_FILE'])
-        with open(key_file) as f:
-            key = f.read()
-    else:
-        key = os.environ['HO_JWT_SECRET']
-    payload = {'sub': user_id, 'roles': roles}
-    # name/email are only used by a peer we later delegate to (federation_callback
-    # reads them to fill in a brand new "half_orm_meta.identity"."user" row it
-    # creates for someone it's never seen before) — harmless extra claims here.
-    if name:
-        payload['name'] = name
-    if email:
-        payload['email'] = email
-    return jwt.encode(payload, key, algorithm=algorithm)
-
-
-@post('/auth/signup')
-async def signup(data: dict) -> dict:
-    """Create a new local user. Becomes admin if no admin exists yet."""
-    email    = (data.get('email') or '').strip()
-    name     = (data.get('name') or '').strip()
-    password = data.get('password') or ''
-    if not email or not name or not password:
-        raise HTTPException(status_code=400, detail='name, email and password required')
-
-    identity = HoIdentityModels(MODEL)
-    existing = await identity.user()(email=email).ho_aselect('id')
-    if existing:
-        raise HTTPException(status_code=409, detail='Email already registered')
-
-    password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    user_id = str(uuid.uuid4())
-    await identity.user()(
-        id=user_id, name=name, email=email, password_hash=password_hash,
-    ).ho_ainsert()
-
-    api = HoApiModels(MODEL)
-    admin_exists = await api.user_role()(role_name='admin').ho_aselect('user_id')
-    role_name = 'admin' if not admin_exists else 'connected'
-    await api.user_role()(user_id=user_id, role_name=role_name).ho_ainsert()
-
-    return {'token': _sign(user_id, [role_name], name, email)}
-
-
-@post('/auth/login')
-async def login(data: dict) -> dict:
-    """Real local login: checks the password against half_orm_meta.identity.user."""
-    email    = (data.get('email') or '').strip()
-    password = data.get('password') or ''
-    if not email or not password:
-        raise HTTPException(status_code=400, detail='email and password required')
-    user_id = await authenticate(MODEL, email, password)
-    if not user_id:
-        raise HTTPException(status_code=401, detail='Invalid email or password')
-    identity = HoIdentityModels(MODEL)
-    user_rows = await identity.user()(id=user_id).ho_aselect('name')
-    name = user_rows[0]['name'] if user_rows else None
-    api = HoApiModels(MODEL)
-    role_rows = await api.user_role()(user_id=user_id).ho_aselect('role_name')
-    roles = [r['role_name'] for r in role_rows] or ['connected']
-    return {'token': _sign(user_id, roles, name, email)}
-
-
-@get('/ho_users')
-async def ho_users() -> list:
-    """Return all known users (local + federated-in) with their admin flag."""
-    identity = HoIdentityModels(MODEL)
-    users = await identity.user()().ho_aselect('id', 'name')
-    api = HoApiModels(MODEL)
-    admin_rows = await api.user_role()(role_name='admin').ho_aselect('user_id')
-    admin_ids = {str(r['user_id']) for r in admin_rows}
-    return [
-        {'id': str(u['id']), 'name': u['name'] or '(unnamed)', 'is_admin': str(u['id']) in admin_ids}
-        for u in users
-    ]
-
-
-routes = [signup, login, ho_users]
-PYEOF
-
-echo -e "${GREEN}✓ Auth routes written${NC}"
+git add .
+git commit -m "Add page_author dynamic role"
+half_orm dev patch merge
+half_orm dev release promote prod
 
 echo ""
 echo -e "${GREEN}=== DONE ===${NC}"

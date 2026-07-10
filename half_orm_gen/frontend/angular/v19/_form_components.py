@@ -1,7 +1,6 @@
 from half_orm_gen.frontend.base import (
     _is_bool_field, _is_text_field, _is_textarea_field,
     _is_required, _is_server_generated, _input_type, _text_fields,
-    NO_COMPONENT_FK_TARGETS,
 )
 from ._helpers import _selector, _title, _field_type_category
 from ._templates import _tpl
@@ -129,7 +128,6 @@ def _fields_component(
     )
 
     ro_row_pk_tpl = _tpl('form/ro_row_pk.html')
-    ro_row_fk_no_component_tpl = _tpl('form/ro_row_fk_no_component.html')
     ro_row_fk_tpl = _tpl('form/ro_row_fk.html')
     ro_row_latex_tpl = _tpl('form/ro_row_latex.html')
     ro_row_plain_tpl = _tpl('form/ro_row_plain.html')
@@ -143,10 +141,6 @@ def _fields_component(
             )
         if f in fk_map:
             rs, rt = fk_map[f]
-            if (rs, rt) in NO_COMPONENT_FK_TARGETS:
-                # No generated detail route for this target (e.g.
-                # half_orm_meta.identity/user) — plain text, not a dead link.
-                return ro_row_fk_no_component_tpl.substitute(label=label, f=f)
             return ro_row_fk_tpl.substitute(label=label, rs=rs, rt=rt, f=f)
         if f in all_fields and _field_type_category(all_fields[f]) == 'string':
             return ro_row_latex_tpl.substitute(label=label, f=f)

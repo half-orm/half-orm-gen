@@ -9,16 +9,6 @@ from pathlib import Path
 
 from half_orm_gen.backend.crud_routes import _py_type_str
 
-# Resources recognized as valid FK-select targets (see _fk_deps below) but
-# that never get a full generated component set (no Fields/List/detail
-# route) — currently just "half_orm_meta.identity"."user", served GET-only
-# purely so other resources' forms can look up/auto-fill a reference to it
-# (planning/a_resoudre.md item 18). Any "linked reference" feature that
-# assumes a real generated component (detail-page FK preview, reverse-FK
-# list) must exclude these, or it ends up importing a file that was never
-# written.
-NO_COMPONENT_FK_TARGETS = {('half_orm_meta.identity', 'user')}
-
 
 # ---------------------------------------------------------------------------
 # Name helpers

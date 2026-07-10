@@ -1,5 +1,8 @@
 from half_orm_gen.backend.crud_routes import _resolved_out, _resolved_in
+from half_orm_gen.backend.ho_api.half_orm_meta.identity.user import RESOURCE as _IDENTITY_USER_RESOURCE
 from ._templates import _tpl
+
+_IDENTITY_USER_TARGET = f'{_IDENTITY_USER_RESOURCE[0]}/{_IDENTITY_USER_RESOURCE[1]}'
 
 
 def _build_perm_data(
@@ -48,4 +51,6 @@ def _build_perm_data(
 
 
 def _permissions_matrix_component_ts(version_prefix: str) -> str:
-    return _tpl('permissions_matrix/permissions-matrix.component.ts').substitute(version_prefix=version_prefix)
+    return _tpl('permissions_matrix/permissions-matrix.component.ts').substitute(
+        version_prefix=version_prefix, identity_user_target=_IDENTITY_USER_TARGET,
+    )

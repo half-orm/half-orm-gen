@@ -140,7 +140,9 @@ const VERB_COLOR: Record<string, string> = {
                                     [value]="getFkAutoRule(fk.fields)"
                                     (change)="setFkAutoGroup(fk.fields, $$any($$event.target).value)">
                               <option value="">—</option>
-                              <option value="connected_user">connected_user</option>
+                              @if (fk.target === '$identity_user_target') {
+                                <option value="connected_user">connected_user</option>
+                              }
                               <option value="context">context</option>
                               <option value="select">select</option>
                             </select>
