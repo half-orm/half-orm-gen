@@ -59,9 +59,26 @@ export class AuthDelegateComponent {
   }
 
   private _redirectWithToken(token: string): void {
+    // A real top-level navigation via a hidden auto-submitting POST form —
+    // not window.location (always GET) and not fetch() (doesn't navigate
+    // the browser) — so the federation token travels in the request body,
+    // never in a URL: no access log line, no browser history entry, no
+    // Referer leak. The backend's /auth/callback expects exactly this
+    // (POST, form-encoded token + csrf_state).
     this.redirecting.set(true);
-    const sep = this.redirectUri.includes('?') ? '&' : '?';
-    window.location.href = `$${this.redirectUri}$${sep}token=$${encodeURIComponent(token)}&csrf_state=$${encodeURIComponent(this.csrfState)}`;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = this.redirectUri;
+    form.style.display = 'none';
+    for (const [name, value] of [['token', token], ['csrf_state', this.csrfState]] as const) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
   }
 
   async submit(): Promise<void> {

@@ -161,13 +161,18 @@ GET /auth/login?redirect_uri=<url>&csrf_state=<state>
   is what other peers register in their own "half_orm_meta.identity".peer
   row for this project — so it's already a valid federation proof.
 
-GET /auth/callback?token=<jwt>&state=<state>
+POST /auth/callback  {token: <jwt>, csrf_state: <state>}  (form-encoded)
   Validate `state` (exists, not expired, single-use — deleted on read),
   verify `token`'s signature against the SPECIFIC peer that state was
   issued for (never "any trusted peer"), upsert
   "half_orm_meta.identity"."user" (origin_peer_id = that peer), mint a
   local session JWT signed with THIS peer's own private key, and redirect
   to the original return_to with that token.
+
+  POST rather than GET: the frontend reaches this endpoint via a real
+  top-level navigation (an auto-submitting hidden form, not fetch()) so the
+  incoming federation token never lands in a URL query string — no access
+  log line, no browser history entry, no Referer leak.
 
 See planning/identite_federee.md section 4 for the full protocol
 rationale (why browser redirect rather than server-to-server credential
@@ -181,10 +186,13 @@ import os
 import secrets
 import time
 import uuid as _uuid
+from typing import Annotated
 
 import jwt as _jwt
-from litestar import get
+from litestar import get, post
+from litestar.enums import RequestEncodingType
 from litestar.exceptions import HTTPException
+from litestar.params import Body
 from litestar.response import Redirect
 
 _STATE_TTL_SECONDS = 600  # 10 minutes
@@ -276,10 +284,18 @@ def make_federation_handlers(model) -> list:
         target = f"{peer_row['url']}/auth/login?redirect_uri={callback_uri}&csrf_state={state_value}"
         return Redirect(path=target)
 
-    # NB: the parameter can't be named `state` — Litestar reserves that name
-    # for its own injected `litestar.datastructures.State` app-state object.
-    @get('/auth/callback')
-    async def federation_callback(token: str, csrf_state: str) -> Redirect:
+    # NB: the field can't be named `state` — Litestar reserves that name for
+    # its own injected `litestar.datastructures.State` app-state object.
+    # POST + form-encoded body (not GET query params) — see the module
+    # docstring: keeps the federation token out of the URL entirely.
+    @post('/auth/callback')
+    async def federation_callback(
+        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
+    ) -> Redirect:
+        token      = data.get('token')
+        csrf_state = data.get('csrf_state')
+        if not token or not csrf_state:
+            raise HTTPException(status_code=400, detail='token and csrf_state required')
         state_row = await LoginState.consume(csrf_state)
         if not state_row:
             raise HTTPException(status_code=400, detail='Unknown or already-used login state')
@@ -315,8 +331,14 @@ def make_federation_handlers(model) -> list:
 
         local_token = _sign_local_token(user_id, await UserRole.roles_for(user_id))
         return_to = state_row['return_to'] or '/'
-        sep = '&' if '?' in return_to else '?'
-        return Redirect(path=f'{return_to}{sep}token={local_token}')
+        # Fragment, not query string: return_to is a static SPA route with no
+        # backend of its own to read a POST body from, so the token can't
+        # travel the same way the incoming one did above. A URL fragment is
+        # never sent to the server by the browser (stripped before the HTTP
+        # request line is built) — no access log line, no Referer leak —
+        # while still being readable client-side via window.location.hash
+        # (see the frontend's auth-callback page).
+        return Redirect(path=f'{return_to}#token={local_token}')
 
     return [auth_login, federation_callback]
 """

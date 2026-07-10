@@ -496,7 +496,13 @@ def _auth_callback_page() -> str:
 
   let error = $state('');
 
-  const token = page.url.searchParams.get('token');
+  // The token travels in the URL fragment, not the query string — a
+  // fragment is never sent to the server by the browser (stripped before
+  // the HTTP request line is built), so it never lands in an access log,
+  // a proxy log, or a Referer header. See ho_api/federation.py's
+  // federation_callback, which redirects here with #token=...
+  const hash = new URLSearchParams(page.url.hash.replace(/^#/, ''));
+  const token = hash.get('token');
   if (!token) {
     error = 'Missing token — sign-in did not complete.';
   } else {
@@ -530,9 +536,26 @@ def _auth_delegate_page(version_prefix: str) -> str:
   const csrfState = page.url.searchParams.get('csrf_state') ?? '';
 
   function redirectWithToken(token: string) {{
+    // A real top-level navigation via a hidden auto-submitting POST form —
+    // not window.location (always GET) and not fetch() (doesn't navigate
+    // the browser) — so the federation token travels in the request body,
+    // never in a URL: no access log line, no browser history entry, no
+    // Referer leak. The backend's /auth/callback expects exactly this
+    // (POST, form-encoded token + csrf_state).
     redirecting = true;
-    const sep = redirectUri.includes('?') ? '&' : '?';
-    window.location.href = `${{redirectUri}}${{sep}}token=${{encodeURIComponent(token)}}&csrf_state=${{encodeURIComponent(csrfState)}}`;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = redirectUri;
+    form.style.display = 'none';
+    for (const [name, value] of [['token', token], ['csrf_state', csrfState]] as const) {{
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    }}
+    document.body.appendChild(form);
+    form.submit();
   }}
 
   if (!redirectUri || !csrfState) {{
