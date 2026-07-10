@@ -69,8 +69,30 @@ if os.path.isfile(_env_file):
                 _k, _, _v = _line.partition('=')
                 os.environ.setdefault(_k.strip(), _v.strip())
 
+# Normalize key-file paths to absolute, once, here — they're written to
+# ho_api/.env relative to ho_api/ (see scaffold_api_dir), and this is the
+# one place in the whole app that's guaranteed to run from ho_api/'s own
+# __file__-relative cur_dir, before any other code (including installed
+# half_orm_gen code, which has no reason to know this project's layout)
+# reads HO_JWT_PRIVATE_KEY_FILE / HO_JWT_PUBLIC_KEY_FILE from the environment.
+for _key_var in ('HO_JWT_PRIVATE_KEY_FILE', 'HO_JWT_PUBLIC_KEY_FILE'):
+    _key_val = os.environ.get(_key_var)
+    if _key_val and not os.path.isabs(_key_val):
+        os.environ[_key_var] = os.path.join(cur_dir, _key_val)
+
 from half_orm_gen.backend.litestar.v2.runtime import build_crud_app
 from {module_name} import MODEL
+
+# Must happen before anything else below touches MODEL — federation.py and
+# any project's own ho_api/custom/routes.py both call model.get_relation_
+# class(...) for half_orm_meta tables (e.g. Peer) at import time, expecting
+# the classes half_orm_meta.identity/api define (Peer.lookup_trusted, User.
+# authenticate, ...) rather than a generic dynamically-built one — which is
+# only true once they've been registered. build_crud_app also registers
+# them (idempotent), but by then federation_setup below would already have
+# run with the wrong classes.
+from half_orm_gen.backend.ho_api import half_orm_meta as _half_orm_meta
+_half_orm_meta.register_all(MODEL)
 
 from ho_api.authorization import Authorization
 
@@ -165,9 +187,6 @@ from litestar import get
 from litestar.exceptions import HTTPException
 from litestar.response import Redirect
 
-from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
-from half_orm_gen.backend.ho_api.models import HoApiModels
-
 _STATE_TTL_SECONDS = 600  # 10 minutes
 
 _ALGORITHM = os.environ.get('HO_JWT_ALGORITHM', 'HS256')
@@ -211,17 +230,10 @@ def _sign_local_token(user_id: str, roles: list[str]) -> str:
 
 
 def make_federation_handlers(model) -> list:
-    identity = HoIdentityModels(model)
-    api = HoApiModels(model)
-
-    async def _local_roles(user_id: str) -> list[str]:
-        # This peer's OWN grants for this person — identity federates,
-        # role assignment doesn't (planning/identite_federee.md). A person
-        # delegated in from another peer for the first time has none yet
-        # (falls back to 'connected'); an admin can grant more afterwards
-        # via half_orm_meta.api.user_role, same as any local user.
-        rows = await api.user_role()(user_id=user_id).ho_aselect('role_name')
-        return [r['role_name'] for r in rows] or ['connected']
+    Peer       = model.get_relation_class('"half_orm_meta.identity".peer')
+    LoginState = model.get_relation_class('"half_orm_meta.identity".login_state')
+    User       = model.get_relation_class('"half_orm_meta.identity"."user"')
+    UserRole   = model.get_relation_class('"half_orm_meta.api".user_role')
 
     # A single /auth/login handles both directions of the protocol — which
     # one applies is determined by which query params are present, not by
@@ -255,14 +267,11 @@ def make_federation_handlers(model) -> list:
             peer_uid = _uuid.UUID(peer)
         except ValueError:
             raise HTTPException(status_code=400, detail='peer must be a uuid (HO_PEER_ID), not a name')
-        rows = await identity.peer()(id=peer_uid, trusted=True).ho_aselect('id', 'url')
-        if not rows:
+        peer_row = await Peer.lookup_trusted(peer_uid)
+        if not peer_row:
             raise HTTPException(status_code=404, detail=f'Unknown or untrusted peer: {peer}')
-        peer_row = rows[0]
         state_value = secrets.token_urlsafe(32)
-        await identity.login_state()(
-            state=state_value, peer_id=peer_row['id'], return_to=return_to,
-        ).ho_ainsert()
+        await LoginState.create(state_value, peer_row['id'], return_to)
         callback_uri = f'{_THIS_PEER_URL}/auth/callback'
         target = f"{peer_row['url']}/auth/login?redirect_uri={callback_uri}&csrf_state={state_value}"
         return Redirect(path=target)
@@ -271,14 +280,9 @@ def make_federation_handlers(model) -> list:
     # for its own injected `litestar.datastructures.State` app-state object.
     @get('/auth/callback')
     async def federation_callback(token: str, csrf_state: str) -> Redirect:
-        state_rows = await identity.login_state()(state=csrf_state).ho_aselect(
-            'peer_id', 'return_to', 'created_at',
-        )
-        if not state_rows:
+        state_row = await LoginState.consume(csrf_state)
+        if not state_row:
             raise HTTPException(status_code=400, detail='Unknown or already-used login state')
-        state_row = state_rows[0]
-        # Single-use: delete immediately, before doing anything else with it.
-        await identity.login_state()(state=csrf_state).ho_adelete('*')
 
         age = (
             datetime.datetime.now(datetime.timezone.utc) - state_row['created_at']
@@ -286,12 +290,10 @@ def make_federation_handlers(model) -> list:
         if age > _STATE_TTL_SECONDS:
             raise HTTPException(status_code=400, detail='Expired login state')
 
-        peer_rows = await identity.peer()(id=state_row['peer_id']).ho_aselect(
-            'jwt_public_key', 'trusted',
-        )
-        if not peer_rows or not peer_rows[0]['trusted'] or not peer_rows[0]['jwt_public_key']:
+        peer_row = await Peer.lookup(state_row['peer_id'])
+        if not peer_row or not peer_row['trusted'] or not peer_row['jwt_public_key']:
             raise HTTPException(status_code=403, detail='Peer is not (or no longer) trusted')
-        public_key = peer_rows[0]['jwt_public_key']
+        public_key = peer_row['jwt_public_key']
 
         # Verify against THIS SPECIFIC peer's key — not "any trusted peer" —
         # otherwise a different (still trusted) peer could substitute its
@@ -307,20 +309,11 @@ def make_federation_handlers(model) -> list:
         uid = _uuid.UUID(user_id)
         now = datetime.datetime.now(datetime.timezone.utc)
 
-        existing = await identity.user()(id=uid).ho_aselect('id')
-        if existing:
-            await identity.user()(id=uid).ho_aupdate(last_seen_at=now)
-        else:
-            await identity.user()(
-                id=uid,
-                origin_peer_id=state_row['peer_id'],
-                name=payload.get('name'),
-                email=payload.get('email'),
-                first_seen_at=now,
-                last_seen_at=now,
-            ).ho_ainsert()
+        await User.upsert_from_federation(
+            uid, state_row['peer_id'], payload.get('name'), payload.get('email'), now,
+        )
 
-        local_token = _sign_local_token(user_id, await _local_roles(user_id))
+        local_token = _sign_local_token(user_id, await UserRole.roles_for(user_id))
         return_to = state_row['return_to'] or '/'
         sep = '&' if '?' in return_to else '?'
         return Redirect(path=f'{return_to}{sep}token={local_token}')
@@ -476,8 +469,6 @@ over from the default DB check whenever that module is present.
 \"\"\"
 import os
 
-from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
-
 HO_LOCAL_AUTH = os.environ.get('HO_LOCAL_AUTH', 'db')
 
 try:
@@ -492,23 +483,8 @@ async def authenticate(model, email: str, password: str) -> str | None:
         return None
     if _custom_authenticate is not None:
         return await _custom_authenticate(model, email, password)
-    return await _authenticate_db(model, email, password)
-
-
-async def _authenticate_db(model, email: str, password: str) -> str | None:
-    import bcrypt
-
-    identity = HoIdentityModels(model)
-    rows = await identity.user()(email=email).ho_aselect('id', 'password_hash')
-    if not rows:
-        return None
-    row = rows[0]
-    stored_hash = row.get('password_hash')
-    if not stored_hash:
-        return None
-    if not bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
-        return None
-    return str(row['id'])
+    User = model.get_relation_class('"half_orm_meta.identity"."user"')
+    return await User.authenticate(email, password)
 """
 
 # ---------------------------------------------------------------------------

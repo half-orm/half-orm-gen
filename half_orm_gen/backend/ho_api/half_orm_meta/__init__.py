@@ -18,10 +18,27 @@ generic dynamically-built one (half_orm.relation_factory.factory checks the
 model's own class registry first).
 """
 
-from .identity import user as _user
-from .api import resource as _resource, route as _route, field as _field
+from .identity import user as _user, peer as _peer, login_state as _login_state
+from .api import (
+    resource as _resource, route as _route, field as _field,
+    role as _role, access as _access,
+    field_access_in as _field_access_in, field_access_out as _field_access_out,
+    field_access_fk_auto as _field_access_fk_auto,
+    field_access_searchable as _field_access_searchable,
+    filter as _filter, access_filter as _access_filter, user_role as _user_role,
+)
 
-_MODULES = (_user, _resource, _route, _field)
+# Order matters for the ones with FK dependencies on each other: role before
+# access (access.role_name references role.name), and resource before
+# route/field (both reference resource(schemaname, relname)) — registration
+# order itself doesn't touch the DB, but keeping it matches the DDL's own
+# dependency order for readability.
+_MODULES = (
+    _user, _peer, _login_state,
+    _resource, _role, _route, _field, _access,
+    _field_access_in, _field_access_out, _field_access_fk_auto,
+    _field_access_searchable, _filter, _access_filter, _user_role,
+)
 
 _registered: set = set()
 

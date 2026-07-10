@@ -29,10 +29,8 @@ def register_relation_roles(cls):
 async def discover_and_register(model, classes) -> None:
     """Scan user modules for @ho_api_role / @ho_api_filter, populate registries and DB."""
     import importlib
-    from half_orm_gen.backend.ho_api.models import HoApiModels
-    api = HoApiModels(model)
-    Role   = api.role()
-    Filter = api.filter()
+    Role   = model.get_relation_class('"half_orm_meta.api".role')
+    Filter = model.get_relation_class('"half_orm_meta.api".filter')
     for cls, _kind in classes:
         try:
             mod = importlib.import_module(cls.__module__)
@@ -49,28 +47,8 @@ async def discover_and_register(model, classes) -> None:
             role_name = getattr(attr, '_ho_api_role', None)
             if role_name:
                 _ROLE_REGISTRY[(schema, table, role_name)] = attr
-                existing = await Role()(name=role_name).ho_aselect('deletable', 'schemaname', 'relname')
-                if not existing:
-                    # deletable=False: this role is hardcoded via @ho_api_role on
-                    # the resource class — deleting the DB row would be pointless,
-                    # discover_and_register re-creates it on every startup anyway.
-                    await Role()(
-                        name=role_name, deletable=False,
-                        schemaname=schema, relname=table,
-                    ).ho_ainsert()
-                elif (
-                    existing[0]['deletable']
-                    or existing[0]['schemaname'] != schema
-                    or existing[0]['relname'] != table
-                ):
-                    # Self-heal a row created before this deletable=False /
-                    # schemaname+relname fix landed.
-                    await Role()(name=role_name).ho_aupdate(
-                        deletable=False, schemaname=schema, relname=table,
-                    )
+                await Role.register_dynamic(schema, table, role_name)
             filter_name = getattr(attr, '_ho_api_filter', None)
             if filter_name:
                 _FILTER_REGISTRY[(schema, table, filter_name)] = attr
-                rows = await Filter()(schema_name=schema, table_name=table, name=filter_name).ho_aselect('id')
-                if not rows:
-                    await Filter()(schema_name=schema, table_name=table, name=filter_name).ho_ainsert()
+                await Filter.register(schema, table, filter_name)

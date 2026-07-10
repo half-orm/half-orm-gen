@@ -10,6 +10,10 @@ def build_class(model):
 
     class Route(base):
         @classmethod
+        async def list_all(cls) -> list:
+            return await cls().ho_aselect()
+
+        @classmethod
         async def sync(cls, live_relations: set) -> None:
             """Insert routes for newly-live relations; flag/unflag deprecated ones.
 

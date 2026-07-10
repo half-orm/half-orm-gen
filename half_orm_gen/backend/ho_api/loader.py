@@ -2,9 +2,10 @@
 Load CRUD access configuration from "half_orm_meta.api" tables.
 
 Replaces getattr(mod, 'CRUD_ACCESS', None) in both runtime.py and crud_routes.py.
-"""
 
-from .models import HoApiModels
+Cross-table orchestration only — each table's own read/write logic lives on
+its own class under half_orm_gen.backend.ho_api.half_orm_meta.
+"""
 
 
 async def load_crud_access(model, schema_name: str, table_name: str) -> dict | None:
@@ -12,9 +13,16 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
 
     Returns None if no routes are defined for this relation.
     """
-    api = HoApiModels(model)
+    Route                 = model.get_relation_class('"half_orm_meta.api".route')
+    Access                = model.get_relation_class('"half_orm_meta.api".access')
+    FieldAccessOut         = model.get_relation_class('"half_orm_meta.api".field_access_out')
+    FieldAccessIn          = model.get_relation_class('"half_orm_meta.api".field_access_in')
+    FieldAccessFkAuto      = model.get_relation_class('"half_orm_meta.api".field_access_fk_auto')
+    FieldAccessSearchable  = model.get_relation_class('"half_orm_meta.api".field_access_searchable')
+    AccessFilter           = model.get_relation_class('"half_orm_meta.api".access_filter')
+    Filter                 = model.get_relation_class('"half_orm_meta.api".filter')
 
-    routes = await api.route()(
+    routes = await Route(
         schema_name=schema_name, table_name=table_name, deprecated=False
     ).ho_aselect('verb')
     if not routes:
@@ -23,34 +31,26 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
     crud_access: dict = {}
     for route_row in routes:
         verb = route_row['verb']
-        accesses = await api.access()(
-            schema_name=schema_name, table_name=table_name, verb=verb
-        ).ho_aselect()
+        accesses = await Access.list_for(schema_name, table_name, verb)
 
         verb_dict: dict = {}
         for acc in accesses:
-            role    = acc['role_name']
-            acc_id  = acc['id']
+            role   = acc['role_name']
+            acc_id = acc['id']
 
             if verb == 'DELETE':
                 verb_dict[role] = 'allowed'
                 continue
 
-            out_rows    = await api.field_access_out()(access_id=acc_id).ho_aselect('field_name')
-            in_rows     = await api.field_access_in()(access_id=acc_id).ho_aselect('field_name')
-            fk_rows     = await api.field_access_fk_auto()(access_id=acc_id).ho_aselect('field_name', 'resolve_rule')
-            srch_rows   = await api.field_access_searchable()(access_id=acc_id).ho_aselect('field_name', 'role_name')
+            out_list = await FieldAccessOut.list_for(acc_id)
+            in_list  = await FieldAccessIn.list_for(acc_id)
+            fk_auto  = {r['field_name']: r['resolve_rule'] for r in await FieldAccessFkAuto.list_for(acc_id)}
+            srch_rows = await FieldAccessSearchable.list_for(acc_id)
 
-            filter_rows = await api.access_filter()(access_id=acc_id).ho_aselect('filter_id')
-            filter_names: list[str] = []
-            for fr in filter_rows:
-                f = await api.filter()(id=fr['filter_id']).ho_aselect('name')
-                if f:
-                    filter_names.append(f[0]['name'])
-
-            out_list = [r['field_name'] for r in out_rows]
-            in_list  = [r['field_name'] for r in in_rows]
-            fk_auto  = {r['field_name']: r['resolve_rule'] for r in fk_rows}
+            filter_ids = [r['filter_id'] for r in await AccessFilter.list_for(acc_id)]
+            filter_names = [
+                name for name in [await Filter.name_for(fid) for fid in filter_ids] if name
+            ]
 
             entry: dict = {}
             # Preserve any searchable already distributed by a parent acc processed earlier
@@ -81,27 +81,16 @@ async def load_crud_access(model, schema_name: str, table_name: str) -> dict | N
     return crud_access
 
 
-_SYSTEM_ROLES = [
-    ('anonymous', False, None),
-    ('connected', False, 'anonymous'),
-    ('admin',     False, 'connected'),
-]
-
-
 async def ensure_system_roles(model) -> None:
     """Insert each system role individually if not already present."""
-    api = HoApiModels(model)
-    Role = api.role()
-    for name, deletable, parent_name in _SYSTEM_ROLES:
-        if not await Role(name=name).ho_aselect('name'):
-            await Role(name=name, deletable=deletable, parent_name=parent_name).ho_ainsert()
+    Role = model.get_relation_class('"half_orm_meta.api".role')
+    await Role.ensure_system_roles()
 
 
 async def load_role_parents(model) -> dict[str, str | None]:
     """Return {role_name: parent_name} for all roles."""
-    api = HoApiModels(model)
-    rows = await api.role()().ho_aselect('name', 'parent_name')
-    return {r['name']: r['parent_name'] for r in rows}
+    Role = model.get_relation_class('"half_orm_meta.api".role')
+    return await Role.load_parents()
 
 
 async def load_roles_info(model) -> list[dict]:
@@ -112,12 +101,8 @@ async def load_roles_info(model) -> list[dict]:
     registry.py) — that's what makes it dynamic, and what a client uses to
     know which resource's permissions matrix should offer it as a row.
     """
-    api = HoApiModels(model)
-    rows = await api.role()().ho_aselect('name', 'schemaname', 'relname')
-    return [
-        {'name': r['name'], 'schema_name': r['schemaname'], 'table_name': r['relname']}
-        for r in rows
-    ]
+    Role = model.get_relation_class('"half_orm_meta.api".role')
+    return await Role.load_roles_info()
 
 
 async def reconcile_catalog(model) -> None:

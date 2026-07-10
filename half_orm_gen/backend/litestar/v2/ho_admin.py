@@ -5,6 +5,10 @@ All endpoints require an active role of 'admin'.
 After each mutating operation the in-memory crud_access_by_res and
 access_map_holder are refreshed so that /ho_access reflects the change
 immediately, without a server restart.
+
+Thin HTTP layer only — each table's own read/write logic lives on its own
+class under half_orm_gen.backend.ho_api.half_orm_meta (Role, Access,
+FieldAccessIn/Out/FkAuto/Searchable, Filter, AccessFilter, Field).
 """
 import uuid
 from typing import Any
@@ -14,7 +18,6 @@ from litestar.exceptions import HTTPException
 
 from half_orm_gen.backend.crud_helpers import _get_roles, _expand_roles, _filter_access_for_roles, _ws_event
 from half_orm_gen.backend.ho_api.loader import load_crud_access, load_role_parents
-from half_orm_gen.backend.ho_api.models import HoApiModels
 from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
 from half_orm_gen.backend.litestar.v2.runtime import _manager
 
@@ -63,19 +66,21 @@ async def _reload_resource_access(
     access_map_holder[0] = access_map
 
 
-async def _resource_for_access(api: HoApiModels, access_id: uuid.UUID) -> str | None:
-    rows = await api.access()(id=access_id).ho_aselect('schema_name', 'table_name')
-    if not rows:
-        return None
-    return f"{rows[0]['schema_name']}/{rows[0]['table_name']}"
-
-
 def make_ho_admin_handlers(
     model, prefix: str,
     crud_access_by_res: dict, api_excluded_by_res: dict,
     access_map_holder: list, parent_map_holder: list,
 ) -> list:
-    api = HoApiModels(model)
+    Role                  = model.get_relation_class('"half_orm_meta.api".role')
+    Route                 = model.get_relation_class('"half_orm_meta.api".route')
+    Access                = model.get_relation_class('"half_orm_meta.api".access')
+    Field                 = model.get_relation_class('"half_orm_meta.api".field')
+    FieldAccessOut         = model.get_relation_class('"half_orm_meta.api".field_access_out')
+    FieldAccessIn          = model.get_relation_class('"half_orm_meta.api".field_access_in')
+    FieldAccessFkAuto      = model.get_relation_class('"half_orm_meta.api".field_access_fk_auto')
+    FieldAccessSearchable  = model.get_relation_class('"half_orm_meta.api".field_access_searchable')
+    Filter                 = model.get_relation_class('"half_orm_meta.api".filter')
+    AccessFilter           = model.get_relation_class('"half_orm_meta.api".access_filter')
 
     async def _reload(resource: str) -> None:
         await _reload_resource_access(
@@ -90,21 +95,8 @@ def make_ho_admin_handlers(
     @get(f'{prefix}/ho_admin/roles')
     async def ho_admin_roles(request: Request) -> list:
         _check_admin(request)
-        rows = await api.role()().ho_aselect()
         dynamic_role_names = {name for (_, _, name) in _ROLE_REGISTRY}
-        return [
-            {
-                'name':        r['name'],
-                'deletable':   r['deletable'],
-                'parent_name': r['parent_name'],
-                'kind': (
-                    'dynamic' if r['name'] in dynamic_role_names
-                    else 'system' if not r['deletable']
-                    else 'user'
-                ),
-            }
-            for r in rows
-        ]
+        return await Role.list_all(dynamic_role_names)
 
     @post(f'{prefix}/ho_admin/roles')
     async def ho_admin_create_role(request: Request, data: dict[str, Any]) -> dict:
@@ -113,7 +105,7 @@ def make_ho_admin_handlers(
         parent_name = data.get('parent_name', 'connected')
         if not name:
             raise HTTPException(status_code=400, detail='name required')
-        await api.role()(name=name, deletable=True, parent_name=parent_name).ho_ainsert()
+        await Role.create(name, parent_name)
         await _reload_parent_map()
         return {'name': name, 'parent_name': parent_name}
 
@@ -121,12 +113,12 @@ def make_ho_admin_handlers(
     async def ho_admin_delete_role(request: Request, name: str) -> None:
         _check_admin(request)
         try:
-            result = await api.role()(name=name).ho_adelete('*')
+            deleted = await Role.delete(name)
         except Exception as exc:
             if 'ForeignKeyViolation' in type(exc).__name__ or 'foreign key' in str(exc).lower():
                 raise HTTPException(status_code=409, detail=f'Role "{name}" still has child roles')
             raise
-        if not result:
+        if not deleted:
             raise HTTPException(status_code=404, detail=f'Role "{name}" not found')
         await _reload_parent_map()
 
@@ -134,8 +126,8 @@ def make_ho_admin_handlers(
     async def ho_admin_set_role_parent(request: Request, name: str, data: dict[str, Any]) -> dict:
         _check_admin(request)
         parent_name = data.get('parent_name')
-        result = await api.role()(name=name).ho_aupdate(parent_name=parent_name)
-        if not result:
+        ok = await Role.set_parent(name, parent_name)
+        if not ok:
             raise HTTPException(status_code=404, detail=f'Role "{name}" not found')
         await _reload_parent_map()
         return {'name': name, 'parent_name': parent_name}
@@ -143,7 +135,7 @@ def make_ho_admin_handlers(
     @get(f'{prefix}/ho_admin/catalog')
     async def ho_admin_catalog(request: Request) -> dict:
         _check_admin(request)
-        routes = await api.route()().ho_aselect()
+        routes = await Route.list_all()
         relations: dict[tuple, list] = {}
         for row in routes:
             key = (row['schema_name'], row['table_name'])
@@ -152,9 +144,7 @@ def make_ho_admin_handlers(
         result = {}
         for (schema, table), verbs in relations.items():
             resource_key = f'{schema}/{table}'
-            field_rows = await api.field()(
-                schema_name=schema, table_name=table, deprecated=False
-            ).ho_aselect('column_name', 'label_order')
+            field_rows = await Field.list_for(schema, table)
             fields = [r['column_name'] for r in field_rows]
             label_fields = [
                 r['column_name'] for r in sorted(
@@ -185,9 +175,7 @@ def make_ho_admin_handlers(
                 })
 
             dynamic_roles = [name for (s, t, name) in _ROLE_REGISTRY if s == schema and t == table]
-
-            filter_rows = await api.filter()(schema_name=schema, table_name=table).ho_aselect()
-            filters = [{'id': str(r['id']), 'name': r['name']} for r in filter_rows]
+            filters = await Filter.list_for(schema, table)
 
             access: dict = {}
             pmap = parent_map_holder[0]
@@ -200,24 +188,22 @@ def make_ho_admin_handlers(
                 return result
 
             for verb in verbs:
-                acc_rows = await api.access()(
-                    schema_name=schema, table_name=table, verb=verb
-                ).ho_aselect()
+                acc_rows = await Access.list_for(schema, table, verb)
                 verb_entry: dict = {}
                 for acc in acc_rows:
                     role             = acc['role_name']
-                    out_rows         = await api.field_access_out()(access_id=acc['id']).ho_aselect('field_name')
-                    in_rows          = await api.field_access_in()(access_id=acc['id']).ho_aselect('field_name')
-                    af_rows          = await api.access_filter()(access_id=acc['id']).ho_aselect('filter_id')
-                    fk_auto_rows     = await api.field_access_fk_auto()(access_id=acc['id']).ho_aselect('field_name', 'resolve_rule')
-                    searchable_rows  = await api.field_access_searchable()(access_id=acc['id']).ho_aselect('field_name', 'role_name')
+                    out_list         = await FieldAccessOut.list_for(acc['id'])
+                    in_list          = await FieldAccessIn.list_for(acc['id'])
+                    af_rows          = await AccessFilter.list_for(acc['id'])
+                    fk_auto_rows     = await FieldAccessFkAuto.list_for(acc['id'])
+                    searchable_rows  = await FieldAccessSearchable.list_for(acc['id'])
 
                     # Preserve searchable already distributed to this role by a parent acc
                     pre_searchable = list(verb_entry.get(role, {}).get('searchable', []))
                     entry = {
                         'id':             str(acc['id']),
-                        'out':            [r['field_name'] for r in out_rows],
-                        'in':             [r['field_name'] for r in in_rows],
+                        'out':            out_list,
+                        'in':             in_list,
                         'fk_auto':        {r['field_name']: r['resolve_rule'] for r in fk_auto_rows},
                         'active_filters': [str(r['filter_id']) for r in af_rows],
                         'searchable':     pre_searchable,
@@ -280,29 +266,7 @@ def make_ho_admin_handlers(
         verb      = data.get('verb')
         if not all([role_name, schema, table, verb]):
             raise HTTPException(status_code=400, detail='role_name, schema_name, table_name, verb required')
-        result = await api.access()(
-            role_name=role_name, schema_name=schema, table_name=table, verb=verb,
-        ).ho_ainsert()
-        access_id = result['id']
-        pk_fields: list[str] = []
-        if verb != 'DELETE':
-            rel_cls = model.get_relation_class(f'{schema}.{table}')
-            pk_fields = list(rel_cls()._ho_pkey.keys())
-            # Collect fields already in any ancestor's field_access_out (trigger forbids duplicates)
-            inherited_out: set[str] = set()
-            pmap = parent_map_holder[0]
-            cur: str | None = pmap.get(role_name)
-            while cur:
-                anc_acc = await api.access()(
-                    role_name=cur, schema_name=schema, table_name=table, verb=verb,
-                ).ho_aselect('id')
-                if anc_acc:
-                    anc_out = await api.field_access_out()(access_id=anc_acc[0]['id']).ho_aselect('field_name')
-                    inherited_out.update(r['field_name'] for r in anc_out)
-                cur = pmap.get(cur)
-            for pk in pk_fields:
-                if pk not in inherited_out:
-                    await api.field_access_out()(access_id=access_id, field_name=pk).ho_ainsert()
+        access_id, pk_fields = await Access.create(role_name, schema, table, verb, parent_map_holder[0])
         await _reload(f'{schema}/{table}')
         return {'id': str(access_id), 'pk_fields': pk_fields}
 
@@ -310,12 +274,10 @@ def make_ho_admin_handlers(
     async def ho_admin_delete_access(request: Request, id: str) -> None:
         _check_admin(request)
         uid = uuid.UUID(id)
-        resource = await _resource_for_access(api, uid)
-        result = await api.access()(id=uid).ho_adelete('*')
-        if not result:
+        resource = await Access.delete(uid)
+        if not resource:
             raise HTTPException(status_code=404)
-        if resource:
-            await _reload(resource)
+        await _reload(resource)
 
     @post(f'{prefix}/ho_admin/field_access_out')
     async def ho_admin_add_field_out(request: Request, data: dict[str, Any]) -> dict:
@@ -325,8 +287,8 @@ def make_ho_admin_handlers(
         if not access_id or not field_name:
             raise HTTPException(status_code=400, detail='access_id and field_name required')
         uid = uuid.UUID(access_id)
-        await api.field_access_out()(access_id=uid, field_name=field_name).ho_ainsert()
-        resource = await _resource_for_access(api, uid)
+        await FieldAccessOut.add(uid, field_name)
+        resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
         return {'access_id': access_id, 'field_name': field_name}
@@ -339,9 +301,8 @@ def make_ho_admin_handlers(
         if not access_id or not field_names:
             raise HTTPException(status_code=400, detail='access_id and field_names required')
         uid = uuid.UUID(access_id)
-        for field_name in field_names:
-            await api.field_access_out()(access_id=uid, field_name=field_name).ho_ainsert()
-        resource = await _resource_for_access(api, uid)
+        await FieldAccessOut.add_batch(uid, field_names)
+        resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
         return {'access_id': access_id, 'field_names': field_names}
@@ -350,9 +311,9 @@ def make_ho_admin_handlers(
     async def ho_admin_remove_field_out(request: Request, access_id: str, field_name: str) -> None:
         _check_admin(request)
         uid = uuid.UUID(access_id)
-        resource = await _resource_for_access(api, uid)
-        result = await api.field_access_out()(access_id=uid, field_name=field_name).ho_adelete('*')
-        if not result:
+        resource = await Access.resource_for(uid)
+        removed = await FieldAccessOut.remove(uid, field_name)
+        if not removed:
             raise HTTPException(status_code=404)
         if resource:
             await _reload(resource)
@@ -365,8 +326,8 @@ def make_ho_admin_handlers(
         if not access_id or not field_name:
             raise HTTPException(status_code=400, detail='access_id and field_name required')
         uid = uuid.UUID(access_id)
-        await api.field_access_in()(access_id=uid, field_name=field_name).ho_ainsert()
-        resource = await _resource_for_access(api, uid)
+        await FieldAccessIn.add(uid, field_name)
+        resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
         return {'access_id': access_id, 'field_name': field_name}
@@ -379,9 +340,8 @@ def make_ho_admin_handlers(
         if not access_id or not field_names:
             raise HTTPException(status_code=400, detail='access_id and field_names required')
         uid = uuid.UUID(access_id)
-        for field_name in field_names:
-            await api.field_access_in()(access_id=uid, field_name=field_name).ho_ainsert()
-        resource = await _resource_for_access(api, uid)
+        await FieldAccessIn.add_batch(uid, field_names)
+        resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
         return {'access_id': access_id, 'field_names': field_names}
@@ -390,9 +350,9 @@ def make_ho_admin_handlers(
     async def ho_admin_remove_field_in(request: Request, access_id: str, field_name: str) -> None:
         _check_admin(request)
         uid = uuid.UUID(access_id)
-        resource = await _resource_for_access(api, uid)
-        result = await api.field_access_in()(access_id=uid, field_name=field_name).ho_adelete('*')
-        if not result:
+        resource = await Access.resource_for(uid)
+        removed = await FieldAccessIn.remove(uid, field_name)
+        if not removed:
             raise HTTPException(status_code=404)
         if resource:
             await _reload(resource)
@@ -405,8 +365,8 @@ def make_ho_admin_handlers(
         if not access_id or not filter_id:
             raise HTTPException(status_code=400, detail='access_id and filter_id required')
         uid = uuid.UUID(access_id)
-        await api.access_filter()(access_id=uid, filter_id=uuid.UUID(filter_id)).ho_ainsert()
-        resource = await _resource_for_access(api, uid)
+        await AccessFilter.add(uid, uuid.UUID(filter_id))
+        resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
         return {'access_id': access_id, 'filter_id': filter_id}
@@ -415,11 +375,9 @@ def make_ho_admin_handlers(
     async def ho_admin_remove_access_filter(request: Request, access_id: str, filter_id: str) -> None:
         _check_admin(request)
         uid = uuid.UUID(access_id)
-        resource = await _resource_for_access(api, uid)
-        result = await api.access_filter()(
-            access_id=uid, filter_id=uuid.UUID(filter_id)
-        ).ho_adelete('*')
-        if not result:
+        resource = await Access.resource_for(uid)
+        removed = await AccessFilter.remove(uid, uuid.UUID(filter_id))
+        if not removed:
             raise HTTPException(status_code=404)
         if resource:
             await _reload(resource)
@@ -432,15 +390,12 @@ def make_ho_admin_handlers(
         resolve_rule = data.get('resolve_rule')
         if not access_id or not field_name or not resolve_rule:
             raise HTTPException(status_code=400, detail='access_id, field_name and resolve_rule required')
-        if resolve_rule not in ('connected_user', 'context', 'select'):
-            raise HTTPException(status_code=400, detail='resolve_rule must be connected_user, context or select')
         uid = uuid.UUID(access_id)
-        existing = await api.field_access_fk_auto()(access_id=uid, field_name=field_name).ho_aselect('id')
-        if existing:
-            await api.field_access_fk_auto()(access_id=uid, field_name=field_name).ho_aupdate(resolve_rule=resolve_rule)
-        else:
-            await api.field_access_fk_auto()(access_id=uid, field_name=field_name, resolve_rule=resolve_rule).ho_ainsert()
-        resource = await _resource_for_access(api, uid)
+        try:
+            await FieldAccessFkAuto.set(uid, field_name, resolve_rule)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
         return {'access_id': access_id, 'field_name': field_name, 'resolve_rule': resolve_rule}
@@ -449,9 +404,9 @@ def make_ho_admin_handlers(
     async def ho_admin_remove_fk_auto(request: Request, access_id: str, field_name: str) -> None:
         _check_admin(request)
         uid = uuid.UUID(access_id)
-        resource = await _resource_for_access(api, uid)
-        result = await api.field_access_fk_auto()(access_id=uid, field_name=field_name).ho_adelete('*')
-        if not result:
+        resource = await Access.resource_for(uid)
+        removed = await FieldAccessFkAuto.remove(uid, field_name)
+        if not removed:
             raise HTTPException(status_code=404)
         if resource:
             await _reload(resource)
@@ -465,11 +420,8 @@ def make_ho_admin_handlers(
         if not access_id or not field_name:
             raise HTTPException(status_code=400, detail='access_id and field_name required')
         uid = uuid.UUID(access_id)
-        kwargs: dict[str, Any] = {'access_id': uid, 'field_name': field_name}
-        if role_name is not None:
-            kwargs['role_name'] = role_name
-        await api.field_access_searchable()(**kwargs).ho_ainsert()
-        resource = await _resource_for_access(api, uid)
+        await FieldAccessSearchable.add(uid, field_name, role_name)
+        resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
         return {'access_id': access_id, 'field_name': field_name, 'role_name': role_name}
@@ -478,9 +430,9 @@ def make_ho_admin_handlers(
     async def ho_admin_remove_searchable(request: Request, access_id: str, field_name: str) -> None:
         _check_admin(request)
         uid = uuid.UUID(access_id)
-        resource = await _resource_for_access(api, uid)
-        result = await api.field_access_searchable()(access_id=uid, field_name=field_name).ho_adelete('*')
-        if not result:
+        resource = await Access.resource_for(uid)
+        removed = await FieldAccessSearchable.remove(uid, field_name)
+        if not removed:
             raise HTTPException(status_code=404)
         if resource:
             await _reload(resource)
@@ -508,19 +460,13 @@ def make_ho_admin_handlers(
                 status_code=400,
                 detail='schema_name, table_name, field_name, label_order required',
             )
-        await api.field()(
-            schema_name=schema, table_name=table, column_name=field_name,
-        ).ho_aupdate(label_order=label_order)
+        await Field.set_label(schema, table, field_name, label_order)
 
-        acc_rows = await api.access()(schema_name=schema, table_name=table, verb='GET').ho_aselect('id')
+        acc_rows = await Access.list_for(schema, table, 'GET')
         for acc in acc_rows:
-            existing = await api.field_access_searchable()(
-                access_id=acc['id'], field_name=field_name,
-            ).ho_aselect('field_name')
-            if not existing:
-                await api.field_access_searchable()(
-                    access_id=acc['id'], field_name=field_name,
-                ).ho_ainsert()
+            existing = await FieldAccessSearchable.list_for(acc['id'])
+            if field_name not in {r['field_name'] for r in existing}:
+                await FieldAccessSearchable.add(acc['id'], field_name)
 
         resource = f'{schema}/{table}'
         await _reload(resource)
@@ -531,10 +477,7 @@ def make_ho_admin_handlers(
         request: Request, schema_name: str, table_name: str, field_name: str,
     ) -> None:
         _check_admin(request)
-        from half_orm.null import NULL
-        await api.field()(
-            schema_name=schema_name, table_name=table_name, column_name=field_name,
-        ).ho_aupdate(label_order=NULL)
+        await Field.unset_label(schema_name, table_name, field_name)
         await _reload(f'{schema_name}/{table_name}')
 
     @get(f'{prefix}/ho_admin/simulate-access')

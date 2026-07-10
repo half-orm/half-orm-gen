@@ -403,13 +403,9 @@ def _make_delete_handler(
 def _make_ho_meta(model, prefix: str):
     @get(f'{prefix}/ho_meta')
     async def ho_meta() -> dict:
-        from half_orm.null import NULL
-        from half_orm_gen.backend.ho_api.models import HoApiModels
+        Field = model.get_relation_class('"half_orm_meta.api".field')
         meta = model.ho_meta()
-        api = HoApiModels(model)
-        label_rows = await api.field()(label_order=('is not', NULL)).ho_aselect(
-            'schema_name', 'table_name', 'column_name', 'label_order',
-        )
+        label_rows = await Field.with_labels()
         by_resource: dict[str, list] = {}
         for row in label_rows:
             by_resource.setdefault(f"{row['schema_name']}/{row['table_name']}", []).append(row)
@@ -461,9 +457,8 @@ def _make_auth_peers(model, prefix: str):
     @get(f'{prefix}/auth/peers')
     async def auth_peers() -> dict:
         import os
-        from half_orm_gen.backend.ho_api.identity_models import HoIdentityModels
-        identity = HoIdentityModels(model)
-        rows = await identity.peer()(trusted=True).ho_aselect('id', 'name', 'url', 'frontend_url')
+        Peer = model.get_relation_class('"half_orm_meta.identity".peer')
+        rows = await Peer(trusted=True).ho_aselect('id', 'name', 'url', 'frontend_url')
         return {
             'peers': rows,
             'local_auth_enabled': os.environ.get('HO_LOCAL_AUTH', 'db') != 'none',
@@ -477,10 +472,8 @@ def _make_ho_setup(model, prefix: str):
     """Return {has_admin: bool} — used by the frontend to detect first-run state."""
     @get(f'{prefix}/ho_setup')
     async def ho_setup() -> dict:
-        from half_orm_gen.backend.ho_api.models import HoApiModels
-        api = HoApiModels(model)
-        rows = await api.user_role()(role_name='admin').ho_aselect('user_id')
-        return {'has_admin': bool(rows)}
+        UserRole = model.get_relation_class('"half_orm_meta.api".user_role')
+        return {'has_admin': await UserRole.has_admin()}
     return ho_setup
 
 
@@ -631,13 +624,25 @@ def _resolve_guard(name: str, parent_map_holder: list, custom_guards: dict):
     return _guard
 
 
-def _discover_custom_api_routes(classes, prefix: str, parent_map_holder: list, custom_guards: dict) -> list:
+def _discover_custom_api_routes(classes, parent_map_holder: list, custom_guards: dict) -> list:
     """Scan relation classes for @tools.api_* methods and build real handlers.
 
     A method qualifies when it carries the `is_api_route` marker (set by
     half_orm_gen.tools.api_get/post/put/delete/patch) and is defined
     directly on the class (not just inherited — avoids registering the
     same route once per subclass sharing a common base).
+
+    Returns handlers built with their BARE (unprefixed) path — callers must
+    merge them into the same route_handlers bucket as federation.py's/
+    custom/routes.py's handlers so they all go through the one Router(path
+    =prefix, ...) wrapping. Registering them as already-prefixed, standalone
+    top-level handlers instead collides with a Router-mounted handler that
+    happens to resolve to the exact same final path (e.g. federation's own
+    GET /auth/login next to this module's default POST /auth/login) —
+    Litestar treats the two registration paths as distinct route objects
+    even when the resulting URL is identical, and refuses to attach a
+    second implicit OPTIONS handler to what it sees as an already-claimed
+    path.
     """
     seen: set = set()
     handlers = []
@@ -676,10 +681,20 @@ def _discover_custom_api_routes(classes, prefix: str, parent_map_holder: list, c
                 async def _handler(**kwargs):
                     return await bound_method(relation_cls(), **kwargs)
                 _handler.__signature__ = handler_sig
+                # Litestar's handler validation reads __annotations__ directly
+                # (not just __signature__, which inspect.signature() would
+                # follow on its own) — without this it rejects the handler
+                # for having no return-type annotation.
+                _handler.__annotations__ = {
+                    p.name: p.annotation for p in handler_sig.parameters.values()
+                    if p.annotation is not inspect.Parameter.empty
+                }
+                if handler_sig.return_annotation is not inspect.Signature.empty:
+                    _handler.__annotations__['return'] = handler_sig.return_annotation
                 _handler.__name__ = f'{relation_cls.__name__}_{bound_method.__name__}'
                 return _handler
 
-            handlers.append(decorator(f'{prefix}{path}', **litestar_params)(_make_handler()))
+            handlers.append(decorator(path, **litestar_params)(_make_handler()))
     return handlers
 
 
@@ -777,8 +792,17 @@ def build_crud_app(
         _make_ws_handler(prefix),
         *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
         *make_identity_admin_handlers(model, prefix),
-        *_discover_custom_api_routes(model.classes(), prefix, parent_map_holder, custom_guards or {}),
     ]
+
+    # Merged into route_handlers (below), not special_handlers: these carry
+    # bare/unprefixed paths, same as federation.py's and any project's own
+    # ho_api/custom/routes.py handlers, so they all go through the single
+    # Router(path=prefix, ...) wrapping instead of colliding with a
+    # Router-mounted handler that resolves to the same final path (see
+    # _discover_custom_api_routes's docstring).
+    route_handlers = (route_handlers or []) + _discover_custom_api_routes(
+        model.classes(), parent_map_holder, custom_guards or {}
+    )
 
     logging_config = LoggingConfig(
         loggers={'app': {'level': 'ERROR', 'handlers': ['queue_listener']}}

@@ -26,4 +26,31 @@ def build_class(model):
                         schema_name=schema, table_name=table, column_name=col
                     ).ho_aupdate(deprecated=should)
 
+        @classmethod
+        async def list_for(cls, schema: str, table: str) -> list:
+            return await cls(
+                schema_name=schema, table_name=table, deprecated=False
+            ).ho_aselect('column_name', 'label_order')
+
+        @classmethod
+        async def with_labels(cls) -> list:
+            """Rows for every field that's part of a resource's display label."""
+            from half_orm.null import NULL
+            return await cls(label_order=('is not', NULL)).ho_aselect(
+                'schema_name', 'table_name', 'column_name', 'label_order',
+            )
+
+        @classmethod
+        async def set_label(cls, schema: str, table: str, field_name: str, label_order: int) -> None:
+            await cls(
+                schema_name=schema, table_name=table, column_name=field_name,
+            ).ho_aupdate(label_order=label_order)
+
+        @classmethod
+        async def unset_label(cls, schema: str, table: str, field_name: str) -> None:
+            from half_orm.null import NULL
+            await cls(
+                schema_name=schema, table_name=table, column_name=field_name,
+            ).ho_aupdate(label_order=NULL)
+
     return register_class(Field)
