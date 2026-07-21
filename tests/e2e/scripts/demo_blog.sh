@@ -10,7 +10,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-FIXTURES_DIR="$SCRIPT_DIR/../../../fixtures"
+FIXTURES_DIR="$SCRIPT_DIR/fixtures"
 source "$SCRIPT_DIR/common.sh"
 
 PROJECT="blog_demo"
