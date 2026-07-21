@@ -343,7 +343,7 @@ def _py_type_str(py_type) -> str:
 # ---------------------------------------------------------------------------
 
 def _parse_q(
-    q: str, api_excluded: list[str]
+    q: str, api_excluded: list[str], field_types: dict[str, str] | None = None,
 ) -> tuple[dict, list[str], list]:
     """Parse the ?q= search string into filter structures for halfORM.
 
@@ -355,9 +355,22 @@ def _parse_q(
                                 also usable on text for an alphabetical jump, e.g. ``col:>=M``)
       - ``col:>=A<=B``        → range filter, returned in range_filters
 
+    field_types maps column name → SQL type (from ho_meta()/_fields_metadata).
+    A ``tsvector`` column always matches via full-text search (``@@
+    plainto_tsquery(...)`` — see half_orm.field's _OPERATOR_RHS_TEMPLATES)
+    regardless of the ``col:text`` / ``col:*text`` prefix distinction (both
+    forms mean "search this text", and plainto_tsquery already tokenizes
+    the whole term) — ilike does not work against tsvector at all, so this
+    isn't just an optimization, it's the only form that produces valid SQL.
+    Not added to search_cols: unaccent (which search_cols exists to enable)
+    doesn't apply to tsvector — half_orm's own unaccent setter already
+    ignores it for non-text-like types, but skipping it here keeps intent
+    explicit at the call site.
+
     Returns (filter_kwargs, search_cols, range_filters).
     Fields in api_excluded are silently ignored.
     """
+    field_types = field_types or {}
     filter_kwargs: dict = {}
     search_cols: list[str] = []
     range_filters: list = []
@@ -368,11 +381,16 @@ def _parse_q(
         col, val = col.strip(), val.strip()
         if not col or not val or col in api_excluded:
             continue
-        range_match = re.match(r'^(>=|>)(.+?)(<=|<)(.+)$', val)
+        is_tsvector = field_types.get(col) == 'tsvector'
+        range_match = None if is_tsvector else re.match(r'^(>=|>)(.+?)(<=|<)(.+)$', val)
         if range_match:
             op1, op1val, op2, op2val = range_match.groups()
             if op1val.strip() and op2val.strip():
                 range_filters.append((col, op1, op1val.strip(), op2, op2val.strip()))
+        elif is_tsvector:
+            term = val[1:].strip() if val.startswith('*') else val
+            if term:
+                filter_kwargs[col] = ('@@', term)
         else:
             single = re.match(r'^(>=|>|<=|<)(.*)$', val)
             if single:

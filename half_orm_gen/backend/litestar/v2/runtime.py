@@ -130,6 +130,7 @@ def _make_list_handler(
     path: str, cls, resource: str,
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
     parent_map_holder: list, pk_names: list | None = None,
+    field_types_by_res: dict | None = None,
 ):
     slug = resource.replace('/', '_')
     schema_name, table_name = resource.split('/')
@@ -156,7 +157,8 @@ def _make_list_handler(
         if q and not searchable_cols:
             return {'data': [], 'meta': {'offset': offset, 'limit': limit, 'has_more': False, 'dynamic_roles': {}}}
         if q:
-            filter_kwargs, search_cols, range_filters = _parse_q(q, api_excluded)
+            field_types = (field_types_by_res or {}).get(resource, {})
+            filter_kwargs, search_cols, range_filters = _parse_q(q, api_excluded, field_types)
             filter_kwargs  = {k: v for k, v in filter_kwargs.items()  if k in searchable_cols}
             search_cols    = [c for c in search_cols    if c in searchable_cols]
             range_filters  = [r for r in range_filters  if r[0] in searchable_cols]
@@ -484,6 +486,7 @@ def _make_ho_search(
     api_excluded_by_res: dict,
     all_fields_by_res: dict,
     parent_map_holder: list,
+    field_types_by_res: dict | None = None,
 ):
     @get(f'{prefix}/ho_search')
     async def ho_search(
@@ -524,11 +527,15 @@ def _make_ho_search(
                 continue
 
             role_filter = _get_role_filter(crud_access, 'GET', roles)
+            field_types = (field_types_by_res or {}).get(res_key, {})
 
             inst = None
             for field in searchable_cols:
-                part = cls(**{field: ('ilike', '%' + term + '%')})
-                getattr(part, field).unaccent = True
+                if field_types.get(field) == 'tsvector':
+                    part = cls(**{field: ('@@', term)})
+                else:
+                    part = cls(**{field: ('ilike', '%' + term + '%')})
+                    getattr(part, field).unaccent = True
                 if inst is None:
                     inst = part
                 else:
@@ -730,6 +737,7 @@ def build_crud_app(
     crud_access_by_res: dict[str, dict]  = {}
     api_excluded_by_res: dict[str, list] = {}
     all_fields_by_res: dict[str, list]   = {}
+    field_types_by_res: dict[str, dict]  = {}  # resource -> {field_name: sql_type}
     access_map_holder: list  = [{}]   # access_map_holder[0]  = actual map
     parent_map_holder: list  = [{}]   # parent_map_holder[0]  = {role: parent_name}
     roles_holder: list       = [[]]   # roles_holder[0]       = sorted [{name, schema_name, table_name}, ...]
@@ -765,7 +773,7 @@ def build_crud_app(
             ws_rmap[resource] = (cls, pk_info[0][0])
 
         relation_handlers.append(
-            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder, [p[0] for p in pk_info] if pk_info else None)
+            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder, [p[0] for p in pk_info] if pk_info else None, field_types_by_res)
         )
         if pk_info:
             relation_handlers.append(
@@ -790,7 +798,7 @@ def build_crud_app(
         _make_ho_access(access_map_holder, parent_map_holder, prefix),
         _make_ho_setup(ctx.meta_model, prefix),
         _make_auth_peers(ctx.meta_model, prefix),
-        _make_ho_search(prefix, classes_by_res, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder),
+        _make_ho_search(prefix, classes_by_res, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder, field_types_by_res),
         _make_ws_handler(prefix),
         *make_ho_admin_handlers(ctx, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
         *make_identity_admin_handlers(ctx.meta_model, prefix),
@@ -830,8 +838,12 @@ def build_crud_app(
             crud_access_by_res[resource] = crud_access
 
             sfqrn = inst._t_fqrn
-            all_field_names = list(inst._ho_model._fields_metadata(sfqrn).keys())
+            fields_metadata = inst._ho_model._fields_metadata(sfqrn)
+            all_field_names = list(fields_metadata.keys())
             all_fields_by_res[resource] = [f for f in all_field_names if f not in api_excluded]
+            field_types_by_res[resource] = {
+                f: meta['fieldtype'] for f, meta in fields_metadata.items()
+            }
 
             resource_pk_info = _pk_info(cls)
             pk_names = [p[0] for p in resource_pk_info] if resource_pk_info else None
