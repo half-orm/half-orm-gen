@@ -105,19 +105,19 @@ async def load_roles_info(model) -> list[dict]:
     return await Role.load_roles_info()
 
 
-async def reconcile_catalog(model) -> None:
+async def reconcile_catalog(ctx) -> None:
     """Sync resource/route/field catalogs with pg_catalog: insert new, flag
     deprecated, unflag restored. Delegates to each table's own class — see
     half_orm_gen.backend.ho_api.half_orm_meta (Resource.sync/Route.sync/
     Field.sync). Callers must have already called half_orm_meta.register_all
-    (model) — reconcile_catalog itself doesn't, so it can run as many times
-    as needed (e.g. the SIGHUP live-reload path) without re-registering.
+    (ctx.meta_model) — reconcile_catalog itself doesn't, so it can run as many
+    times as needed (e.g. the SIGHUP live-reload path) without re-registering.
 
     "half_orm_meta.identity"."user" needs no special-casing here anymore:
-    once with_half_orm_meta covers it, model.ho_meta() (like model.classes())
+    once with_half_orm_meta covers it, ctx.ho_meta() (like ctx.classes())
     yields it like any other relation.
     """
-    meta = model.ho_meta()
+    meta = ctx.ho_meta()
     live_relations = {(v['schema'], v['table']) for v in meta.values()}
     live_fields = {
         (v['schema'], v['table'], f['name'])
@@ -125,9 +125,9 @@ async def reconcile_catalog(model) -> None:
         for f in v.get('fields', [])
     }
 
-    Resource = model.get_relation_class('"half_orm_meta.api".resource')
-    Route    = model.get_relation_class('"half_orm_meta.api".route')
-    Field    = model.get_relation_class('"half_orm_meta.api".field')
+    Resource = ctx.meta_model.get_relation_class('"half_orm_meta.api".resource')
+    Route    = ctx.meta_model.get_relation_class('"half_orm_meta.api".route')
+    Field    = ctx.meta_model.get_relation_class('"half_orm_meta.api".field')
 
     # Resources first — Route/Field both FK-reference resource(schemaname, relname).
     await Resource.sync(live_relations)

@@ -13,10 +13,17 @@ import click
 from half_orm.cli_utils import create_and_register_extension
 from half_orm_gen.frontend import GenApp
 from half_orm_gen.backend.generate import GenApi
+from half_orm_gen.backend.ho_api.context import HalfOrmContext
 from half_orm_gen.frontend.svelte.v5.svelte import SvelteAppGenerator
 from half_orm_gen.frontend.angular.v19.angular import AngularAppGenerator
 
 _VERSION_FILE = Path('ho_api') / '.api_version'
+
+_STANDALONE_MODULE_TEMPLATE = """\
+from half_orm.model import Model
+
+MODEL = Model('{database}', with_half_orm_meta='half_orm_meta.identity.user')
+"""
 
 
 def _read_api_version() -> int:
@@ -29,6 +36,72 @@ def _read_api_version() -> int:
 def _write_api_version(version: int) -> None:
     _VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
     _VERSION_FILE.write_text(str(version) + '\n')
+
+
+def _ensure_standalone_model(database: str, module_name: str, base_dir: Path):
+    """Write {base_dir}/{module_name}/__init__.py once if missing (never
+    overwritten — same convention as ho_api/custom/guards.py.example), then
+    import it and return its MODEL."""
+    pkg_dir = base_dir / module_name
+    init_py = pkg_dir / '__init__.py'
+    if not init_py.exists():
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        init_py.write_text(
+            _STANDALONE_MODULE_TEMPLATE.format(database=database), encoding='utf-8'
+        )
+        click.echo(f'  created  {init_py}')
+
+    sys.path.insert(0, str(base_dir))
+    import importlib
+    module = importlib.import_module(module_name)
+    return module.MODEL
+
+
+def _resolve_ctx(database: str | None, meta_database: str | None):
+    """Resolve (ctx, module_name, base_dir) from --database/--meta-database,
+    falling back to half-orm-dev project auto-discovery when neither
+    override is given. Exits the process on any resolution failure, same
+    error messages as before this option existed."""
+    if database:
+        module_name, base_dir = database, Path.cwd()
+        business_model = _ensure_standalone_model(database, module_name, base_dir)
+    else:
+        try:
+            from half_orm_dev.repo import Repo
+        except ImportError:
+            click.echo(
+                'Error: half_orm_dev is not installed. '
+                'Install it with: pip install half-orm-dev',
+                err=True,
+            )
+            sys.exit(1)
+
+        try:
+            repo = Repo()
+        except Exception as exc:
+            click.echo(
+                f'Error: could not load the halfORM project ({exc}).\n'
+                'Make sure you are inside a half-orm-dev project directory.',
+                err=True,
+            )
+            sys.exit(1)
+
+        if repo.database is None:
+            click.echo(
+                'Error: no halfORM project found in this directory or any parent.\n'
+                'Make sure you are inside a half-orm-dev project directory.',
+                err=True,
+            )
+            sys.exit(1)
+
+        module_name, base_dir, business_model = repo.name, Path(repo.base_dir), repo.model
+
+    if meta_database and meta_database != module_name:
+        meta_model = _ensure_standalone_model(meta_database, meta_database, base_dir)
+    else:
+        meta_model = None
+
+    return HalfOrmContext(business_model, meta_model), module_name, base_dir
 
 
 def add_commands(main_group):
@@ -55,44 +128,31 @@ def add_commands(main_group):
         help='Scaffold an RS256 keypair for cross-project identity federation '
              '(Litestar only) instead of the default HS256 shared secret.',
     )
-    def api(dry_run, bump, framework, federation):
+    @click.option(
+        '--database', default=None, metavar='NAME',
+        help='Business database (half_orm config name). Use outside a '
+             'half-orm-dev project, or to override auto-discovery.',
+    )
+    @click.option(
+        '--meta-database', default=None, metavar='NAME',
+        help='Separate database owning "half_orm_meta.api"/".identity", for '
+             'when the business database is read-only. Defaults to the same '
+             'database as --database / the auto-discovered project.',
+    )
+    def api(dry_run, bump, framework, federation, database, meta_database):
         """Generate ho_api/app.py from CRUD_ACCESS and @api_* decorated methods.
 
         The API version is read from ho_api/.api_version (default: 0).
         Use --bump to move to N+1; the new value is saved for future runs.
         To revert a mistaken bump: git checkout ho_api/.api_version.
 
-        Must be run from inside a half-orm-dev project directory.
+        Must be run from inside a half-orm-dev project directory, or pass
+        --database to target any database directly.
+
         On first run, missing scaffolding files (guards.py, custom/) are
         created automatically and are never overwritten on subsequent runs.
         """
-        try:
-            from half_orm_dev.repo import Repo
-        except ImportError:
-            click.echo(
-                'Error: half_orm_dev is not installed. '
-                'Install it with: pip install half-orm-dev',
-                err=True,
-            )
-            sys.exit(1)
-
-        try:
-            repo = Repo()
-        except Exception as exc:
-            click.echo(
-                f'Error: could not load the halfORM project ({exc}).\n'
-                'Make sure you are inside a half-orm-dev project directory.',
-                err=True,
-            )
-            sys.exit(1)
-
-        if repo.database is None:
-            click.echo(
-                'Error: no halfORM project found in this directory or any parent.\n'
-                'Make sure you are inside a half-orm-dev project directory.',
-                err=True,
-            )
-            sys.exit(1)
+        ctx, module_name, base_dir = _resolve_ctx(database, meta_database)
 
         if not framework:
             click.echo('Error: specify --litestar.', err=True)
@@ -111,13 +171,17 @@ def add_commands(main_group):
 
         if dry_run:
             click.echo(
-                f'[dry-run] would generate ho_api/app.py ({framework}) for project: {repo.name}'
+                f'[dry-run] would generate ho_api/app.py ({framework}) for project: {module_name}'
                 f' (v{api_version})'
             )
             return
 
-        click.echo(f'Generating {framework} API for project: {repo.name} (v{api_version})')
-        GenApi(repo, api_version=api_version, federation=federation)
+        click.echo(f'Generating {framework} API for project: {module_name} (v{api_version})')
+        GenApi(
+            ctx=ctx, module_name=module_name, base_dir=base_dir,
+            meta_module_name=meta_database or None,
+            api_version=api_version, federation=federation,
+        )
         click.echo('\nTo run:  litestar --app ho_api.app:application run --reload')
 
     @gen.command('frontend')
@@ -127,42 +191,28 @@ def add_commands(main_group):
                   help='Generate an Angular 22 application (signal-based).')
     @click.option('--output', default=None,
                   help='Output directory (default: frontend/<framework>).')
-    def frontend(framework, output):
+    @click.option(
+        '--database', default=None, metavar='NAME',
+        help='Business database (half_orm config name). Use outside a '
+             'half-orm-dev project, or to override auto-discovery.',
+    )
+    @click.option(
+        '--meta-database', default=None, metavar='NAME',
+        help='Separate database owning "half_orm_meta.api"/".identity", for '
+             'when the business database is read-only. Defaults to the same '
+             'database as --database / the auto-discovered project.',
+    )
+    def frontend(framework, output, database, meta_database):
         """Generate a frontend backoffice from CRUD_ACCESS introspection.
 
         Produces a complete SvelteKit or Angular application with Tailwind CSS,
         per-resource List/CreateForm/DetailView components in generated/,
         admin-only route pages, and a minimal JWT login.
 
-        Must be run from inside a half-orm-dev project directory.
+        Must be run from inside a half-orm-dev project directory, or pass
+        --database to target any database directly.
         """
-        try:
-            from half_orm_dev.repo import Repo
-        except ImportError:
-            click.echo(
-                'Error: half_orm_dev is not installed. '
-                'Install it with: pip install half-orm-dev',
-                err=True,
-            )
-            sys.exit(1)
-
-        try:
-            repo = Repo()
-        except Exception as exc:
-            click.echo(
-                f'Error: could not load the halfORM project ({exc}).\n'
-                'Make sure you are inside a half-orm-dev project directory.',
-                err=True,
-            )
-            sys.exit(1)
-
-        if repo.database is None:
-            click.echo(
-                'Error: no halfORM project found in this directory or any parent.\n'
-                'Make sure you are inside a half-orm-dev project directory.',
-                err=True,
-            )
-            sys.exit(1)
+        ctx, module_name, base_dir = _resolve_ctx(database, meta_database)
 
         api_version = _read_api_version()
         output_dir = Path(output) if output else Path('ho_frontend') / framework
@@ -179,7 +229,7 @@ def add_commands(main_group):
             sys.exit(1)
 
         click.echo(f'Generating {framework} application → {output_dir}')
-        GenApp(repo, generator=generator, output_dir=output_dir, api_version=api_version)
+        GenApp(ctx=ctx, generator=generator, output_dir=output_dir, api_version=api_version)
         if framework == 'svelte':
             click.echo(f'\nTo run:  cd {output_dir} && npm install && npm run dev')
         elif framework == 'angular':

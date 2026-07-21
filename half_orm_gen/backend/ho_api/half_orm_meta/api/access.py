@@ -19,11 +19,19 @@ def build_class(model):
             return f"{rows[0]['schema_name']}/{rows[0]['table_name']}"
 
         @classmethod
-        async def create(cls, role_name: str, schema: str, table: str, verb: str, parent_map: dict) -> tuple:
+        async def create(cls, role_name: str, schema: str, table: str, verb: str, parent_map: dict, resource_model) -> tuple:
             """Create an access row. For non-DELETE verbs, also auto-grants
             the resource's PK field(s) as 'out' — unless already inherited
             from an ancestor role's access on the same resource/verb (the
             check_field_not_inherited trigger forbids duplicates).
+
+            resource_model resolves the resource's own relation class — the
+            model that owns `schema` (see HalfOrmContext.model_for), which
+            may be a different database than cls._ho_model (the metadata
+            database) when the two are split — e.g. schema is
+            "half_orm_meta.identity" (identity.user, exposed as an ordinary
+            CRUD resource): that's meta_model, same as cls._ho_model, not
+            business_model.
 
             Returns (access_id, pk_fields).
             """
@@ -33,7 +41,7 @@ def build_class(model):
             access_id = result['id']
             pk_fields: list[str] = []
             if verb != 'DELETE':
-                rel_cls = cls._ho_model.get_relation_class(f'{schema}.{table}')
+                rel_cls = resource_model.get_relation_class(f'{schema}.{table}')
                 pk_fields = list(rel_cls()._ho_pkey.keys())
                 FieldAccessOut = cls._ho_model.get_relation_class('"half_orm_meta.api".field_access_out')
                 inherited_out: set = set()

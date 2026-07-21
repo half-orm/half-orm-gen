@@ -400,11 +400,11 @@ def _make_delete_handler(
 # Special endpoint factories
 # ---------------------------------------------------------------------------
 
-def _make_ho_meta(model, prefix: str):
+def _make_ho_meta(ctx, prefix: str):
     @get(f'{prefix}/ho_meta')
     async def ho_meta() -> dict:
-        Field = model.get_relation_class('"half_orm_meta.api".field')
-        meta = model.ho_meta()
+        Field = ctx.meta_model.get_relation_class('"half_orm_meta.api".field')
+        meta = ctx.ho_meta()
         label_rows = await Field.with_labels()
         by_resource: dict[str, list] = {}
         for row in label_rows:
@@ -426,7 +426,7 @@ def _make_ho_roles(roles_holder: list, prefix: str):
     return ho_roles
 
 
-def _make_ho_access(access_map_holder: list, parent_map_holder: list, model, prefix: str):
+def _make_ho_access(access_map_holder: list, parent_map_holder: list, prefix: str):
     """access_map_holder[0] is the access map, populated at startup."""
     @get(f'{prefix}/ho_access')
     async def ho_access(request: Request) -> dict:
@@ -699,7 +699,7 @@ def _discover_custom_api_routes(classes, parent_map_holder: list, custom_guards:
 
 
 def build_crud_app(
-    model,
+    ctx,
     module_name: str = '',
     api_version: int | None = None,
     middleware: list | None = None,
@@ -708,7 +708,9 @@ def build_crud_app(
     **litestar_kwargs,
 ) -> Litestar:
     """
-    Build a Litestar application dynamically from a halfORM model.
+    Build a Litestar application dynamically from a halfORM context (business
+    model + the model owning "half_orm_meta.api"/".identity" — the same
+    model in the common case).
 
     Registers routes for all relations at build time. Access configuration
     (roles, field restrictions) is loaded from "half_orm_meta.api" at startup.
@@ -716,13 +718,13 @@ def build_crud_app(
     prefix = f'/v{api_version}' if api_version is not None else ''
 
     # Registers half_orm_meta's own hand-maintained Relation subclasses
-    # (half_orm_gen.backend.ho_api.half_orm_meta) against this model — after
-    # this, model.classes()/model.get_relation_class(...) transparently
-    # return them instead of a generic dynamically-built class. Must run
-    # before the class-enumeration loop below (idempotent — safe even if
-    # this model was already registered elsewhere).
+    # (half_orm_gen.backend.ho_api.half_orm_meta) against the meta model —
+    # after this, ctx.meta_model.classes()/get_relation_class(...)
+    # transparently return them instead of a generic dynamically-built
+    # class. Must run before the class-enumeration loop below (idempotent —
+    # safe even if this model was already registered elsewhere).
     from half_orm_gen.backend.ho_api import half_orm_meta
-    half_orm_meta.register_all(model)
+    half_orm_meta.register_all(ctx.meta_model)
 
     # Mutable containers populated at startup — handlers close over these refs
     crud_access_by_res: dict[str, dict]  = {}
@@ -736,7 +738,7 @@ def build_crud_app(
     classes_by_res: dict[str, type] = {}
     relation_handlers: list = []
 
-    for cls, _kind in model.classes():
+    for cls, _kind in ctx.classes():
         inst    = cls()
         schema  = inst._t_fqrn[1]
         table   = inst._t_fqrn[2]
@@ -783,15 +785,15 @@ def build_crud_app(
     from half_orm_gen.backend.litestar.v2.ho_admin import make_ho_admin_handlers
     from half_orm_gen.backend.litestar.v2.identity_admin import make_identity_admin_handlers
     special_handlers = [
-        _make_ho_meta(model, prefix),
+        _make_ho_meta(ctx, prefix),
         _make_ho_roles(roles_holder, prefix),
-        _make_ho_access(access_map_holder, parent_map_holder, model, prefix),
-        _make_ho_setup(model, prefix),
-        _make_auth_peers(model, prefix),
+        _make_ho_access(access_map_holder, parent_map_holder, prefix),
+        _make_ho_setup(ctx.meta_model, prefix),
+        _make_auth_peers(ctx.meta_model, prefix),
         _make_ho_search(prefix, classes_by_res, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder),
         _make_ws_handler(prefix),
-        *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
-        *make_identity_admin_handlers(model, prefix),
+        *make_ho_admin_handlers(ctx, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder, parent_map_holder),
+        *make_identity_admin_handlers(ctx.meta_model, prefix),
     ]
 
     # Merged into route_handlers (below), not special_handlers: these carry
@@ -801,7 +803,7 @@ def build_crud_app(
     # Router-mounted handler that resolves to the same final path (see
     # _discover_custom_api_routes's docstring).
     route_handlers = (route_handlers or []) + _discover_custom_api_routes(
-        model.classes(), parent_map_holder, custom_guards or {}
+        ctx.classes(), parent_map_holder, custom_guards or {}
     )
 
     logging_config = LoggingConfig(
@@ -817,18 +819,18 @@ def build_crud_app(
         """
         access_map: dict = {}
 
-        for cls, _kind in model.classes():
+        for cls, _kind in ctx.classes():
             inst     = cls()
             schema   = inst._t_fqrn[1]
             table    = inst._t_fqrn[2]
             resource = f'{schema}/{table}'
             api_excluded = api_excluded_by_res.get(resource, [])
 
-            crud_access = await load_crud_access(model, schema, table) or {}
+            crud_access = await load_crud_access(ctx.meta_model, schema, table) or {}
             crud_access_by_res[resource] = crud_access
 
             sfqrn = inst._t_fqrn
-            all_field_names = list(model._fields_metadata(sfqrn).keys())
+            all_field_names = list(inst._ho_model._fields_metadata(sfqrn).keys())
             all_fields_by_res[resource] = [f for f in all_field_names if f not in api_excluded]
 
             resource_pk_info = _pk_info(cls)
@@ -839,13 +841,13 @@ def build_crud_app(
                 access_map[resource] = access_entry
 
         access_map_holder[0] = access_map
-        parent_map_holder[0] = await load_role_parents(model)
-        roles_holder[0] = sorted(await load_roles_info(model), key=lambda r: r['name'])
+        parent_map_holder[0] = await load_role_parents(ctx.meta_model)
+        roles_holder[0] = sorted(await load_roles_info(ctx.meta_model), key=lambda r: r['name'])
 
     async def _startup() -> None:
         global _HO_WARN_SHOWN
-        await model.aconnect()
-        if model._production_mode:
+        await ctx.aconnect_all()
+        if ctx.business_model._production_mode or ctx.meta_model._production_mode:
             raise RuntimeError(
                 'halfORM DEV HELPERS are active (ho_roles, ho_access, _get_roles fallback). '
                 'These routes and the bearer-token-as-role fallback are not safe for production. '
@@ -855,11 +857,11 @@ def build_crud_app(
             print(_HO_WARN, file=sys.stderr, flush=True)
             _HO_WARN_SHOWN = True
 
-        await ensure_system_roles(model)
-        await reconcile_catalog(model)
+        await ensure_system_roles(ctx.meta_model)
+        await reconcile_catalog(ctx)
 
         from half_orm_gen.backend.ho_api.registry import discover_and_register
-        await discover_and_register(model, model.classes())
+        await discover_and_register(ctx.meta_model, ctx.classes())
 
         await _reload_all_access()
 

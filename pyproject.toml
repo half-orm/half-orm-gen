@@ -7,7 +7,6 @@ name = "half_orm_gen"
 dynamic = ["version"]
 dependencies = [
     "half-orm>=1.0.0rc16,<1.1.0",
-    "half-orm-dev>=1.0.0a32,<1.1.0",
     "litestar>=2.0.0",
     "PyJWT>=2.0.0",
     "cryptography>=41.0.0",
@@ -40,6 +39,11 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 requires-python = ">=3.9"
+
+[project.optional-dependencies]
+dev = [
+    "half-orm-dev>=1.0.0a32,<1.1.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/half-orm/half-orm-gen"

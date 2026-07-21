@@ -79,7 +79,7 @@ class _Resource:
 
 class AngularAppGenerator(StoreGenerator):
 
-    def generate(self, classes, api_version, output_dir: Path, *, model=None) -> None:
+    def generate(self, classes, api_version, output_dir: Path, *, meta_model=None) -> None:
         if output_dir.exists():
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True)
@@ -88,17 +88,19 @@ class AngularAppGenerator(StoreGenerator):
         project_name   = output_dir.name
         project_title  = ' '.join(p.capitalize() for p in project_name.split('-'))
 
-        # Load all crud_access from DB in one async pass
-        if model is not None:
+        # Load all crud_access from DB in one async pass — always from
+        # meta_model, which owns "half_orm_meta.api".route/access/... (may
+        # be a different database than the one classes' relations live in).
+        if meta_model is not None:
             import asyncio
             from half_orm_gen.backend.ho_api.loader import load_crud_access
 
             async def _load_all():
-                await model.aconnect()
+                await meta_model.aconnect()
                 result = {}
                 for relation, _kind in classes:
                     s, t = relation._t_fqrn[1], relation._t_fqrn[2]
-                    ca = await load_crud_access(model, s, t)
+                    ca = await load_crud_access(meta_model, s, t)
                     result[(s, t)] = ca if ca is not None else {}
                 return result
 

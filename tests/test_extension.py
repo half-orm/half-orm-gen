@@ -1,8 +1,9 @@
 """
-Tests for half-orm-gen extension.
+Tests for half-orm-gen: CLI precedence (--database/--meta-database vs
+half-orm-dev auto-discovery), HalfOrmContext, api_dir scaffolding, and the
+@tools.api_* decorators.
 """
 
-import inspect
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -12,6 +13,7 @@ import pytest
 from click.testing import CliRunner
 
 from half_orm_gen.cli_extension import add_commands
+from half_orm_gen.backend.ho_api.context import HalfOrmContext
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +21,7 @@ from half_orm_gen.cli_extension import add_commands
 # ---------------------------------------------------------------------------
 
 def _make_cli():
-    """Return a Click group with the litestar extension registered."""
+    """Return a Click group with the gen extension registered."""
 
     @click.group()
     def cli():
@@ -29,8 +31,8 @@ def _make_cli():
         def _fake_register(main_group, module):
             def decorator(func):
                 group = click.group(
-                    name='litestar',
-                    help='Generate and manage a Litestar API from a halfORM project.',
+                    name='gen',
+                    help='Generate a Litestar API and frontend backoffice from a halfORM project.',
                 )(func)
                 main_group.add_command(group)
                 return group
@@ -45,6 +47,8 @@ def _make_mock_repo(name='testdb', base_dir='/tmp/testdb'):
     repo = Mock()
     repo.name = name
     repo.base_dir = base_dir
+    repo.database = Mock()
+    repo.model = Mock(name='business_model')
     return repo
 
 
@@ -59,65 +63,264 @@ def _mock_half_orm_dev(repo):
 
 
 # ---------------------------------------------------------------------------
-# CLI tests
+# CLI precedence tests — half-orm-dev auto-discovery vs --database override
 # ---------------------------------------------------------------------------
 
-class TestCLI:
+class TestCLIPrecedence:
 
     def setup_method(self):
         self.runner = CliRunner()
         self.cli = _make_cli()
 
-    def test_litestar_group_registered(self):
-        assert 'litestar' in self.cli.commands
+    def test_gen_group_registered(self):
+        assert 'gen' in self.cli.commands
 
-    def test_generate_command_exists(self):
-        litestar = self.cli.commands['litestar']
-        assert 'generate' in litestar.commands
+    def test_api_command_exists(self):
+        gen = self.cli.commands['gen']
+        assert 'api' in gen.commands
 
-    def test_litestar_help(self):
-        result = self.runner.invoke(self.cli, ['litestar', '--help'])
-        assert result.exit_code == 0
-        assert 'generate' in result.output
-
-    def test_generate_help(self):
-        result = self.runner.invoke(self.cli, ['litestar', 'generate', '--help'])
-        assert result.exit_code == 0
-        assert '--dry-run' in result.output
-        assert 'api/app.py' in result.output
-
-    def test_generate_dry_run(self):
+    def test_api_no_flags_uses_repo_discovery(self):
+        """No --database/--meta-database + half-orm-dev project found: same
+        behavior as before these options existed."""
         repo = _make_mock_repo(name='mydb')
         with _mock_half_orm_dev(repo):
-            with patch('half_orm_gen.generate.GenApi'):
-                result = self.runner.invoke(self.cli, ['litestar', 'generate', '--dry-run'])
-        assert result.exit_code == 0
-        assert 'mydb' in result.output
+            with patch('half_orm_gen.cli_extension.GenApi') as mock_genapi:
+                result = self.runner.invoke(self.cli, ['gen', 'api', '--litestar'])
+        assert result.exit_code == 0, result.output
+        assert mock_genapi.call_count == 1
+        _, kwargs = mock_genapi.call_args
+        assert kwargs['module_name'] == 'mydb'
+        assert kwargs['ctx'].business_model is repo.model
+        assert kwargs['ctx'].meta_model is repo.model  # unsplit
 
-    def test_generate_calls_genapi(self):
-        repo = _make_mock_repo()
-        with _mock_half_orm_dev(repo):
-            with patch('half_orm_gen.generate.GenApi') as mock_genapi:
-                result = self.runner.invoke(self.cli, ['litestar', 'generate'])
-        assert result.exit_code == 0
-        mock_genapi.assert_called_once_with(repo, api_version=0)
-
-    def test_generate_no_half_orm_dev(self):
-        """Generate should fail gracefully when half_orm_dev is not installed."""
+    def test_api_no_half_orm_dev_and_no_database_fails(self):
+        """Unchanged existing error path: half_orm_dev absent, no --database given."""
         with patch.dict('sys.modules', {'half_orm_dev': None, 'half_orm_dev.repo': None}):
-            result = self.runner.invoke(self.cli, ['litestar', 'generate'])
+            result = self.runner.invoke(self.cli, ['gen', 'api', '--litestar'])
         assert result.exit_code != 0
+        assert 'half_orm_dev is not installed' in result.output
 
-    def test_generate_repo_init_failure(self):
-        """Generate should fail gracefully when Repo() raises."""
+    def test_api_repo_init_failure(self):
+        """Unchanged existing error path: Repo() raises."""
         mock_module = Mock()
         mock_module.Repo = Mock(side_effect=Exception('no .half_orm_cli found'))
         with patch.dict('sys.modules', {
             'half_orm_dev': Mock(),
             'half_orm_dev.repo': mock_module,
         }):
-            result = self.runner.invoke(self.cli, ['litestar', 'generate'])
+            result = self.runner.invoke(self.cli, ['gen', 'api', '--litestar'])
         assert result.exit_code != 0
+
+    def test_api_database_flag_skips_repo_discovery(self, tmp_path, monkeypatch):
+        """--database alone must work with no half_orm_dev installed at all."""
+        monkeypatch.chdir(tmp_path)
+        fake_model = Mock(name='standalone_model')
+        with patch.dict('sys.modules', {'half_orm_dev': None, 'half_orm_dev.repo': None}):
+            with patch('half_orm_gen.cli_extension._ensure_standalone_model', return_value=fake_model) as mock_ensure:
+                with patch('half_orm_gen.cli_extension.GenApi') as mock_genapi:
+                    result = self.runner.invoke(
+                        self.cli, ['gen', 'api', '--litestar', '--database', 'mydb']
+                    )
+        assert result.exit_code == 0, result.output
+        mock_ensure.assert_called_once_with('mydb', 'mydb', tmp_path)
+        _, kwargs = mock_genapi.call_args
+        assert kwargs['module_name'] == 'mydb'
+        assert kwargs['ctx'].business_model is fake_model
+        assert kwargs['ctx'].meta_model is fake_model  # unsplit
+
+    def test_api_database_inside_project_overrides_discovery(self, tmp_path, monkeypatch):
+        """--database given while inside a half-orm-dev project fully
+        overrides the business side — Repo() is never even consulted."""
+        monkeypatch.chdir(tmp_path)
+        fake_model = Mock(name='standalone_model')
+        repo = _make_mock_repo(name='mydb')
+        with _mock_half_orm_dev(repo):
+            with patch('half_orm_gen.cli_extension._ensure_standalone_model', return_value=fake_model):
+                with patch('half_orm_gen.cli_extension.GenApi'):
+                    result = self.runner.invoke(
+                        self.cli, ['gen', 'api', '--litestar', '--database', 'otherdb']
+                    )
+        assert result.exit_code == 0, result.output
+
+    def test_meta_database_layers_onto_project_discovery(self, tmp_path):
+        """--meta-database alone works inside an existing half-orm-dev
+        project, splitting off the metadata database."""
+        repo = _make_mock_repo(name='mydb', base_dir=str(tmp_path))
+        fake_meta_model = Mock(name='meta_model')
+        with _mock_half_orm_dev(repo):
+            with patch('half_orm_gen.cli_extension._ensure_standalone_model', return_value=fake_meta_model) as mock_ensure:
+                with patch('half_orm_gen.cli_extension.GenApi') as mock_genapi:
+                    result = self.runner.invoke(
+                        self.cli, ['gen', 'api', '--litestar', '--meta-database', 'metadb']
+                    )
+        assert result.exit_code == 0, result.output
+        mock_ensure.assert_called_once_with('metadb', 'metadb', tmp_path)
+        _, kwargs = mock_genapi.call_args
+        ctx = kwargs['ctx']
+        assert ctx.business_model is repo.model
+        assert ctx.meta_model is fake_meta_model
+        assert ctx.split is True
+
+    def test_frontend_command_exists(self):
+        gen = self.cli.commands['gen']
+        assert 'frontend' in gen.commands
+
+
+# ---------------------------------------------------------------------------
+# HalfOrmContext
+# ---------------------------------------------------------------------------
+
+class _FakeModel:
+    """Minimal stand-in for half_orm.model.Model."""
+
+    def __init__(self, classes=(), ho_meta=None):
+        self._classes = list(classes)
+        self._ho_meta = ho_meta or {}
+        self.aconnect_calls = 0
+
+    def classes(self):
+        yield from self._classes
+
+    def ho_meta(self) -> dict:
+        return dict(self._ho_meta)
+
+    async def aconnect(self):
+        self.aconnect_calls += 1
+
+
+class TestHalfOrmContext:
+
+    def test_defaults_meta_to_business(self):
+        model = _FakeModel()
+        ctx = HalfOrmContext(model)
+        assert ctx.meta_model is model
+        assert ctx.split is False
+
+    def test_split_true_for_distinct_models(self):
+        business = _FakeModel()
+        meta = _FakeModel()
+        ctx = HalfOrmContext(business, meta)
+        assert ctx.split is True
+
+    def test_classes_unsplit_is_pure_passthrough(self):
+        class A: pass
+        business = _FakeModel(classes=[(A, 'table')])
+        ctx = HalfOrmContext(business)
+        assert list(ctx.classes()) == [(A, 'table')]
+
+    def test_classes_split_merges_and_dedupes(self):
+        class A: pass
+        class B: pass
+        business = _FakeModel(classes=[(A, 'table')])
+        meta = _FakeModel(classes=[(A, 'table'), (B, 'table')])
+        ctx = HalfOrmContext(business, meta)
+        result = list(ctx.classes())
+        assert result == [(A, 'table'), (B, 'table')]  # A not duplicated
+
+    def test_ho_meta_split_merges(self):
+        business = _FakeModel(ho_meta={'public/foo': {'schema': 'public', 'table': 'foo'}})
+        meta = _FakeModel(ho_meta={'half_orm_meta.identity/user': {'schema': 'half_orm_meta.identity', 'table': 'user'}})
+        ctx = HalfOrmContext(business, meta)
+        merged = ctx.ho_meta()
+        assert 'public/foo' in merged
+        assert 'half_orm_meta.identity/user' in merged
+
+    def test_ho_meta_unsplit_is_passthrough(self):
+        business = _FakeModel(ho_meta={'public/foo': {}})
+        ctx = HalfOrmContext(business)
+        assert ctx.ho_meta() == {'public/foo': {}}
+
+    @pytest.mark.asyncio
+    async def test_aconnect_all_unsplit_connects_once(self):
+        business = _FakeModel()
+        ctx = HalfOrmContext(business)
+        await ctx.aconnect_all()
+        assert business.aconnect_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_aconnect_all_split_connects_both(self):
+        business = _FakeModel()
+        meta = _FakeModel()
+        ctx = HalfOrmContext(business, meta)
+        await ctx.aconnect_all()
+        assert business.aconnect_calls == 1
+        assert meta.aconnect_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# ho_api/ scaffolding (half_orm_gen.backend.litestar.v2.scaffold)
+# ---------------------------------------------------------------------------
+
+class TestScaffoldApiDir:
+
+    def test_creates_all_expected_files(self, tmp_path):
+        from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
+
+        api_dir = tmp_path / 'ho_api'
+        scaffold_api_dir(api_dir, module_name='mydb', api_version=0)
+
+        assert (api_dir / 'app.py').exists()
+        assert (api_dir / 'authorization.py').exists()
+        assert (api_dir / 'local_auth.py').exists()
+        assert (api_dir / '.env.example').exists()
+        assert (api_dir / '.env').exists()
+        assert (api_dir / 'custom' / 'middlewares' / 'jwt_config.py').exists()
+        assert (api_dir / 'custom' / 'local_auth.py.example').exists()
+
+    def test_app_py_imports_module_name(self, tmp_path):
+        from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
+
+        api_dir = tmp_path / 'ho_api'
+        scaffold_api_dir(api_dir, module_name='mydb', api_version=0)
+
+        content = (api_dir / 'app.py').read_text()
+        assert 'from mydb import MODEL' in content
+        assert 'HalfOrmContext(MODEL, None)' in content
+        assert 'build_crud_app(\n    _ctx,' in content
+
+    def test_app_py_split_meta_database(self, tmp_path):
+        from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
+
+        api_dir = tmp_path / 'ho_api'
+        scaffold_api_dir(api_dir, module_name='mydb', meta_module_name='mymeta', api_version=0)
+
+        content = (api_dir / 'app.py').read_text()
+        assert 'from mydb import MODEL' in content
+        assert 'from mymeta import MODEL as META_MODEL' in content
+        assert 'HalfOrmContext(MODEL, META_MODEL)' in content
+
+    def test_does_not_overwrite_env(self, tmp_path):
+        from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
+
+        api_dir = tmp_path / 'ho_api'
+        scaffold_api_dir(api_dir, module_name='mydb', api_version=0)
+        original_env = (api_dir / '.env').read_text()
+
+        scaffold_api_dir(api_dir, module_name='mydb', api_version=0)
+
+        assert (api_dir / '.env').read_text() == original_env
+
+    def test_app_py_always_regenerated(self, tmp_path):
+        from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
+
+        api_dir = tmp_path / 'ho_api'
+        api_dir.mkdir()
+        (api_dir / 'app.py').write_text('# stale content')
+
+        scaffold_api_dir(api_dir, module_name='mydb', api_version=0)
+
+        assert (api_dir / 'app.py').read_text() != '# stale content'
+
+    def test_federation_scaffolds_keypair(self, tmp_path):
+        from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
+
+        api_dir = tmp_path / 'ho_api'
+        scaffold_api_dir(api_dir, module_name='mydb', api_version=0, federation=True)
+
+        assert (api_dir / 'federation.py').exists()
+        assert (api_dir / 'private_key.pem').exists()
+        assert (api_dir / 'public_key.pem').exists()
+        assert 'HO_JWT_ALGORITHM=RS256' in (api_dir / '.env').read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -230,266 +433,6 @@ class TestTools:
         import asyncio
         result = asyncio.run(handler(None))
         assert result == 42
-
-
-# ---------------------------------------------------------------------------
-# scaffolding tests
-# ---------------------------------------------------------------------------
-
-class TestScaffolding:
-
-    def test_creates_all_expected_files(self, tmp_path):
-        from half_orm_gen.scaffold import scaffold_api_dir as _scaffold_api_dir
-
-        api_dir = tmp_path / 'api'
-        api_dir.mkdir()
-        _scaffold_api_dir(api_dir)
-
-        assert (api_dir / '__init__.py').exists()
-        assert (api_dir / 'guards.py').exists()
-        assert (api_dir / 'custom' / 'routes.py').exists()
-        assert (api_dir / 'custom' / '__init__.py').exists()
-        assert (api_dir / 'custom' / 'middlewares' / '__init__.py').exists()
-        assert (api_dir / 'custom' / 'middlewares' / 'authorization.py').exists()
-
-    def test_guards_py_contains_public_and_connected(self, tmp_path):
-        from half_orm_gen.scaffold import scaffold_api_dir as _scaffold_api_dir
-
-        api_dir = tmp_path / 'api'
-        api_dir.mkdir()
-        _scaffold_api_dir(api_dir)
-
-        content = (api_dir / 'guards.py').read_text()
-        assert 'async def anonymous' in content
-        assert 'async def connected' in content
-
-    def test_does_not_overwrite_existing_files(self, tmp_path):
-        from half_orm_gen.scaffold import scaffold_api_dir as _scaffold_api_dir
-
-        api_dir = tmp_path / 'api'
-        api_dir.mkdir()
-
-        # Pre-existing user content
-        guards_py = api_dir / 'guards.py'
-        guards_py.write_text('# my custom guards')
-
-        _scaffold_api_dir(api_dir)
-
-        assert guards_py.read_text() == '# my custom guards'
-
-    def test_partial_scaffold_fills_missing_only(self, tmp_path):
-        from half_orm_gen.scaffold import scaffold_api_dir as _scaffold_api_dir
-
-        api_dir = tmp_path / 'api'
-        api_dir.mkdir()
-        (api_dir / 'guards.py').write_text('# existing')
-
-        _scaffold_api_dir(api_dir)
-
-        # guards.py untouched, but other files created
-        assert (api_dir / 'guards.py').read_text() == '# existing'
-        assert (api_dir / 'custom' / 'routes.py').exists()
-
-
-# ---------------------------------------------------------------------------
-# GenApi helper method tests
-# ---------------------------------------------------------------------------
-
-class TestGenApiHelpers:
-    """Unit tests for route-generation helpers (api_routes module)."""
-
-    def setup_method(self):
-        from half_orm_gen.api_routes import (
-            _path_params, _query_params, _format_litestar_args,
-            _extract_guards,
-        )
-        self._path_params = _path_params
-        self._query_params = _query_params
-        self._format_litestar_args = _format_litestar_args
-        self._extract_guards = _extract_guards
-
-    def test_path_params_single(self):
-        assert self._path_params('/items/{id: uuid}') == 'id: Any'
-
-    def test_path_params_multiple(self):
-        result = self._path_params('/post/{post_id: uuid}/user/{user_id: uuid}')
-        assert 'post_id: Any' in result
-        assert 'user_id: Any' in result
-
-    def test_path_params_none(self):
-        assert self._path_params('/items') == ''
-
-    def test_query_params_skips_self(self):
-        sig = inspect.signature(lambda self, x: None)
-        decl, call = self._query_params(sig)
-        assert 'self' not in decl
-        assert 'self' not in call
-        assert 'x' in decl
-        assert 'x' in call
-
-    def test_query_params_with_annotation_and_default(self):
-        def fn(self, name: str, limit: int = 10): pass
-
-        sig = inspect.signature(fn)
-        decl, call = self._query_params(sig)
-        assert 'name: str' in decl
-        assert 'limit: int=10' in decl
-        assert call == 'name, limit'
-
-    def test_format_litestar_args_path(self):
-        result = self._format_litestar_args({'path': '/user/{id: uuid}'}, [], '', None)
-        assert '"/user/{id: uuid}"' in result
-
-    def test_format_litestar_args_path_with_version(self):
-        result = self._format_litestar_args({'path': '/user/{id: uuid}'}, [], '', 1)
-        assert '"/v1/user/{id: uuid}"' in result
-
-    def test_format_litestar_args_guards(self):
-        result = self._format_litestar_args({'path': '/items'}, ['anonymous', 'connected'], '', None)
-        assert 'guards=[guards.anonymous, guards.connected]' in result
-
-    def test_format_litestar_args_description(self):
-        result = self._format_litestar_args({'path': '/items'}, [], 'My description.', None)
-        assert 'My description.' in result
-
-    def test_extract_guards_string_list(self):
-        assert self._extract_guards({'guards': ['anonymous', 'connected']}) == ['anonymous', 'connected']
-
-    def test_extract_guards_callable_list(self):
-        def anonymous(): pass
-        def connected(): pass
-
-        assert self._extract_guards({'guards': [anonymous, connected]}) == ['anonymous', 'connected']
-
-    def test_extract_guards_empty(self):
-        assert self._extract_guards({}) == []
-        assert self._extract_guards({'guards': None}) == []
-
-
-# ---------------------------------------------------------------------------
-# GenApi integration test (mocked relations + tmp filesystem)
-# ---------------------------------------------------------------------------
-
-class TestGenApi:
-
-    def _make_relation(self, module_str, class_name, schemaname, methods):
-        """Build a minimal mock Relation class with @api_* decorated methods."""
-        attrs = {
-            '__module__': module_str,
-            '__name__': class_name,
-            '_schemaname': schemaname,
-            '_dbname': module_str.split('.')[0],
-            '_ho_dataclass_name': classmethod(lambda cls: f'DC_{class_name}'),
-        }
-        attrs.update(methods)
-        return type(class_name, (), attrs)
-
-    def test_generate_creates_app_py(self, tmp_path):
-        from half_orm_gen.generate import GenApi
-        from half_orm_gen import tools
-
-        @tools.api_get('/users', guards=['anonymous'])
-        async def get_users(self): pass
-
-        relation = self._make_relation(
-            'mydb.actor.user', 'User', 'actor',
-            {'get_users': get_users},
-        )
-
-        with patch('importlib.import_module', return_value=Mock(spec=[])):
-            GenApi(
-                relation_classes=[(relation, 'table')],
-                module_name='mydb',
-                base_dir=str(tmp_path),
-            )
-
-        assert (tmp_path / 'api' / 'app.py').exists()
-
-    def test_generated_app_py_contains_route(self, tmp_path):
-        from half_orm_gen.generate import GenApi
-        from half_orm_gen import tools
-
-        @tools.api_get('/users', guards=['anonymous'])
-        async def get_users(self): pass
-
-        relation = self._make_relation(
-            'mydb.actor.user', 'User', 'actor',
-            {'get_users': get_users},
-        )
-
-        with patch('importlib.import_module', return_value=Mock(spec=[])):
-            GenApi(
-                relation_classes=[(relation, 'table')],
-                module_name='mydb',
-                base_dir=str(tmp_path),
-            )
-
-        content = (tmp_path / 'api' / 'app.py').read_text()
-        assert '@get' in content
-        assert '"/users"' in content
-        assert 'mydb_actor_user_get_users' in content
-
-    def test_generated_app_py_has_header(self, tmp_path):
-        from half_orm_gen.generate import GenApi
-
-        with patch('importlib.import_module', return_value=Mock(spec=[])):
-            GenApi(
-                relation_classes=[],
-                module_name='mydb',
-                base_dir=str(tmp_path),
-            )
-
-        content = (tmp_path / 'api' / 'app.py').read_text()
-        assert 'from mydb import ho_baseclasses' in content
-        assert 'application = Litestar(' in content
-
-    def test_generate_scaffolds_missing_api_files(self, tmp_path):
-        from half_orm_gen.generate import GenApi
-
-        with patch('importlib.import_module', return_value=Mock(spec=[])):
-            GenApi(
-                relation_classes=[],
-                module_name='mydb',
-                base_dir=str(tmp_path),
-            )
-
-        assert (tmp_path / 'api' / 'guards.py').exists()
-        assert (tmp_path / 'api' / 'custom' / 'routes.py').exists()
-
-    def test_generate_does_not_overwrite_guards(self, tmp_path):
-        from half_orm_gen.generate import GenApi
-
-        api_dir = tmp_path / 'api'
-        api_dir.mkdir()
-        guards_py = api_dir / 'guards.py'
-        guards_py.write_text('# project-specific guards')
-
-        with patch('importlib.import_module', return_value=Mock(spec=[])):
-            GenApi(
-                relation_classes=[],
-                module_name='mydb',
-                base_dir=str(tmp_path),
-            )
-
-        assert guards_py.read_text() == '# project-specific guards'
-
-    def test_generate_overwrites_app_py(self, tmp_path):
-        """app.py is always regenerated, even if it already exists."""
-        from half_orm_gen.generate import GenApi
-
-        api_dir = tmp_path / 'api'
-        api_dir.mkdir()
-        app_py = api_dir / 'app.py'
-        app_py.write_text('# old content')
-
-        with patch('importlib.import_module', return_value=Mock(spec=[])):
-            GenApi(
-                relation_classes=[],
-                module_name='mydb',
-                base_dir=str(tmp_path),
-            )
-
-        assert app_py.read_text() != '# old content'
 
 
 if __name__ == '__main__':

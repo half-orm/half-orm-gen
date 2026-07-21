@@ -12,8 +12,10 @@ class GenApp:
 
     Parameters
     ----------
-    repo:
-        A ``half_orm_dev.repo.Repo`` instance.
+    ctx:
+        A :class:`~half_orm_gen.backend.ho_api.context.HalfOrmContext`
+        pairing the business model with the model that owns
+        "half_orm_meta.api"/"half_orm_meta.identity".
     generator:
         A framework-specific generator instance (e.g. SvelteAppGenerator).
     output_dir:
@@ -22,11 +24,11 @@ class GenApp:
         Integer API version (used to build route prefixes).
     """
 
-    def __init__(self, repo, *, generator, output_dir: Path, api_version=None):
+    def __init__(self, *, ctx, generator, output_dir: Path, api_version=None):
         from half_orm_gen.backend.generate import _ensure_ho_api_schema
-        _ensure_ho_api_schema(repo.model)
-        classes = list(repo.model.classes())
-        generator.generate(classes, api_version, output_dir, model=repo.model)
+        _ensure_ho_api_schema(ctx)
+        classes = list(ctx.classes())
+        generator.generate(classes, api_version, output_dir, meta_model=ctx.meta_model)
 
 
 class GenStore:
@@ -35,8 +37,10 @@ class GenStore:
 
     Parameters
     ----------
-    repo:
-        A ``half_orm_dev.repo.Repo`` instance.
+    ctx:
+        A :class:`~half_orm_gen.backend.ho_api.context.HalfOrmContext`
+        pairing the business model with the model that owns
+        "half_orm_meta.api"/"half_orm_meta.identity".
     generator:
         A :class:`StoreGenerator` subclass instance (e.g. SvelteGenerator).
     output_dir:
@@ -47,13 +51,13 @@ class GenStore:
 
     def __init__(
         self,
-        repo,
         *,
+        ctx,
         generator: StoreGenerator,
         output_dir: Path,
         api_version: int | None = None,
     ):
         from half_orm_gen.backend.generate import _ensure_ho_api_schema
-        _ensure_ho_api_schema(repo.model)
-        classes = list(repo.model.classes())
-        generator.generate(classes, api_version, output_dir, model=repo.model)
+        _ensure_ho_api_schema(ctx)
+        classes = list(ctx.classes())
+        generator.generate(classes, api_version, output_dir, meta_model=ctx.meta_model)

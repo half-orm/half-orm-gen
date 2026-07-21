@@ -39,21 +39,21 @@ def _check_admin(request: Request) -> list[str]:
 
 
 async def _reload_resource_access(
-    model, resource: str,
+    ctx, resource: str,
     crud_access_by_res: dict, api_excluded_by_res: dict, access_map_holder: list,
 ) -> None:
     """Reload one resource's access from DB and update the in-memory dicts."""
     from half_orm_gen.backend.litestar.v2.runtime import _build_access_entry
 
     schema, table = resource.split('/', 1)
-    crud_access = await load_crud_access(model, schema, table) or {}
+    crud_access = await load_crud_access(ctx.meta_model, schema, table) or {}
     crud_access_by_res[resource] = crud_access
 
     api_excluded = api_excluded_by_res.get(resource, [])
-    rel_cls = model.get_relation_class(f'{schema}.{table}')
+    rel_cls = ctx.model_for(schema).get_relation_class(f'{schema}.{table}')
     rel_inst = rel_cls()
     sfqrn = rel_inst._t_fqrn
-    all_field_names = list(model._fields_metadata(sfqrn).keys())
+    all_field_names = list(rel_inst._ho_model._fields_metadata(sfqrn).keys())
     pk_fields = list(getattr(rel_inst, '_ho_pkey', {}).keys()) or None
 
     access_entry = _build_access_entry(crud_access, api_excluded, all_field_names, pk_fields)
@@ -67,10 +67,11 @@ async def _reload_resource_access(
 
 
 def make_ho_admin_handlers(
-    model, prefix: str,
+    ctx, prefix: str,
     crud_access_by_res: dict, api_excluded_by_res: dict,
     access_map_holder: list, parent_map_holder: list,
 ) -> list:
+    model = ctx.meta_model
     Role                  = model.get_relation_class('"half_orm_meta.api".role')
     Route                 = model.get_relation_class('"half_orm_meta.api".route')
     Access                = model.get_relation_class('"half_orm_meta.api".access')
@@ -84,7 +85,7 @@ def make_ho_admin_handlers(
 
     async def _reload(resource: str) -> None:
         await _reload_resource_access(
-            model, resource, crud_access_by_res, api_excluded_by_res, access_map_holder
+            ctx, resource, crud_access_by_res, api_excluded_by_res, access_map_holder
         )
         await _manager.broadcast(_ws_event('access_reload', resource))
 
@@ -153,7 +154,7 @@ def make_ho_admin_handlers(
                 )
             ]
 
-            rel_cls = model.get_relation_class(f'{schema}.{table}')
+            rel_cls = ctx.model_for(schema).get_relation_class(f'{schema}.{table}')
             rel_inst = rel_cls()
             pk_fields = list(rel_inst._ho_pkey.keys())
             ho_fields = getattr(rel_inst, '_ho_fields', {})
@@ -266,7 +267,7 @@ def make_ho_admin_handlers(
         verb      = data.get('verb')
         if not all([role_name, schema, table, verb]):
             raise HTTPException(status_code=400, detail='role_name, schema_name, table_name, verb required')
-        access_id, pk_fields = await Access.create(role_name, schema, table, verb, parent_map_holder[0])
+        access_id, pk_fields = await Access.create(role_name, schema, table, verb, parent_map_holder[0], ctx.model_for(schema))
         await _reload(f'{schema}/{table}')
         return {'id': str(access_id), 'pk_fields': pk_fields}
 

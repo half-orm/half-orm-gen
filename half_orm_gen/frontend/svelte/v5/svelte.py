@@ -2330,7 +2330,7 @@ def _detail_page(
 
 class SvelteAppGenerator(StoreGenerator):
 
-    def generate(self, classes, api_version, output_dir: Path, *, model=None) -> None:
+    def generate(self, classes, api_version, output_dir: Path, *, meta_model=None) -> None:
         if output_dir.exists():
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True)

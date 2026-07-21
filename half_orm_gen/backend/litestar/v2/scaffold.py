@@ -81,18 +81,21 @@ for _key_var in ('HO_JWT_PRIVATE_KEY_FILE', 'HO_JWT_PUBLIC_KEY_FILE'):
         os.environ[_key_var] = os.path.join(cur_dir, _key_val)
 
 from half_orm_gen.backend.litestar.v2.runtime import build_crud_app
+from half_orm_gen.backend.ho_api.context import HalfOrmContext
 from {module_name} import MODEL
+{meta_import}
+_ctx = HalfOrmContext(MODEL, {meta_model_expr})
 
-# Must happen before anything else below touches MODEL — federation.py and
-# any project's own ho_api/custom/routes.py both call model.get_relation_
-# class(...) for half_orm_meta tables (e.g. Peer) at import time, expecting
-# the classes half_orm_meta.identity/api define (Peer.lookup_trusted, User.
-# authenticate, ...) rather than a generic dynamically-built one — which is
-# only true once they've been registered. build_crud_app also registers
-# them (idempotent), but by then federation_setup below would already have
-# run with the wrong classes.
+# Must happen before anything else below touches _ctx.meta_model —
+# federation.py and any project's own ho_api/custom/routes.py both call
+# model.get_relation_class(...) for half_orm_meta tables (e.g. Peer) at
+# import time, expecting the classes half_orm_meta.identity/api define
+# (Peer.lookup_trusted, User.authenticate, ...) rather than a generic
+# dynamically-built one — which is only true once they've been registered.
+# build_crud_app also registers them (idempotent), but by then
+# federation_setup below would already have run with the wrong classes.
 from half_orm_gen.backend.ho_api import half_orm_meta as _half_orm_meta
-_half_orm_meta.register_all(MODEL)
+_half_orm_meta.register_all(_ctx.meta_model)
 
 from ho_api.authorization import Authorization
 
@@ -117,7 +120,7 @@ except ImportError:
     _custom_guards = {}
 
 application = build_crud_app(
-    MODEL,
+    _ctx,
     module_name='{module_name}',
     api_version={api_version},
     middleware=_middleware,
@@ -131,7 +134,7 @@ application = build_crud_app(
 # to _route_handlers before custom/routes.py (if any) is appended.
 _FEDERATION_SETUP = """\
 from ho_api.federation import make_federation_handlers
-_route_handlers = _route_handlers + make_federation_handlers(MODEL)
+_route_handlers = _route_handlers + make_federation_handlers(_ctx.meta_model)
 """
 
 # ---------------------------------------------------------------------------
@@ -609,10 +612,15 @@ async def enrich_state(payload: dict, state: dict) -> None:
 def scaffold_api_dir(
     api_dir: Path,
     module_name: str = '',
+    meta_module_name: str | None = None,
     api_version: int | None = None,
     federation: bool = False,
 ) -> None:
     """Write ho_api/app.py and authorization.py. Always regenerated.
+
+    meta_module_name: top-level package exposing MODEL for the database that
+    owns "half_orm_meta.api"/".identity", when it's a separate database from
+    the business one (module_name). None means they're the same database.
 
     federation: when True, scaffold an RS256 keypair instead of the default
     HS256 shared secret — needed only for projects that will register with
@@ -623,11 +631,20 @@ def scaffold_api_dir(
     api_dir.mkdir(parents=True, exist_ok=True)
     version_str = str(api_version) if api_version is not None else 'None'
 
+    if meta_module_name and meta_module_name != module_name:
+        meta_import = f'from {meta_module_name} import MODEL as META_MODEL'
+        meta_model_expr = 'META_MODEL'
+    else:
+        meta_import = ''
+        meta_model_expr = 'None'
+
     # app.py — always regenerated
     app_py = api_dir / 'app.py'
     content = (
         _APP_TEMPLATE
         .replace('{module_name}', module_name)
+        .replace('{meta_import}', meta_import)
+        .replace('{meta_model_expr}', meta_model_expr)
         .replace('{api_version}', version_str)
         .replace('{federation_setup}', _FEDERATION_SETUP if federation else '')
     )
