@@ -43,19 +43,32 @@ class HalfOrmContext:
 
     def classes(self):
         """business_model.classes(), plus meta_model's own (allowlisted)
-        relations when split, deduped by (module, qualname).
+        relations when split, deduped by (schema, table).
 
         Delegates entirely to Model.classes() — which already falls back to
         get_relation_class() (pure DB introspection, no Python file
         required) for any resource with no generated/importable module, or
-        whose module doesn't define the expected class."""
+        whose module doesn't define the expected class.
+
+        Deduping by (cls.__module__, cls.__qualname__) would be wrong here:
+        every half_orm_meta.* class is built by the SAME build_class()
+        function in half_orm_gen's own source (see half_orm_meta/__init__.py)
+        — one call per model — so two distinct classes built against two
+        distinct models (business_model and meta_model) share the exact
+        same __module__/__qualname__ despite being different class objects
+        bound to different connections; deduping on that pair silently
+        fails to catch the collision, and build_crud_app then registers the
+        same route path twice (ImproperlyConfiguredException at startup).
+        (schema, table) — read off cls._t_fqrn[1:], set as a class
+        attribute by half_orm.relation_factory's factory(), no
+        instantiation needed — is what actually identifies a resource."""
         seen = set()
         for cls, kind in self.business_model.classes():
-            seen.add((cls.__module__, cls.__qualname__))
+            seen.add(cls._t_fqrn[1:])
             yield cls, kind
         if self.split:
             for cls, kind in self.meta_model.classes():
-                key = (cls.__module__, cls.__qualname__)
+                key = cls._t_fqrn[1:]
                 if key not in seen:
                     yield cls, kind
 

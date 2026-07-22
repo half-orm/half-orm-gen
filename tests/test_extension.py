@@ -203,19 +203,32 @@ class TestHalfOrmContext:
         assert ctx.split is True
 
     def test_classes_unsplit_is_pure_passthrough(self):
-        class A: pass
+        class A: _t_fqrn = ('db', 'public', 'a')
         business = _FakeModel(classes=[(A, 'table')])
         ctx = HalfOrmContext(business)
         assert list(ctx.classes()) == [(A, 'table')]
 
     def test_classes_split_merges_and_dedupes(self):
-        class A: pass
-        class B: pass
+        class A: _t_fqrn = ('db', 'public', 'a')
+        class B: _t_fqrn = ('db', 'public', 'b')
         business = _FakeModel(classes=[(A, 'table')])
         meta = _FakeModel(classes=[(A, 'table'), (B, 'table')])
         ctx = HalfOrmContext(business, meta)
         result = list(ctx.classes())
         assert result == [(A, 'table'), (B, 'table')]  # A not duplicated
+
+    def test_classes_split_dedupes_by_resource_not_class_identity(self):
+        """Two DISTINCT class objects sharing (schema, table) — e.g. two
+        half_orm_meta.* classes built by the same build_class() function
+        against different models, so they'd share __module__/__qualname__
+        too — must still be deduped as the same resource."""
+        class A1: _t_fqrn = ('db1', 'half_orm_meta.identity', 'user')
+        class A2: _t_fqrn = ('db2', 'half_orm_meta.identity', 'user')
+        business = _FakeModel(classes=[(A1, 'table')])
+        meta = _FakeModel(classes=[(A2, 'table')])
+        ctx = HalfOrmContext(business, meta)
+        result = list(ctx.classes())
+        assert result == [(A1, 'table')]  # meta's A2 dropped as a duplicate resource
 
     def test_ho_meta_split_merges(self):
         business = _FakeModel(ho_meta={'public/foo': {'schema': 'public', 'table': 'foo'}})
