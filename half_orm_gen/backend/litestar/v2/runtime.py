@@ -17,6 +17,8 @@ from litestar import Litestar, Router, get, post, put, delete, patch, websocket,
 from litestar.exceptions import HTTPException
 from litestar.logging import LoggingConfig
 
+from half_orm.field import is_text_like_sql_type
+
 from half_orm_gen.backend.ho_api.loader import (
     load_crud_access,
     load_role_parents,
@@ -732,6 +734,22 @@ def _make_ho_search(
             if not searchable_cols:
                 continue
 
+            # Free-text global search only makes sense against text-like
+            # columns and tsvector (full-text) columns — an int4/timestamptz/
+            # uuid/bool/... column can't be ILIKE'd against arbitrary typed
+            # text (Postgres would reject casting the search term to its
+            # type). A column ending up "searchable" despite its type
+            # (mis-configured, or auto-granted alongside a label — see
+            # ho_admin_set_field_label) is silently excluded here rather
+            # than raising a 500 at query time.
+            field_types = (field_types_by_res or {}).get(res_key, {})
+            searchable_cols = [
+                f for f in searchable_cols
+                if field_types.get(f) == 'tsvector' or is_text_like_sql_type(field_types.get(f, ''))
+            ]
+            if not searchable_cols:
+                continue
+
             pk_names = list(getattr(cls(), '_ho_pkey', {}).keys())
             authorized = _effective_out_fields(
                 crud_access, 'GET', roles, api_excluded,
@@ -741,7 +759,6 @@ def _make_ho_search(
                 continue
 
             role_filter = _get_role_filter(crud_access, 'GET', roles)
-            field_types = (field_types_by_res or {}).get(res_key, {})
 
             inst = None
             for field in searchable_cols:
