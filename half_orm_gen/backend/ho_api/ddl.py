@@ -11,6 +11,14 @@ CREATE TABLE IF NOT EXISTS "half_orm_meta.api".resource (
   PRIMARY KEY (schemaname, relname)
 );
 
+ALTER TABLE "half_orm_meta.api".resource
+  ADD COLUMN IF NOT EXISTS is_association boolean NOT NULL DEFAULT false;
+-- True for a pure many-to-many junction table (its PK is exactly its two
+-- single-column FKs, each to a different table) — set to an auto-detected
+-- default the first time Resource.sync() discovers the resource (see
+-- reconcile_catalog), never touched again afterwards so an admin override
+-- (POST .../ho_admin/resource_association) survives every later reconcile.
+
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".role (
   name        text PRIMARY KEY,
   deletable   boolean NOT NULL DEFAULT TRUE,

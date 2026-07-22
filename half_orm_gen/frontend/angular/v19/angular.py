@@ -67,6 +67,7 @@ class _Resource:
     put_in_names: list
     fk_deps: list
     rev_fk_deps: list
+    association_targets: list
     optional_post_fields: frozenset
     crud_access: dict
     api_excluded: list
@@ -102,11 +103,17 @@ class AngularAppGenerator(StoreGenerator):
                     s, t = relation._t_fqrn[1], relation._t_fqrn[2]
                     ca = await load_crud_access(meta_model, s, t)
                     result[(s, t)] = ca if ca is not None else {}
-                return result
+                Resource = meta_model.get_relation_class('"half_orm_meta.api".resource')
+                is_association = {
+                    (r['schemaname'], r['relname']): r['is_association']
+                    for r in await Resource.list_all()
+                }
+                return result, is_association
 
-            crud_access_map = asyncio.run(_load_all())
+            crud_access_map, is_association_by_res = asyncio.run(_load_all())
         else:
             crud_access_map = {}
+            is_association_by_res = {}
 
         # --- static files ---
         self._write(output_dir / '.gitignore', _GITIGNORE)
@@ -210,8 +217,20 @@ class AngularAppGenerator(StoreGenerator):
 
             fk_deps     = self._fk_deps(inst, out_names, detail_resources)
             rev_fk_deps = self._reverse_fk_deps(inst, pk_field, crud_resources)
+            association_targets = self._association_targets(
+                inst, pk_field, crud_resources, is_association_by_res
+            )
+            # Pivot children rendered via association_targets instead — drop
+            # them from the plain raw-rows rev_fk_deps to avoid a duplicate
+            # "Related" section for the same child.
+            _assoc_pivots = {(ps, pt) for ps, pt, _, _, _ in association_targets}
+            rev_fk_deps = [dep for dep in rev_fk_deps if (dep[0], dep[1]) not in _assoc_pivots]
 
             base_path = f'{version_prefix}/{schema_name}/{table_name}'
+            association_targets_with_url = [
+                (ps, pt, ff, ts, tt, f'{version_prefix}/{ps}/{pt}/via/{ff}')
+                for ps, pt, ff, ts, tt in association_targets
+            ]
 
             resources.append(_Resource(
                 schema_name=schema_name, table_name=table_name, map_key=map_key,
@@ -221,6 +240,7 @@ class AngularAppGenerator(StoreGenerator):
                 has_post=has_post, has_put=has_put, has_del=has_del, has_detail=has_detail,
                 post_in_names=post_in_names, put_in_names=put_in_names,
                 fk_deps=fk_deps, rev_fk_deps=rev_fk_deps,
+                association_targets=association_targets_with_url,
                 optional_post_fields=optional_post_fields,
                 crud_access=crud_access, api_excluded=api_excluded,
             ))
@@ -346,6 +366,7 @@ class AngularAppGenerator(StoreGenerator):
                     r.pk_field, r.pk_ts_type, r.pk_extractor,
                     r.out_names, r.put_in_names, r.has_put,
                     r.map_key, r.fk_deps, r.rev_fk_deps, r.all_fields,
+                    association_targets=r.association_targets,
                 )
                 self._write(comp_dir / 'detail.component.ts', ts)
                 self._write(comp_dir / 'detail.component.html', html)

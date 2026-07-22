@@ -105,6 +105,31 @@ async def load_roles_info(model) -> list[dict]:
     return await Role.load_roles_info()
 
 
+def _is_pivot(entry: dict) -> bool:
+    """True if `entry` (one ctx.ho_meta() value) is a pure many-to-many
+    pivot/junction table: its PK is exactly 2 columns, each the sole
+    local field of a single-column FK, targeting two DIFFERENT tables.
+
+    Mirrors half_orm_gen.backend.litestar.v2.runtime._pivot_fk_pair, which
+    expresses the same 4-part condition against a live Relation class's
+    own _ho_fkeys instead of this ho_meta()-shaped dict — keep both in
+    sync if this definition ever changes.
+    """
+    pk_fields = entry.get('pk_fields') or []
+    if len(pk_fields) != 2:
+        return False
+    targets = []
+    for pk_field in pk_fields:
+        fk = next(
+            (fk for fk in entry.get('fk_deps', []) if fk['local_fields'] == [pk_field]),
+            None,
+        )
+        if fk is None:
+            return False
+        targets.append((fk['remote_schema'], fk['remote_table']))
+    return targets[0] != targets[1]
+
+
 async def reconcile_catalog(ctx) -> None:
     """Sync resource/route/field catalogs with pg_catalog: insert new, flag
     deprecated, unflag restored. Delegates to each table's own class — see
@@ -119,6 +144,9 @@ async def reconcile_catalog(ctx) -> None:
     """
     meta = ctx.ho_meta()
     live_relations = {(v['schema'], v['table']) for v in meta.values()}
+    live_relations_with_pivot_flag = {
+        (v['schema'], v['table']): _is_pivot(v) for v in meta.values()
+    }
     live_fields = {
         (v['schema'], v['table'], f['name'])
         for v in meta.values()
@@ -130,6 +158,6 @@ async def reconcile_catalog(ctx) -> None:
     Field    = ctx.meta_model.get_relation_class('"half_orm_meta.api".field')
 
     # Resources first — Route/Field both FK-reference resource(schemaname, relname).
-    await Resource.sync(live_relations)
+    await Resource.sync(live_relations_with_pivot_flag)
     await Route.sync(live_relations)
     await Field.sync(live_fields)

@@ -8,7 +8,7 @@ import { SiloRegistry } from '../../../generated/silo-registry.service';
 import type { Row } from '../../../generated/resource.silo';
 import { AuthService } from '../../../core/auth.service';
 import { PermissionsMatrixComponent } from '../../../generated/permissions-matrix.component';
-import { ${iname}FieldsComponent } from './fields.component';$fk_fields_imports$rev_list_imports
+import { ${iname}FieldsComponent } from './fields.component';$fk_fields_imports$rev_list_imports$association_imports
 
 @Component({
   selector: '$selector',
@@ -32,6 +32,7 @@ export class ${iname}DetailComponent {
   readonly editing = signal(false);
   readonly error   = signal('');
 $form_class
+$association_signals
 
   constructor() {
     effect(() => {
@@ -43,8 +44,9 @@ $form_class
     });
     effect(() => {
       if (this.item()) this.silo.markRead(this.id());
-    });$form_effect$ws_effect$fk_fetch_effects
+    });$form_effect$ws_effect$fk_fetch_effects$association_effects
   }
 
-  str(v: unknown): string { return String(v); }$handle_update
+  str(v: unknown): string { return String(v); }
+  objectEntries(o: Record<string, unknown> | undefined | null): [string, unknown][] { return o ? Object.entries(o) : []; }$handle_update
 }

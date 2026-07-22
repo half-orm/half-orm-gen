@@ -117,6 +117,220 @@ def _pk_info(cls) -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# Many-to-many "pivot" (association/junction table) detection + join route
+#
+# A pivot's PK is exactly its two single-column FKs, each to a different
+# table. Mirrors half_orm_gen.backend.ho_api.loader._is_pivot, which
+# expresses the same condition against a ctx.ho_meta()-shaped dict instead
+# of a live Relation class's own _ho_fkeys — keep both in sync if this
+# definition ever changes.
+# ---------------------------------------------------------------------------
+
+class _PivotSide:
+    """One of a pivot's two FK columns: which table it targets, and the
+    attribute names (on the pivot / on the target) needed to navigate the
+    FK chain via half_orm's own Fkey.set() mechanism (see _make_via_handler).
+    """
+    __slots__ = ('field', 'schema', 'table', 'remote_pk_field', 'fwd_attr', 'rev_attr')
+
+    def __init__(self, field, schema, table, remote_pk_field, fwd_attr, rev_attr):
+        self.field = field
+        self.schema = schema
+        self.table = table
+        self.remote_pk_field = remote_pk_field
+        self.fwd_attr = fwd_attr   # pivot's own attribute for this forward FK
+        self.rev_attr = rev_attr   # target's own attribute for its reverse FK back to the pivot
+
+
+def _attr_name_for_fkey(inst, fkey) -> str | None:
+    """The instance attribute name a FKey object is exposed under — may be
+    an auto-generated fk_.../rfk_... name or a project's own Fkeys alias;
+    either way, `getattr(inst, name)` is required for ho_aselect(json_agg=
+    {name: ...}) — it looks the name up via instance __dict__, not
+    _ho_fkeys directly (see half_orm.relation._ho_prep_json_agg_select)."""
+    for attr_name in inst._ho_fkeys_attr:
+        if inst.__dict__.get(attr_name) is fkey:
+            return attr_name
+    return None
+
+
+def _pivot_fk_pair(cls) -> tuple[_PivotSide, _PivotSide] | None:
+    """Detect a pure many-to-many pivot table. Returns (side_a, side_b), or
+    None when `cls` isn't one (self-referential — both FKs to the same
+    table — is explicitly out of scope; composite far-side PKs are a known
+    v1 limitation)."""
+    inst = cls()
+    pk_names = list(inst._ho_pkey.keys())
+    if len(pk_names) != 2:
+        return None
+
+    forward = {}  # pk_name -> (fkey, target_schema, target_table)
+    for fkey in inst._ho_fkeys.values():
+        if fkey.is_reverse or len(fkey.names) != 1:
+            continue
+        if fkey.names[0] not in pk_names:
+            continue
+        target_schema, target_table = fkey.remote['fqtn']
+        forward[fkey.names[0]] = (fkey, target_schema, target_table)
+
+    if set(forward) != set(pk_names):
+        return None
+    targets = [forward[pk][1:] for pk in pk_names]
+    if targets[0] == targets[1]:
+        return None  # self-referential
+
+    sides = []
+    for pk_name in pk_names:
+        fkey, target_schema, target_table = forward[pk_name]
+        fwd_attr = _attr_name_for_fkey(inst, fkey)
+        if fwd_attr is None:
+            return None
+        target_cls = inst._ho_model.get_relation_class(f'{target_schema}.{target_table}')
+        target_inst = target_cls()
+        target_pk_names = list(target_inst._ho_pkey.keys())
+        if len(target_pk_names) != 1:
+            return None  # composite far-side PK — v1 limitation
+        rev_fkey = None
+        for candidate in target_inst._ho_fkeys.values():
+            if not candidate.is_reverse:
+                continue
+            if candidate.remote['fqtn'] != inst._t_fqrn[1:]:
+                continue
+            if list(candidate.fk_names) == [pk_name]:
+                rev_fkey = candidate
+                break
+        if rev_fkey is None:
+            return None
+        rev_attr = _attr_name_for_fkey(target_inst, rev_fkey)
+        if rev_attr is None:
+            return None
+        sides.append(_PivotSide(
+            field=pk_name, schema=target_schema, table=target_table,
+            remote_pk_field=target_pk_names[0], fwd_attr=fwd_attr, rev_attr=rev_attr,
+        ))
+    return sides[0], sides[1]
+
+
+def _make_via_handler(
+    path: str, cls, resource: str, sides: tuple[_PivotSide, _PivotSide],
+    crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
+    parent_map_holder: list, meta_model,
+):
+    """GET {path}/via/{fixed_field}/{value} — for a pivot table, returns the
+    OTHER side's rows reached through it (e.g. from actor_id=9, the films
+    that actor appears in), instead of the pivot's own raw rows. One merged
+    row per pivot record: {target_pk, target_resource, target_label, extra}
+    — target_label is the target's own configured label field(s) joined
+    (None if it has none/none survive authorization, letting the frontend
+    fall back to displaying target_pk itself); extra is the pivot's own
+    non-FK/PK fields, authorized exactly like its normal list view.
+
+    Two independent ho_aselect(json_agg=...) calls, both starting from the
+    FIXED side's own class filtered by its own PK — half_orm's own
+    FK-navigation + aggregation mechanism (Fkey.set() chaining, ho_aselect's
+    json_agg parameter), not a hand-rolled SELECT + IN-query:
+      - unchained: the pivot's own extra fields (leaf = the pivot itself).
+      - chained through the pivot to the target (leaf = the target class):
+        its own PK + authorized label fields.
+    Merged here by the shared target id.
+    """
+    by_field = {s.field: s for s in sides}
+
+    async def handler(
+        request: Request, fixed_field: str, value: str,
+        limit: Optional[int] = 100, offset: Optional[int] = 0,
+    ) -> dict:
+        side = by_field.get(fixed_field)
+        if side is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f'"{fixed_field}" is not a FK column of {resource} (expected one of {list(by_field)})',
+            )
+        target = next(s for s in sides if s is not side)
+
+        roles = _expand_roles(_get_roles(request), parent_map_holder[0])
+
+        # Pivot's own extra (non-FK/PK) fields, authorized like its normal list view.
+        pivot_crud_access = crud_access_by_res.get(resource, {})
+        pivot_api_excluded = api_excluded_by_res.get(resource, [])
+        pivot_authorized = _effective_out_fields(
+            pivot_crud_access, 'GET', roles, pivot_api_excluded,
+            all_fields_by_res.get(resource, []),
+        ) or []
+        pk_and_fk_fields = {s.field for s in sides}
+        pivot_extra_fields = [f for f in pivot_authorized if f not in pk_and_fk_fields]
+
+        # Far side's label fields, authorized like its own normal list view.
+        target_resource = f'{target.schema}/{target.table}'
+        target_crud_access = crud_access_by_res.get(target_resource, {})
+        target_api_excluded = api_excluded_by_res.get(target_resource, [])
+        Field = meta_model.get_relation_class('"half_orm_meta.api".field')
+        field_rows = await Field.list_for(target.schema, target.table)
+        configured_labels = [
+            r['column_name'] for r in sorted(
+                (r for r in field_rows if r['label_order'] is not None),
+                key=lambda r: r['label_order'],
+            )
+        ]
+        target_out = _effective_out_fields(
+            target_crud_access, 'GET', roles, target_api_excluded,
+            all_fields_by_res.get(target_resource, []),
+        ) or []
+        authorized_labels = [f for f in configured_labels if f in target_out]
+
+        FixedCls = cls._ho_model.get_relation_class(f'{side.schema}.{side.table}')
+
+        # Pivot's own extra data — unchained, leaf is the pivot itself.
+        extra_inst = FixedCls(**{side.remote_pk_field: value})
+        getattr(extra_inst, side.rev_attr).set(cls())
+        extra_rows = await extra_inst.ho_aselect(
+            json_agg={side.rev_attr: pivot_extra_fields + [target.field]}
+        )
+        pivot_entries = extra_rows[0][side.rev_attr] if extra_rows else []
+        if not pivot_entries:
+            return {'data': [], 'meta': {
+                'target_resource': target_resource, 'offset': offset, 'limit': limit, 'has_more': False,
+            }}
+
+        # Far side's label — chained through the pivot, leaf is the target class.
+        pivot_rel = cls()
+        getattr(pivot_rel, target.fwd_attr).set()
+        label_inst = FixedCls(**{side.remote_pk_field: value})
+        getattr(label_inst, side.rev_attr).set(pivot_rel)
+        label_rows = await label_inst.ho_aselect(
+            json_agg={side.rev_attr: [target.remote_pk_field] + authorized_labels}
+        )
+        label_entries = label_rows[0][side.rev_attr] if label_rows else []
+        label_by_id = {row[target.remote_pk_field]: row for row in label_entries}
+
+        data = []
+        for entry in pivot_entries:
+            target_id = entry.get(target.field)
+            extra = {k: v for k, v in entry.items() if k != target.field}
+            label_row = label_by_id.get(target_id, {})
+            label_values = [
+                str(label_row[f]) for f in authorized_labels
+                if label_row.get(f) is not None
+            ]
+            data.append({
+                'target_pk': target_id,
+                'target_resource': target_resource,
+                'target_label': ' '.join(label_values) if label_values else None,
+                'extra': extra,
+            })
+
+        total = len(data)
+        page = data[offset:offset + limit]
+        return {'data': page, 'meta': {
+            'target_resource': target_resource, 'offset': offset, 'limit': limit,
+            'has_more': offset + limit < total,
+        }}
+
+    handler.__name__ = handler.__qualname__ = f'via_{resource.replace("/", "_")}'
+    return get(f'{path}/via/{{fixed_field:str}}/{{value:str}}')(handler)
+
+
+# ---------------------------------------------------------------------------
 # Route handler factories
 #
 # Each factory closes over:
@@ -789,6 +1003,12 @@ def build_crud_app(
                 relation_handlers.append(
                     _make_delete_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info, ws_rmap, parent_map_holder)
                 )
+
+        pivot_sides = _pivot_fk_pair(cls)
+        if pivot_sides is not None:
+            relation_handlers.append(
+                _make_via_handler(path, cls, resource, pivot_sides, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder, ctx.meta_model)
+            )
 
     from half_orm_gen.backend.litestar.v2.ho_admin import make_ho_admin_handlers
     from half_orm_gen.backend.litestar.v2.identity_admin import make_identity_admin_handlers

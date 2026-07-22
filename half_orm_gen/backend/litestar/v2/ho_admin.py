@@ -72,6 +72,7 @@ def make_ho_admin_handlers(
     access_map_holder: list, parent_map_holder: list,
 ) -> list:
     model = ctx.meta_model
+    Resource               = model.get_relation_class('"half_orm_meta.api".resource')
     Role                  = model.get_relation_class('"half_orm_meta.api".role')
     Route                 = model.get_relation_class('"half_orm_meta.api".route')
     Access                = model.get_relation_class('"half_orm_meta.api".access')
@@ -141,6 +142,11 @@ def make_ho_admin_handlers(
         for row in routes:
             key = (row['schema_name'], row['table_name'])
             relations.setdefault(key, []).append(row['verb'])
+
+        is_association_by_res = {
+            (r['schemaname'], r['relname']): r['is_association']
+            for r in await Resource.list_all()
+        }
 
         result = {}
         for (schema, table), verbs in relations.items():
@@ -255,8 +261,30 @@ def make_ho_admin_handlers(
                 'dynamic_roles':        dynamic_roles,
                 'filters':              filters,
                 'access':               access,
+                'is_association':       is_association_by_res.get((schema, table), False),
             }
         return result
+
+    @post(f'{prefix}/ho_admin/resource_association')
+    async def ho_admin_set_resource_association(request: Request, data: dict[str, Any]) -> dict:
+        """Toggle whether a resource is treated as a many-to-many pivot table
+        (auto-detected default on first discovery — see Resource.sync/
+        reconcile_catalog — overridable here; the override persists across
+        every later reconcile/restart)."""
+        _check_admin(request)
+        schema = data.get('schema_name')
+        table  = data.get('table_name')
+        value  = data.get('is_association')
+        if not schema or not table or not isinstance(value, bool):
+            raise HTTPException(
+                status_code=400,
+                detail='schema_name, table_name, is_association (bool) required',
+            )
+        updated = await Resource.set_is_association(schema, table, value)
+        if not updated:
+            raise HTTPException(status_code=404, detail=f'Resource "{schema}/{table}" not found')
+        await _reload(f'{schema}/{table}')
+        return {'schema_name': schema, 'table_name': table, 'is_association': value}
 
     @post(f'{prefix}/ho_admin/access')
     async def ho_admin_create_access(request: Request, data: dict[str, Any]) -> dict:
@@ -510,4 +538,5 @@ def make_ho_admin_handlers(
         ho_admin_remove_searchable,
         ho_admin_set_field_label,
         ho_admin_unset_field_label,
+        ho_admin_set_resource_association,
     ]

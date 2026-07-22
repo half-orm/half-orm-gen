@@ -204,5 +204,37 @@ class StoreGenerator(ABC):
             deps.append((remote_schema, remote_table, remote_fk_fields[0]))
         return deps
 
+    def _association_targets(
+        self, inst, pk_field: str | None, crud_resources: set,
+        is_association_by_res: dict,
+    ) -> list:
+        """For each reverse-FK child that's a many-to-many pivot table (see
+        half_orm_gen.backend.litestar.v2.runtime._pivot_fk_pair — reused
+        here rather than re-derived, so both stay in lockstep with the
+        backend's own /via/ route), resolve the pivot's OTHER forward FK to
+        find the actual far-side target.
+
+        Returns (pivot_schema, pivot_table, fixed_field, target_schema,
+        target_table) — fixed_field is the pivot's own column referencing
+        `inst` (the one path segment the backend's /via/{fixed_field}/{id}
+        route needs), same value _reverse_fk_deps already resolves.
+        """
+        from half_orm_gen.backend.litestar.v2.runtime import _pivot_fk_pair
+
+        targets = []
+        for pivot_schema, pivot_table, fixed_field in self._reverse_fk_deps(inst, pk_field, crud_resources):
+            if not is_association_by_res.get((pivot_schema, pivot_table), False):
+                continue
+            pivot_cls = inst._ho_model.get_relation_class(f'{pivot_schema}.{pivot_table}')
+            sides = _pivot_fk_pair(pivot_cls)
+            if sides is None:
+                continue
+            this_side = next((s for s in sides if s.field == fixed_field), None)
+            if this_side is None:
+                continue
+            target_side = next(s for s in sides if s is not this_side)
+            targets.append((pivot_schema, pivot_table, fixed_field, target_side.schema, target_side.table))
+        return targets
+
     @abstractmethod
     def generate(self, classes, api_version, output_dir: Path, *, meta_model=None) -> None: ...

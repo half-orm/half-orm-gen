@@ -448,5 +448,336 @@ class TestTools:
         assert result == 42
 
 
+# ---------------------------------------------------------------------------
+# Pivot/association-table detection (loader._is_pivot)
+# ---------------------------------------------------------------------------
+
+class TestIsPivot:
+
+    def _import(self):
+        from half_orm_gen.backend.ho_api.loader import _is_pivot
+        return _is_pivot
+
+    def _fk(self, local_field, remote_schema, remote_table):
+        return {
+            'local_fields': [local_field],
+            'remote_schema': remote_schema, 'remote_table': remote_table,
+            'remote_fields': ['id'],
+        }
+
+    def test_genuine_pivot_detected(self):
+        _is_pivot = self._import()
+        entry = {
+            'pk_fields': ['actor_id', 'film_id'],
+            'fk_deps': [
+                self._fk('actor_id', 'public', 'actor'),
+                self._fk('film_id', 'public', 'film'),
+            ],
+        }
+        assert _is_pivot(entry) is True
+
+    def test_self_referential_not_detected(self):
+        """Both FKs to the SAME table — which side is 'the other side' is
+        ambiguous, explicitly out of scope."""
+        _is_pivot = self._import()
+        entry = {
+            'pk_fields': ['user_id_a', 'user_id_b'],
+            'fk_deps': [
+                self._fk('user_id_a', 'public', 'user'),
+                self._fk('user_id_b', 'public', 'user'),
+            ],
+        }
+        assert _is_pivot(entry) is False
+
+    def test_single_column_pk_not_detected(self):
+        _is_pivot = self._import()
+        entry = {
+            'pk_fields': ['id'],
+            'fk_deps': [self._fk('author_id', 'public', 'author')],
+        }
+        assert _is_pivot(entry) is False
+
+    def test_three_column_pk_not_detected(self):
+        _is_pivot = self._import()
+        entry = {
+            'pk_fields': ['a_id', 'b_id', 'c_id'],
+            'fk_deps': [
+                self._fk('a_id', 'public', 'a'),
+                self._fk('b_id', 'public', 'b'),
+                self._fk('c_id', 'public', 'c'),
+            ],
+        }
+        assert _is_pivot(entry) is False
+
+    def test_pk_field_without_matching_fk_not_detected(self):
+        """A 2-column PK where one column isn't itself a (single-column) FK
+        — e.g. a natural composite key, not a pivot."""
+        _is_pivot = self._import()
+        entry = {
+            'pk_fields': ['film_id', 'lang_id'],
+            'fk_deps': [self._fk('film_id', 'public', 'film')],
+        }
+        assert _is_pivot(entry) is False
+
+    def test_composite_local_fields_not_a_single_column_fk(self):
+        """An FK whose local_fields spans more than one column doesn't count
+        as 'the sole local field' for either PK column."""
+        _is_pivot = self._import()
+        entry = {
+            'pk_fields': ['a_id', 'b_id'],
+            'fk_deps': [{
+                'local_fields': ['a_id', 'b_id'],
+                'remote_schema': 'public', 'remote_table': 'other',
+                'remote_fields': ['x', 'y'],
+            }],
+        }
+        assert _is_pivot(entry) is False
+
+
+# ---------------------------------------------------------------------------
+# Pivot/association-table detection (runtime._pivot_fk_pair) — live _ho_fkeys
+# path, mirroring TestIsPivot's ho_meta()-shaped coverage above.
+# ---------------------------------------------------------------------------
+
+class _FakeFKey:
+    def __init__(self, names, fk_names, remote_fqtn, is_reverse=False):
+        self.names = names
+        self.fk_names = fk_names
+        self.is_reverse = is_reverse
+        self._remote_fqtn = remote_fqtn
+
+    @property
+    def remote(self):
+        return {'fqtn': self._remote_fqtn, 'reverse': self.is_reverse}
+
+
+class _FakeInst:
+    def __init__(self, pkey_names, fkeys: dict, model, t_fqrn):
+        self._ho_pkey = {n: None for n in pkey_names}
+        self._ho_fkeys = fkeys
+        self._ho_fkeys_attr = set(fkeys.keys())
+        self._ho_model = model
+        self._t_fqrn = t_fqrn
+        for name, fkey in fkeys.items():
+            setattr(self, name, fkey)
+
+
+class _FakePivotModel:
+    def __init__(self):
+        self.classes = {}
+
+    def get_relation_class(self, fqtn):
+        return self.classes[fqtn]
+
+
+def _build_pagila_like_fixture():
+    """film_actor(actor_id, film_id) <-> actor(actor_id) / film(film_id)."""
+    from half_orm_gen.backend.litestar.v2 import runtime
+
+    model = _FakePivotModel()
+
+    def actor_cls():
+        return _FakeInst(
+            ['actor_id'],
+            {'rfk_film_actor_actor_id': _FakeFKey(
+                names=['actor_id'], fk_names=['actor_id'],
+                remote_fqtn=('public', 'film_actor'), is_reverse=True,
+            )},
+            model, ('db', 'public', 'actor'),
+        )
+
+    def film_cls():
+        return _FakeInst(
+            ['film_id'],
+            {'rfk_film_actor_film_id': _FakeFKey(
+                names=['film_id'], fk_names=['film_id'],
+                remote_fqtn=('public', 'film_actor'), is_reverse=True,
+            )},
+            model, ('db', 'public', 'film'),
+        )
+
+    def film_actor_cls():
+        return _FakeInst(
+            ['actor_id', 'film_id'],
+            {
+                'fk_actor': _FakeFKey(
+                    names=['actor_id'], fk_names=['actor_id'],
+                    remote_fqtn=('public', 'actor'),
+                ),
+                'fk_film': _FakeFKey(
+                    names=['film_id'], fk_names=['film_id'],
+                    remote_fqtn=('public', 'film'),
+                ),
+            },
+            model, ('db', 'public', 'film_actor'),
+        )
+
+    model.classes['public.actor'] = actor_cls
+    model.classes['public.film'] = film_cls
+    model.classes['public.film_actor'] = film_actor_cls
+    return runtime, film_actor_cls, model
+
+
+class TestPivotFkPair:
+
+    def test_genuine_pivot_detected_with_attr_names(self):
+        runtime, film_actor_cls, _ = _build_pagila_like_fixture()
+        sides = runtime._pivot_fk_pair(film_actor_cls)
+        assert sides is not None
+        by_field = {s.field: s for s in sides}
+        assert set(by_field) == {'actor_id', 'film_id'}
+        actor_side = by_field['actor_id']
+        assert (actor_side.schema, actor_side.table) == ('public', 'actor')
+        assert actor_side.remote_pk_field == 'actor_id'
+        assert actor_side.fwd_attr == 'fk_actor'
+        assert actor_side.rev_attr == 'rfk_film_actor_actor_id'
+        film_side = by_field['film_id']
+        assert (film_side.schema, film_side.table) == ('public', 'film')
+        assert film_side.fwd_attr == 'fk_film'
+        assert film_side.rev_attr == 'rfk_film_actor_film_id'
+
+    def test_single_column_pk_not_detected(self):
+        from half_orm_gen.backend.litestar.v2 import runtime
+        model = _FakePivotModel()
+
+        def cls_():
+            return _FakeInst(['id'], {}, model, ('db', 'public', 'thing'))
+
+        assert runtime._pivot_fk_pair(cls_) is None
+
+    def test_self_referential_not_detected(self):
+        from half_orm_gen.backend.litestar.v2 import runtime
+        model = _FakePivotModel()
+
+        def user_cls():
+            return _FakeInst(
+                ['id'],
+                {'rfk_friend_a': _FakeFKey(['id'], ['user_id_a'], ('public', 'friend'), is_reverse=True)},
+                model, ('db', 'public', 'user'),
+            )
+
+        def friend_cls():
+            return _FakeInst(
+                ['user_id_a', 'user_id_b'],
+                {
+                    'fk_a': _FakeFKey(['user_id_a'], ['id'], ('public', 'user')),
+                    'fk_b': _FakeFKey(['user_id_b'], ['id'], ('public', 'user')),
+                },
+                model, ('db', 'public', 'friend'),
+            )
+
+        model.classes['public.user'] = user_cls
+        assert runtime._pivot_fk_pair(friend_cls) is None
+
+    def test_composite_far_side_pk_not_detected(self):
+        from half_orm_gen.backend.litestar.v2 import runtime
+        model = _FakePivotModel()
+
+        def actor_cls():
+            return _FakeInst(
+                ['actor_id', 'other_id'],  # composite PK on the far side
+                {},
+                model, ('db', 'public', 'actor'),
+            )
+
+        def film_actor_cls():
+            return _FakeInst(
+                ['actor_id', 'film_id'],
+                {
+                    'fk_actor': _FakeFKey(['actor_id'], ['actor_id'], ('public', 'actor')),
+                    'fk_film': _FakeFKey(['film_id'], ['film_id'], ('public', 'film')),
+                },
+                model, ('db', 'public', 'film_actor'),
+            )
+
+        def film_cls():
+            return _FakeInst(['film_id'], {}, model, ('db', 'public', 'film'))
+
+        model.classes['public.actor'] = actor_cls
+        model.classes['public.film'] = film_cls
+        assert runtime._pivot_fk_pair(film_actor_cls) is None
+
+    def test_no_matching_reverse_fk_not_detected(self):
+        """Forward FKs exist on the pivot, but the target side has no
+        reverse FK pointing back (shouldn't happen with a real FK
+        constraint, but _pivot_fk_pair must fail closed, not crash)."""
+        from half_orm_gen.backend.litestar.v2 import runtime
+        model = _FakePivotModel()
+
+        def actor_cls():
+            return _FakeInst(['actor_id'], {}, model, ('db', 'public', 'actor'))
+
+        def film_cls():
+            return _FakeInst(['film_id'], {}, model, ('db', 'public', 'film'))
+
+        def film_actor_cls():
+            return _FakeInst(
+                ['actor_id', 'film_id'],
+                {
+                    'fk_actor': _FakeFKey(['actor_id'], ['actor_id'], ('public', 'actor')),
+                    'fk_film': _FakeFKey(['film_id'], ['film_id'], ('public', 'film')),
+                },
+                model, ('db', 'public', 'film_actor'),
+            )
+
+        model.classes['public.actor'] = actor_cls
+        model.classes['public.film'] = film_cls
+        assert runtime._pivot_fk_pair(film_actor_cls) is None
+
+
+# ---------------------------------------------------------------------------
+# StoreGenerator._association_targets (frontend/base.py) — reuses
+# runtime._pivot_fk_pair's detection, resolved from the reverse-FK side.
+# ---------------------------------------------------------------------------
+
+class _ConcreteGenerator:
+    """Minimal stand-in exposing StoreGenerator's concrete methods without
+    needing to satisfy its ABC (generate() is irrelevant here)."""
+    from half_orm_gen.frontend.base import StoreGenerator
+    _reverse_fk_deps = StoreGenerator._reverse_fk_deps
+    _association_targets = StoreGenerator._association_targets
+
+
+class TestAssociationTargets:
+
+    def test_resolves_far_side_through_pivot(self):
+        _, film_actor_cls, model = _build_pagila_like_fixture()
+        actor_inst = model.classes['public.actor']()
+        gen = _ConcreteGenerator()
+
+        targets = gen._association_targets(
+            actor_inst, 'actor_id',
+            crud_resources={('public', 'film_actor')},
+            is_association_by_res={('public', 'film_actor'): True},
+        )
+        assert targets == [('public', 'film_actor', 'actor_id', 'public', 'film')]
+
+    def test_not_flagged_is_association_yields_nothing(self):
+        """Same reverse FK, but the resource isn't tagged is_association —
+        must fall back to nothing here (the plain rev_fk_deps path handles it)."""
+        _, film_actor_cls, model = _build_pagila_like_fixture()
+        actor_inst = model.classes['public.actor']()
+        gen = _ConcreteGenerator()
+
+        targets = gen._association_targets(
+            actor_inst, 'actor_id',
+            crud_resources={('public', 'film_actor')},
+            is_association_by_res={('public', 'film_actor'): False},
+        )
+        assert targets == []
+
+    def test_no_pk_field_yields_nothing(self):
+        _, film_actor_cls, model = _build_pagila_like_fixture()
+        actor_inst = model.classes['public.actor']()
+        gen = _ConcreteGenerator()
+
+        targets = gen._association_targets(
+            actor_inst, None,
+            crud_resources={('public', 'film_actor')},
+            is_association_by_res={('public', 'film_actor'): True},
+        )
+        assert targets == []
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

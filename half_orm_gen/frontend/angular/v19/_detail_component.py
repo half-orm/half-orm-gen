@@ -5,6 +5,12 @@ from ._form_components import (
 from ._templates import _tpl
 
 
+def _assoc_slug(pivot_schema: str, pivot_table: str, fixed_field: str) -> str:
+    """JS-safe unique identifier for one association_targets entry."""
+    raw = f'{pivot_schema}_{pivot_table}_{fixed_field}'
+    return 'assoc_' + ''.join(c if c.isalnum() else '_' for c in raw)
+
+
 def _detail_component(
     schema_name: str, table_name: str,
     iname: str, pk_field: str, pk_ts_type: str, pk_extractor: str,
@@ -12,7 +18,9 @@ def _detail_component(
     has_put: bool, map_key: str,
     fk_deps: list, rev_fk_deps: list,
     all_fields: dict,
+    association_targets: list | None = None,
 ) -> tuple[str, str, str]:
+    association_targets = association_targets or []
     title   = _title(schema_name, table_name)
     fk_map  = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
@@ -119,15 +127,30 @@ def _detail_component(
             pk_field=pk_field,
         )
 
+    # Association (many-to-many pivot) sections — the pivot's far side,
+    # not its own raw rows (see runtime._pivot_fk_pair / the /via/ route).
+    assoc_section_tpl = _tpl('detail/association_section.html')
+    assoc_sections = ''
+    assoc_signal_names = []
+    for pivot_schema, pivot_table, fixed_field, target_schema, target_table, via_path in association_targets:
+        signal_name = _assoc_slug(pivot_schema, pivot_table, fixed_field)
+        assoc_signal_names.append((signal_name, via_path))
+        assoc_sections += assoc_section_tpl.substitute(
+            target_rs=target_schema, target_rt=target_table,
+            target_title=_title(target_schema, target_table),
+            signal_name=signal_name,
+        )
+
     right_col = ''
     if fk_deps:
         right_col += '\n      <p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">↗ Direct references</p>'
         right_col += fk_sections
-    if rev_fk_deps:
+    if rev_fk_deps or association_targets:
         if fk_deps:
             right_col += '\n      <hr class="my-6 border-gray-200">'
         right_col += '\n      <p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">↙ Related</p>'
         right_col += rev_sections
+        right_col += assoc_sections
 
     handle_update = ''
     if has_put and put_in_names:
@@ -172,6 +195,40 @@ def _detail_component(
             f'    }});'
         )
 
+    # Association (many-to-many pivot) fetch — a dedicated HttpClient call
+    # (not the ResourceSilo/list machinery: the /via/ route's merged-row
+    # shape isn't a normal resource list), gated on the same reactive
+    # dependencies (token/access/simulated role) as the constructor's own
+    # silo-fetch effect above, so it refreshes on role simulation too.
+    association_imports = (
+        "\nimport { HttpClient, HttpHeaders } from '@angular/common/http';"
+        if assoc_signal_names else ''
+    )
+    association_signals = '\n  '.join(
+        f'readonly {name} = signal<any[]>([]);' for name, _ in assoc_signal_names
+    )
+    if assoc_signal_names:
+        association_signals = (
+            '  private http = inject(HttpClient);\n  ' + association_signals
+        )
+    association_effects = ''
+    for signal_name, via_path in assoc_signal_names:
+        association_effects += (
+            f'\n    effect(() => {{\n'
+            f'      void this.auth.token();\n'
+            f'      void this.auth.simulatedRole();\n'
+            f'      const i = this.item();\n'
+            f"      const id = i?.['{pk_field}'];\n"
+            f'      if (id == null) return;\n'
+            f'      const t = this.auth.token();\n'
+            f"      const headers = t ? new HttpHeaders({{ Authorization: `Bearer ${{t}}` }}) : new HttpHeaders();\n"
+            f"      this.http.get<{{ data: any[] }}>(`{via_path}/${{String(id)}}`, {{ headers }}).subscribe({{\n"
+            f'        next: (res) => this.{signal_name}.set(res.data ?? []),\n'
+            f'        error: () => this.{signal_name}.set([]),\n'
+            f'      }});\n'
+            f'    }});'
+        )
+
     # Add type annotation to lambda parameter
     typed_extractor = pk_extractor.replace('i =>', '(i: Row) =>')
     pk_id_line = f'\n  protected getPkId = {typed_extractor};'
@@ -189,5 +246,8 @@ def _detail_component(
         form_class=form_class, form_effect=form_effect, ws_effect=ws_effect,
         fk_fetch_effects=fk_fetch_effects, handle_update=handle_update,
         selector=_selector(schema_name, table_name, 'detail'),
+        association_imports=association_imports,
+        association_signals=association_signals,
+        association_effects=association_effects,
     )
     return ts, html, ''
