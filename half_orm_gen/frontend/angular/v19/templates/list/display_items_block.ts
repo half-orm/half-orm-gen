@@ -15,10 +15,22 @@
     const sf = this.silo.sortField();
     if (sf) {
       const asc = this.silo.sortAsc();
+      const ft = this.fieldTypes[sf];
       items = [...items].sort((a, b) => {
-        const av = String((a as any)[sf] ?? '');
-        const bv = String((b as any)[sf] ?? '');
-        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+        const av = (a as any)[sf];
+        const bv = (b as any)[sf];
+        if (av == null && bv == null) return 0;
+        if (av == null) return asc ? -1 : 1;
+        if (bv == null) return asc ? 1 : -1;
+        let cmp: number;
+        if (ft === 'number') {
+          cmp = Number(av) - Number(bv);
+        } else if (ft === 'date' || ft === 'datetime') {
+          cmp = new Date(av).getTime() - new Date(bv).getTime();
+        } else {
+          cmp = String(av).localeCompare(String(bv));
+        }
+        return asc ? cmp : -cmp;
       });
     }
     return items;
