@@ -107,6 +107,11 @@ export class AuthService {
     this.fetchedRoutes.clear();
     clearAllStates();
     this.exitSimulation();
+    // A successful login/signup proves an admin account exists — set this
+    // directly instead of waiting on a re-fetch, so a signup immediately
+    // followed by logout shows "Sign in" (not "Create admin account") without
+    // needing a full page reload to re-run ngOnInit's _fetchSetupStatus().
+    this.hasAdmin.set(true);
     void this._fetchAccess();
     void this._fetchRoles();
     void this._fetchUsers();
