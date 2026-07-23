@@ -22,7 +22,7 @@ _VERSION_FILE = Path('ho_api') / '.api_version'
 _STANDALONE_MODULE_TEMPLATE = """\
 from half_orm.model import Model
 
-MODEL = Model('{database}', with_half_orm_meta='half_orm_meta.identity.user')
+MODEL = Model('{database}', with_half_orm_meta={with_half_orm_meta!r})
 """
 
 
@@ -38,16 +38,34 @@ def _write_api_version(version: int) -> None:
     _VERSION_FILE.write_text(str(version) + '\n')
 
 
-def _ensure_standalone_model(database: str, module_name: str, base_dir: Path):
+def _ensure_standalone_model(
+    database: str, module_name: str, base_dir: Path,
+    with_half_orm_meta: bool | str = False,
+):
     """Write {base_dir}/{module_name}/__init__.py once if missing (never
     overwritten — same convention as ho_api/custom/guards.py.example), then
-    import it and return its MODEL."""
+    import it and return its MODEL.
+
+    with_half_orm_meta must only be truthy for whichever model actually owns
+    "half_orm_meta.api"/".identity" (the meta model — the business model
+    itself, in single-DB mode) — never for a business model paired with a
+    separate --meta-database. Otherwise, if the business database happens to
+    physically carry a half_orm_meta schema (e.g. leftover from an earlier
+    single-DB run), business_model.classes() would enumerate its own
+    (never-registered) generic classes for it, and HalfOrmContext.classes()
+    — which yields business_model first — would silently shadow meta_model's
+    real hand-registered classes (half_orm_meta.identity.user's
+    login/signup routes, notably) with no error, just missing routes.
+    """
     pkg_dir = base_dir / module_name
     init_py = pkg_dir / '__init__.py'
     if not init_py.exists():
         pkg_dir.mkdir(parents=True, exist_ok=True)
         init_py.write_text(
-            _STANDALONE_MODULE_TEMPLATE.format(database=database), encoding='utf-8'
+            _STANDALONE_MODULE_TEMPLATE.format(
+                database=database, with_half_orm_meta=with_half_orm_meta,
+            ),
+            encoding='utf-8',
         )
         click.echo(f'  created  {init_py}')
 
@@ -64,7 +82,11 @@ def _resolve_ctx(database: str | None, meta_database: str | None):
     error messages as before this option existed."""
     if database:
         module_name, base_dir = database, Path.cwd()
-        business_model = _ensure_standalone_model(database, module_name, base_dir)
+        is_split = bool(meta_database and meta_database != module_name)
+        business_model = _ensure_standalone_model(
+            database, module_name, base_dir,
+            with_half_orm_meta=False if is_split else 'half_orm_meta.identity.user',
+        )
     else:
         try:
             from half_orm_dev.repo import Repo
@@ -97,7 +119,10 @@ def _resolve_ctx(database: str | None, meta_database: str | None):
         module_name, base_dir, business_model = repo.name, Path(repo.base_dir), repo.model
 
     if meta_database and meta_database != module_name:
-        meta_model = _ensure_standalone_model(meta_database, meta_database, base_dir)
+        meta_model = _ensure_standalone_model(
+            meta_database, meta_database, base_dir,
+            with_half_orm_meta='half_orm_meta.identity.user',
+        )
     else:
         meta_model = None
 
