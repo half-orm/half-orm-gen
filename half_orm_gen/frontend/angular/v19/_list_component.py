@@ -131,7 +131,12 @@ def _list_component(
     )
 
     router_link_es = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
-    _comp_imports = ['PermissionsMatrixComponent', 'HoTooltipComponent', 'NewItemsBadgeComponent']
+    new_items_badge_import = (
+        "import { NewItemsBadgeComponent } from '../../../generated/new-items-badge.component';\n"
+    ) if pk_extractor else ''
+    _comp_imports = ['PermissionsMatrixComponent', 'HoTooltipComponent']
+    if pk_extractor:
+        _comp_imports.append('NewItemsBadgeComponent')
     if needs_router_link:
         _comp_imports.insert(0, 'RouterLink')
     imports_str = ', '.join(_comp_imports)
@@ -158,6 +163,7 @@ def _list_component(
 
     ts = _tpl('list/list.component.ts').substitute(
         router_link_es=router_link_es,
+        new_items_badge_import=new_items_badge_import,
         selector=_selector(schema_name, table_name, 'list'),
         imports_str=imports_str, iname=iname, map_key=map_key,
         pk_id_line=pk_id_line, field_types_map=field_types_map,

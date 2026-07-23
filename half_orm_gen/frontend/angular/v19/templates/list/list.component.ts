@@ -10,8 +10,7 @@ import { isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTit
 import type { FieldType } from '../../../generated/stores/filters';
 import { PermissionsMatrixComponent } from '../../../generated/permissions-matrix.component';
 import { HoTooltipComponent } from '../../../generated/ho-tooltip.component';
-import { NewItemsBadgeComponent } from '../../../generated/new-items-badge.component';
-@Component({
+${new_items_badge_import}@Component({
   selector: '$selector',
   standalone: true,
   imports: [$imports_str],
