@@ -316,7 +316,10 @@ def make_ho_admin_handlers(
         if not access_id or not field_name:
             raise HTTPException(status_code=400, detail='access_id and field_name required')
         uid = uuid.UUID(access_id)
-        await FieldAccessOut.add(uid, field_name)
+        try:
+            await FieldAccessOut.add(uid, field_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
@@ -330,7 +333,10 @@ def make_ho_admin_handlers(
         if not access_id or not field_names:
             raise HTTPException(status_code=400, detail='access_id and field_names required')
         uid = uuid.UUID(access_id)
-        await FieldAccessOut.add_batch(uid, field_names)
+        try:
+            await FieldAccessOut.add_batch(uid, field_names)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
@@ -355,7 +361,10 @@ def make_ho_admin_handlers(
         if not access_id or not field_name:
             raise HTTPException(status_code=400, detail='access_id and field_name required')
         uid = uuid.UUID(access_id)
-        await FieldAccessIn.add(uid, field_name)
+        try:
+            await FieldAccessIn.add(uid, field_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
@@ -369,7 +378,10 @@ def make_ho_admin_handlers(
         if not access_id or not field_names:
             raise HTTPException(status_code=400, detail='access_id and field_names required')
         uid = uuid.UUID(access_id)
-        await FieldAccessIn.add_batch(uid, field_names)
+        try:
+            await FieldAccessIn.add_batch(uid, field_names)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
@@ -449,7 +461,10 @@ def make_ho_admin_handlers(
         if not access_id or not field_name:
             raise HTTPException(status_code=400, detail='access_id and field_name required')
         uid = uuid.UUID(access_id)
-        await FieldAccessSearchable.add(uid, field_name, role_name)
+        try:
+            await FieldAccessSearchable.add(uid, field_name, role_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         resource = await Access.resource_for(uid)
         if resource:
             await _reload(resource)
@@ -495,7 +510,10 @@ def make_ho_admin_handlers(
         for acc in acc_rows:
             existing = await FieldAccessSearchable.list_for(acc['id'])
             if field_name not in {r['field_name'] for r in existing}:
-                await FieldAccessSearchable.add(acc['id'], field_name)
+                try:
+                    await FieldAccessSearchable.add(acc['id'], field_name)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
 
         resource = f'{schema}/{table}'
         await _reload(resource)

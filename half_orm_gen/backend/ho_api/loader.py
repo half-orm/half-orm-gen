@@ -8,6 +8,40 @@ its own class under half_orm_gen.backend.ho_api.half_orm_meta.
 """
 
 
+async def resolve_field_id(model, access_id, field_name: str):
+    """Resolve (access_id, field_name) to the matching "half_orm_meta.api".field.id.
+
+    field_access_in/out/searchable/fk_auto all store a field_id (a real FK
+    to field, cascading on column drop) but keep field_name in their own
+    public .add()/.remove() API, matching every caller across the codebase
+    — this is the shared translation, via access's own (schema_name,
+    table_name), those four classes' methods call internally.
+
+    Raises ValueError if the access row or the field doesn't exist (a
+    bogus/typo'd field_name is now rejected here rather than silently
+    accepted, per the field_id migration this replaces).
+    """
+    Access = model.get_relation_class('"half_orm_meta.api".access')
+    Field  = model.get_relation_class('"half_orm_meta.api".field')
+    rows = await Access(id=access_id).ho_aselect('schema_name', 'table_name')
+    if not rows:
+        raise ValueError(f'No access row for id={access_id}')
+    schema, table = rows[0]['schema_name'], rows[0]['table_name']
+    field_rows = await Field(schema_name=schema, table_name=table, column_name=field_name).ho_aselect('id')
+    if not field_rows:
+        raise ValueError(f'"{field_name}" is not a column of {schema}.{table}')
+    return field_rows[0]['id']
+
+
+async def resolve_field_names(model, field_ids: list) -> dict:
+    """Bulk field_id -> column_name (one query for many ids); {} for empty input."""
+    if not field_ids:
+        return {}
+    Field = model.get_relation_class('"half_orm_meta.api".field')
+    rows = await Field(id=('in', tuple(field_ids))).ho_aselect('id', 'column_name')
+    return {r['id']: r['column_name'] for r in rows}
+
+
 async def load_crud_access(model, schema_name: str, table_name: str) -> dict | None:
     """Reconstruct a CRUD_ACCESS-compatible dict from "half_orm_meta.api" tables.
 

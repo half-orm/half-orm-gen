@@ -167,81 +167,6 @@ CREATE TABLE IF NOT EXISTS "half_orm_meta.api".field_access_out (
   PRIMARY KEY (access_id, field_name)
 );
 
-CREATE OR REPLACE FUNCTION "half_orm_meta.api".check_field_not_inherited()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_role   text;
-  v_schema text;
-  v_table  text;
-  v_verb   text;
-  v_parent text;
-  v_anc_id uuid;
-BEGIN
-  SELECT a.role_name, a.schema_name, a.table_name, a.verb
-    INTO v_role, v_schema, v_table, v_verb
-    FROM "half_orm_meta.api".access a WHERE a.id = NEW.access_id;
-
-  SELECT r.parent_name INTO v_parent
-    FROM "half_orm_meta.api".role r WHERE r.name = v_role;
-
-  WHILE v_parent IS NOT NULL LOOP
-    SELECT a.id INTO v_anc_id
-      FROM "half_orm_meta.api".access a
-     WHERE a.role_name   = v_parent
-       AND a.schema_name = v_schema
-       AND a.table_name  = v_table
-       AND a.verb        = v_verb;
-
-    IF FOUND THEN
-      IF TG_TABLE_NAME = 'field_access_in' THEN
-        IF EXISTS (SELECT 1 FROM "half_orm_meta.api".field_access_in
-                    WHERE access_id = v_anc_id AND field_name = NEW.field_name) THEN
-          RAISE EXCEPTION
-            'Field "%" is already granted to ancestor role "%" — store only additional fields',
-            NEW.field_name, v_parent;
-        END IF;
-      ELSE
-        IF EXISTS (SELECT 1 FROM "half_orm_meta.api".field_access_out
-                    WHERE access_id = v_anc_id AND field_name = NEW.field_name) THEN
-          RAISE EXCEPTION
-            'Field "%" is already granted to ancestor role "%" — store only additional fields',
-            NEW.field_name, v_parent;
-        END IF;
-      END IF;
-    END IF;
-
-    SELECT r.parent_name INTO v_parent
-      FROM "half_orm_meta.api".role r WHERE r.name = v_parent;
-  END LOOP;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_check_field_in_not_inherited'
-      AND tgrelid = '"half_orm_meta.api".field_access_in'::regclass
-  ) THEN
-    CREATE TRIGGER trg_check_field_in_not_inherited
-      BEFORE INSERT ON "half_orm_meta.api".field_access_in
-      FOR EACH ROW EXECUTE FUNCTION "half_orm_meta.api".check_field_not_inherited();
-  END IF;
-END $$;
-
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_check_field_out_not_inherited'
-      AND tgrelid = '"half_orm_meta.api".field_access_out'::regclass
-  ) THEN
-    CREATE TRIGGER trg_check_field_out_not_inherited
-      BEFORE INSERT ON "half_orm_meta.api".field_access_out
-      FOR EACH ROW EXECUTE FUNCTION "half_orm_meta.api".check_field_not_inherited();
-  END IF;
-END $$;
-
 CREATE TABLE IF NOT EXISTS "half_orm_meta.api".filter (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   schema_name text NOT NULL,
@@ -306,6 +231,280 @@ DO $$ BEGIN
     CREATE TRIGGER trg_check_filter_relation
       BEFORE INSERT OR UPDATE ON "half_orm_meta.api".access_filter
       FOR EACH ROW EXECUTE FUNCTION "half_orm_meta.api".check_filter_relation();
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- field.id migration — surrogate PK, replacing (schema_name, table_name,
+-- column_name) as the primary key (kept as a UNIQUE constraint for
+-- name-based lookup). Lets field_access_in/out/searchable/fk_auto
+-- reference a single field_id column with a real FK (ON DELETE CASCADE)
+-- instead of their own free-text field_name — nothing enforced that
+-- field_name actually named a column known to `field`, so a stale/
+-- typo'd/dropped-column reference could linger with no error and no
+-- cleanup on column removal. Placed here (after every original CREATE
+-- TABLE, including field_access_searchable's own field_name-based FK to
+-- field_access_out) so no still-needed field_name column is dropped
+-- before a later CREATE TABLE IF NOT EXISTS statement needs to reference it.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "half_orm_meta.api".field
+  ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid();
+UPDATE "half_orm_meta.api".field SET id = gen_random_uuid() WHERE id IS NULL;
+ALTER TABLE "half_orm_meta.api".field ALTER COLUMN id SET NOT NULL;
+
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'field_pkey' AND contype = 'p'
+  ) THEN
+    ALTER TABLE "half_orm_meta.api".field DROP CONSTRAINT field_pkey;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_id_pkey') THEN
+    ALTER TABLE "half_orm_meta.api".field ADD CONSTRAINT field_id_pkey PRIMARY KEY (id);
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_natural_key') THEN
+    ALTER TABLE "half_orm_meta.api".field
+      ADD CONSTRAINT field_natural_key UNIQUE (schema_name, table_name, column_name);
+  END IF;
+END $$;
+
+-- field_access_in / field_access_out / field_access_fk_auto /
+-- field_access_searchable: backfill field_id from the still-present
+-- field_name (each resolved independently via access + field — not by
+-- reading field_access_out's own field_id, so this doesn't depend on that
+-- table's migration having already run), then swap constraints, then drop
+-- field_name. Constraint drops/adds are ordered by dependency:
+-- field_access_searchable's OLD fkey (into field_access_out's OLD pkey)
+-- must go before field_access_out's OLD pkey is dropped, and
+-- field_access_searchable's NEW fkey (into field_access_out's NEW pkey)
+-- can only be added after that new pkey exists.
+
+ALTER TABLE "half_orm_meta.api".field_access_in         ADD COLUMN IF NOT EXISTS field_id uuid;
+ALTER TABLE "half_orm_meta.api".field_access_out        ADD COLUMN IF NOT EXISTS field_id uuid;
+ALTER TABLE "half_orm_meta.api".field_access_fk_auto    ADD COLUMN IF NOT EXISTS field_id uuid;
+ALTER TABLE "half_orm_meta.api".field_access_searchable ADD COLUMN IF NOT EXISTS field_id uuid;
+
+-- Guarded (not a bare UPDATE): field_name is dropped at the end of this
+-- migration, so on every run after the first it no longer exists — a bare
+-- UPDATE referencing it would fail to plan at all (unlike a WHERE clause
+-- that just matches zero rows). Each guard checks that field_name is
+-- still there before the statement referencing it is ever prepared.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'half_orm_meta.api' AND table_name = 'field_access_in' AND column_name = 'field_name') THEN
+    UPDATE "half_orm_meta.api".field_access_in t
+      SET field_id = f.id
+      FROM "half_orm_meta.api".access a, "half_orm_meta.api".field f
+      WHERE a.id = t.access_id
+        AND f.schema_name = a.schema_name AND f.table_name = a.table_name
+        AND f.column_name = t.field_name
+        AND t.field_id IS NULL;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'half_orm_meta.api' AND table_name = 'field_access_out' AND column_name = 'field_name') THEN
+    UPDATE "half_orm_meta.api".field_access_out t
+      SET field_id = f.id
+      FROM "half_orm_meta.api".access a, "half_orm_meta.api".field f
+      WHERE a.id = t.access_id
+        AND f.schema_name = a.schema_name AND f.table_name = a.table_name
+        AND f.column_name = t.field_name
+        AND t.field_id IS NULL;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'half_orm_meta.api' AND table_name = 'field_access_fk_auto' AND column_name = 'field_name') THEN
+    UPDATE "half_orm_meta.api".field_access_fk_auto t
+      SET field_id = f.id
+      FROM "half_orm_meta.api".access a, "half_orm_meta.api".field f
+      WHERE a.id = t.access_id
+        AND f.schema_name = a.schema_name AND f.table_name = a.table_name
+        AND f.column_name = t.field_name
+        AND t.field_id IS NULL;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'half_orm_meta.api' AND table_name = 'field_access_searchable' AND column_name = 'field_name') THEN
+    UPDATE "half_orm_meta.api".field_access_searchable t
+      SET field_id = f.id
+      FROM "half_orm_meta.api".access a, "half_orm_meta.api".field f
+      WHERE a.id = t.access_id
+        AND f.schema_name = a.schema_name AND f.table_name = a.table_name
+        AND f.column_name = t.field_name
+        AND t.field_id IS NULL;
+  END IF;
+END $$;
+
+DELETE FROM "half_orm_meta.api".field_access_in         WHERE field_id IS NULL;
+DELETE FROM "half_orm_meta.api".field_access_out        WHERE field_id IS NULL;
+DELETE FROM "half_orm_meta.api".field_access_fk_auto    WHERE field_id IS NULL;
+DELETE FROM "half_orm_meta.api".field_access_searchable WHERE field_id IS NULL;
+-- A stale/mismatched field_name that no longer matches any live column —
+-- exactly the dangling-reference case this migration closes — is dropped
+-- rather than left to violate the NOT NULL/FK added next.
+
+ALTER TABLE "half_orm_meta.api".field_access_in         ALTER COLUMN field_id SET NOT NULL;
+ALTER TABLE "half_orm_meta.api".field_access_out        ALTER COLUMN field_id SET NOT NULL;
+ALTER TABLE "half_orm_meta.api".field_access_fk_auto    ALTER COLUMN field_id SET NOT NULL;
+ALTER TABLE "half_orm_meta.api".field_access_searchable ALTER COLUMN field_id SET NOT NULL;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_in_field_id_fkey') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_in
+      ADD CONSTRAINT field_access_in_field_id_fkey FOREIGN KEY (field_id)
+      REFERENCES "half_orm_meta.api".field(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_out_field_id_fkey') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_out
+      ADD CONSTRAINT field_access_out_field_id_fkey FOREIGN KEY (field_id)
+      REFERENCES "half_orm_meta.api".field(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_fk_auto_field_id_fkey') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_fk_auto
+      ADD CONSTRAINT field_access_fk_auto_field_id_fkey FOREIGN KEY (field_id)
+      REFERENCES "half_orm_meta.api".field(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- Drop field_access_searchable's OLD fkey FIRST — it depends on
+-- field_access_out_pkey, which the next block drops.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint
+             WHERE conname = 'field_access_searchable_access_id_field_name_fkey') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_searchable
+      DROP CONSTRAINT field_access_searchable_access_id_field_name_fkey;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint
+             WHERE conname = 'field_access_searchable_pkey' AND contype = 'p') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_searchable DROP CONSTRAINT field_access_searchable_pkey;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_in_pkey' AND contype = 'p') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_in DROP CONSTRAINT field_access_in_pkey;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_out_pkey' AND contype = 'p') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_out DROP CONSTRAINT field_access_out_pkey;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_fk_auto_access_id_field_name_key') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_fk_auto
+      DROP CONSTRAINT field_access_fk_auto_access_id_field_name_key;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_in_id_pkey') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_in ADD CONSTRAINT field_access_in_id_pkey PRIMARY KEY (access_id, field_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_out_id_pkey') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_out ADD CONSTRAINT field_access_out_id_pkey PRIMARY KEY (access_id, field_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_fk_auto_access_id_field_id_key') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_fk_auto
+      ADD CONSTRAINT field_access_fk_auto_access_id_field_id_key UNIQUE (access_id, field_id);
+  END IF;
+END $$;
+
+-- Now that field_access_out's new (access_id, field_id) pkey exists,
+-- field_access_searchable can get its own new pkey + fkey into it.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_searchable_id_pkey') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_searchable
+      ADD CONSTRAINT field_access_searchable_id_pkey PRIMARY KEY (access_id, field_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'field_access_searchable_out_fkey') THEN
+    ALTER TABLE "half_orm_meta.api".field_access_searchable
+      ADD CONSTRAINT field_access_searchable_out_fkey FOREIGN KEY (access_id, field_id)
+      REFERENCES "half_orm_meta.api".field_access_out(access_id, field_id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- All four tables' field_id columns are in place — safe to drop field_name now.
+ALTER TABLE "half_orm_meta.api".field_access_in         DROP COLUMN IF EXISTS field_name;
+ALTER TABLE "half_orm_meta.api".field_access_out        DROP COLUMN IF EXISTS field_name;
+ALTER TABLE "half_orm_meta.api".field_access_fk_auto    DROP COLUMN IF EXISTS field_name;
+ALTER TABLE "half_orm_meta.api".field_access_searchable DROP COLUMN IF EXISTS field_name;
+
+CREATE OR REPLACE FUNCTION "half_orm_meta.api".check_field_not_inherited()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_role   text;
+  v_schema text;
+  v_table  text;
+  v_verb   text;
+  v_parent text;
+  v_anc_id uuid;
+BEGIN
+  SELECT a.role_name, a.schema_name, a.table_name, a.verb
+    INTO v_role, v_schema, v_table, v_verb
+    FROM "half_orm_meta.api".access a WHERE a.id = NEW.access_id;
+
+  SELECT r.parent_name INTO v_parent
+    FROM "half_orm_meta.api".role r WHERE r.name = v_role;
+
+  WHILE v_parent IS NOT NULL LOOP
+    SELECT a.id INTO v_anc_id
+      FROM "half_orm_meta.api".access a
+     WHERE a.role_name   = v_parent
+       AND a.schema_name = v_schema
+       AND a.table_name  = v_table
+       AND a.verb        = v_verb;
+
+    IF FOUND THEN
+      IF TG_TABLE_NAME = 'field_access_in' THEN
+        IF EXISTS (SELECT 1 FROM "half_orm_meta.api".field_access_in
+                    WHERE access_id = v_anc_id AND field_id = NEW.field_id) THEN
+          RAISE EXCEPTION
+            'Field "%" is already granted to ancestor role "%" — store only additional fields',
+            NEW.field_id, v_parent;
+        END IF;
+      ELSE
+        IF EXISTS (SELECT 1 FROM "half_orm_meta.api".field_access_out
+                    WHERE access_id = v_anc_id AND field_id = NEW.field_id) THEN
+          RAISE EXCEPTION
+            'Field "%" is already granted to ancestor role "%" — store only additional fields',
+            NEW.field_id, v_parent;
+        END IF;
+      END IF;
+    END IF;
+
+    SELECT r.parent_name INTO v_parent
+      FROM "half_orm_meta.api".role r WHERE r.name = v_parent;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_check_field_in_not_inherited'
+      AND tgrelid = '"half_orm_meta.api".field_access_in'::regclass
+  ) THEN
+    CREATE TRIGGER trg_check_field_in_not_inherited
+      BEFORE INSERT ON "half_orm_meta.api".field_access_in
+      FOR EACH ROW EXECUTE FUNCTION "half_orm_meta.api".check_field_not_inherited();
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_check_field_out_not_inherited'
+      AND tgrelid = '"half_orm_meta.api".field_access_out'::regclass
+  ) THEN
+    CREATE TRIGGER trg_check_field_out_not_inherited
+      BEFORE INSERT ON "half_orm_meta.api".field_access_out
+      FOR EACH ROW EXECUTE FUNCTION "half_orm_meta.api".check_field_not_inherited();
   END IF;
 END $$;
 """

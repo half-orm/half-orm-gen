@@ -51,12 +51,11 @@ def build_class(model):
                         role_name=current, schema_name=schema, table_name=table, verb=verb,
                     ).ho_aselect('id')
                     if anc_acc:
-                        anc_out = await FieldAccessOut(access_id=anc_acc[0]['id']).ho_aselect('field_name')
-                        inherited_out.update(r['field_name'] for r in anc_out)
+                        inherited_out.update(await FieldAccessOut.list_for(anc_acc[0]['id']))
                     current = parent_map.get(current)
                 for pk in pk_fields:
                     if pk not in inherited_out:
-                        await FieldAccessOut(access_id=access_id, field_name=pk).ho_ainsert()
+                        await FieldAccessOut.add(access_id, pk)
             return access_id, pk_fields
 
         @classmethod

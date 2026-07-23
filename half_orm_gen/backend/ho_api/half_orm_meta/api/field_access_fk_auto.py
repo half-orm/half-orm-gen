@@ -11,23 +11,36 @@ def build_class(model):
     class FieldAccessFkAuto(base):
         @classmethod
         async def list_for(cls, access_id) -> list:
-            return await cls(access_id=access_id).ho_aselect('field_name', 'resolve_rule')
+            from half_orm_gen.backend.ho_api.loader import resolve_field_names
+            rows = await cls(access_id=access_id).ho_aselect('field_id', 'resolve_rule')
+            names = await resolve_field_names(cls._ho_model, [r['field_id'] for r in rows])
+            return [
+                {'field_name': names[r['field_id']], 'resolve_rule': r['resolve_rule']}
+                for r in rows if r['field_id'] in names
+            ]
 
         @classmethod
         async def set(cls, access_id, field_name: str, resolve_rule: str) -> None:
+            from half_orm_gen.backend.ho_api.loader import resolve_field_id
             if resolve_rule not in VALID_RULES:
                 raise ValueError(f'resolve_rule must be one of {VALID_RULES}')
-            existing = await cls(access_id=access_id, field_name=field_name).ho_aselect('id')
+            field_id = await resolve_field_id(cls._ho_model, access_id, field_name)
+            existing = await cls(access_id=access_id, field_id=field_id).ho_aselect('id')
             if existing:
-                await cls(access_id=access_id, field_name=field_name).ho_aupdate(resolve_rule=resolve_rule)
+                await cls(access_id=access_id, field_id=field_id).ho_aupdate(resolve_rule=resolve_rule)
             else:
                 await cls(
-                    access_id=access_id, field_name=field_name, resolve_rule=resolve_rule
+                    access_id=access_id, field_id=field_id, resolve_rule=resolve_rule
                 ).ho_ainsert()
 
         @classmethod
         async def remove(cls, access_id, field_name: str) -> bool:
-            result = await cls(access_id=access_id, field_name=field_name).ho_adelete('*')
+            from half_orm_gen.backend.ho_api.loader import resolve_field_id
+            try:
+                field_id = await resolve_field_id(cls._ho_model, access_id, field_name)
+            except ValueError:
+                return False
+            result = await cls(access_id=access_id, field_id=field_id).ho_adelete('*')
             return bool(result)
 
     return register_class(FieldAccessFkAuto)
