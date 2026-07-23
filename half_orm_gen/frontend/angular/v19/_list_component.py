@@ -53,7 +53,7 @@ def _list_component(
     td_plain_tpl = _tpl('list/td_plain.html')
 
     def _td(f: str) -> str:
-        inacc = f"silo.inaccessibleFields().has('{f}')"
+        inacc = f"(silo.inaccessibleFields().has('{f}') || (embedded() && ('{f}' in filters())))"
         if f in fk_map:
             rs, rt = fk_map[f]
             return td_fk_tpl.substitute(inacc=inacc, rs=rs, rt=rt, f=f)

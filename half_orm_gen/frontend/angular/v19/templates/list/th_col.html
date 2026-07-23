@@ -1,1 +1,1 @@
-@if (!silo.inaccessibleFields().has('$f')) {<th (click)="sortBy('$f')" class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200 text-gray-600">$f {{ silo.sortField() === '$f' ? (silo.sortAsc() ? '↑' : '↓') : '' }}</th>}
+@if (!silo.inaccessibleFields().has('$f') && !(embedded() && ('$f' in filters()))) {<th (click)="sortBy('$f')" class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200 text-gray-600">$f {{ silo.sortField() === '$f' ? (silo.sortAsc() ? '↑' : '↓') : '' }}</th>}
