@@ -134,6 +134,45 @@ def _list_component(
     new_items_badge_import = (
         "import { NewItemsBadgeComponent } from '../../../generated/new-items-badge.component';\n"
     ) if pk_extractor else ''
+
+    # FK label resolution: read the target row from its silo's cache if
+    # already present (no fetch triggered — a per-visible-row fetch-on-demand
+    # here caused a runaway request storm: ResourceSilo.refresh()'s single-PK
+    # branch never populates auth.fetchedRoutes, so there was no working
+    # dedup guard against re-requesting), then format via the shared
+    # `formatLabel` using the target resource's configured label_fields.
+    # Falls back to the raw id if the row isn't already loaded or has no
+    # label_fields configured — the backend embeds a resolved label directly
+    # in list/detail responses for that case (see runtime.py), so no
+    # additional network round-trip belongs here.
+    fk_label_import = (
+        "import { formatLabel } from '../../../generated/silo-shared';\n"
+    ) if fk_map else ''
+    silo_registry_lines = (
+        f"protected registry = inject(SiloRegistry);\n"
+        f"  protected silo     = this.registry.get('{map_key}');"
+    ) if fk_map else f"protected silo   = inject(SiloRegistry).get('{map_key}');"
+    fk_label_fetch_effects = ''
+    fk_label_method = (
+        # item/field (not a pre-cast embedded label) are passed in from the
+        # template — Angular's template expression grammar doesn't support
+        # TS-only syntax like `as any`, so the (item['_labels'] as any)?.[f]
+        # cast has to happen here, in TS, not inline in the .html.
+        f'\n\n  fkLabel(targetKey: string, id: unknown, item: Row, field: string): string {{\n'
+        f'    const strId = String(id);\n'
+        f'    const row = this.registry.tryGet(targetKey)?.byPk().get(strId);\n'
+        f'    if (row) {{\n'
+        f'      const labelFields = (this.registry.meta()[targetKey] as any)?.label_fields ?? [];\n'
+        f'      if (labelFields.length) {{\n'
+        f'        const label = formatLabel(row, labelFields);\n'
+        f'        if (label) return label;\n'
+        f'      }}\n'
+        f'    }}\n'
+        f'    const embeddedLabel = (item[\'_labels\'] as any)?.[field];\n'
+        f'    return embeddedLabel || strId;\n'
+        f'  }}'
+    ) if fk_map else ''
+
     _comp_imports = ['PermissionsMatrixComponent', 'HoTooltipComponent']
     if pk_extractor:
         _comp_imports.append('NewItemsBadgeComponent')
@@ -164,6 +203,10 @@ def _list_component(
     ts = _tpl('list/list.component.ts').substitute(
         router_link_es=router_link_es,
         new_items_badge_import=new_items_badge_import,
+        fk_label_import=fk_label_import,
+        silo_registry_lines=silo_registry_lines,
+        fk_label_fetch_effects=fk_label_fetch_effects,
+        fk_label_method=fk_label_method,
         selector=_selector(schema_name, table_name, 'list'),
         imports_str=imports_str, iname=iname, map_key=map_key,
         pk_id_line=pk_id_line, field_types_map=field_types_map,

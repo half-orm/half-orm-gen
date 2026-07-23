@@ -156,10 +156,44 @@ def _fields_component(
         'LatexPipe' if has_latex else '',
     ]))
 
+    # FK label resolution: read the target row from its silo's cache if
+    # already present (no fetch triggered here — see _list_component.py for
+    # why an active fetch-on-demand was reverted), then format via the
+    # shared `formatLabel` using the target's label_fields. Falls back to
+    # the raw id if the row isn't already loaded (e.g. via the detail page's
+    # own fk_fetch_effects, which populate this same silo cache) or has no
+    # label_fields configured.
+    fk_core_import = ''
+    fk_label_imports = (
+        "\nimport { formatLabel } from '../../silo-shared';"
+    ) if fk_map else ''
+    fk_label_block = (
+        # item/field (not a pre-cast embedded label) are passed in from the
+        # template — Angular's template expression grammar doesn't support
+        # TS-only syntax like `as any`, so the (item['_labels'] as any)?.[f]
+        # cast has to happen here, in TS, not inline in the .html.
+        f'\n  fkLabel(targetKey: string, id: unknown, item: Row, field: string): string {{\n'
+        f'    const strId = String(id);\n'
+        f'    const row = this.registry.tryGet(targetKey)?.byPk().get(strId);\n'
+        f'    if (row) {{\n'
+        f'      const labelFields = (this.registry.meta()[targetKey] as any)?.label_fields ?? [];\n'
+        f'      if (labelFields.length) {{\n'
+        f'        const label = formatLabel(row, labelFields);\n'
+        f'        if (label) return label;\n'
+        f'      }}\n'
+        f'    }}\n'
+        f'    const embeddedLabel = (item[\'_labels\'] as any)?.[field];\n'
+        f'    return embeddedLabel || strId;\n'
+        f'  }}'
+    ) if fk_map else ''
+
     html = _tpl('form/fields.component.html').substitute(rows=rows)
 
     ts = _tpl('form/fields.component.ts').substitute(
         latex_import=latex_import,
+        fk_core_import=fk_core_import,
+        fk_label_imports=fk_label_imports,
+        fk_label_block=fk_label_block,
         selector=_selector(schema_name, table_name, 'fields'),
         all_imports=all_imports, iname=iname, map_key=map_key,
     )

@@ -213,6 +213,106 @@ def _pivot_fk_pair(cls) -> tuple[_PivotSide, _PivotSide] | None:
     return sides[0], sides[1]
 
 
+# ---------------------------------------------------------------------------
+# FK label enrichment (list/get responses) — same "direct FK ⇒ scalar,
+# limit/offset-safe" join as _make_via_handler, applied to a resource's own
+# forward FK columns instead of a pivot's far side. See _resolve_label_deps.
+# ---------------------------------------------------------------------------
+
+class _FwdLabelDep:
+    """One single-column forward FK on a class: which table it targets, and
+    the attribute name needed to chain it via Fkey.set() + ho_aselect's
+    json_agg (see _attr_name_for_fkey)."""
+    __slots__ = ('field', 'attr', 'schema', 'table')
+
+    def __init__(self, field, attr, schema, table):
+        self.field = field
+        self.attr = attr
+        self.schema = schema
+        self.table = table
+
+
+def _forward_fk_deps(cls) -> list[_FwdLabelDep]:
+    """All single-column forward (non-reverse) FKs of `cls` — composite FKs
+    are skipped (no single id to look a label up by)."""
+    inst = cls()
+    deps = []
+    for fkey in inst._ho_fkeys.values():
+        if fkey.is_reverse or len(fkey.names) != 1:
+            continue
+        attr = _attr_name_for_fkey(inst, fkey)
+        if attr is None:
+            continue
+        target_schema, target_table = fkey.remote['fqtn']
+        deps.append(_FwdLabelDep(field=fkey.names[0], attr=attr, schema=target_schema, table=target_table))
+    return deps
+
+
+async def _resolve_label_deps(
+    fwd_label_deps: list, crud_access_by_res: dict, api_excluded_by_res: dict,
+    all_fields_by_res: dict, roles: list, meta_model,
+) -> list[tuple]:
+    """For each forward FK dep, keep it only if its target has configured
+    label_fields AND at least one of them survives the current role's GET
+    authorization on the target resource — same two checks _make_via_handler
+    applies to a pivot's far side. Returns [(dep, authorized_labels), ...]."""
+    if not fwd_label_deps:
+        return []
+    Field = meta_model.get_relation_class('"half_orm_meta.api".field')
+    resolved = []
+    for dep in fwd_label_deps:
+        target_resource = f'{dep.schema}/{dep.table}'
+        field_rows = await Field.list_for(dep.schema, dep.table)
+        configured_labels = [
+            r['column_name'] for r in sorted(
+                (r for r in field_rows if r['label_order'] is not None),
+                key=lambda r: r['label_order'],
+            )
+        ]
+        if not configured_labels:
+            continue
+        target_crud_access = crud_access_by_res.get(target_resource, {})
+        target_api_excluded = api_excluded_by_res.get(target_resource, [])
+        target_out = _effective_out_fields(
+            target_crud_access, 'GET', roles, target_api_excluded,
+            all_fields_by_res.get(target_resource, []),
+        ) or []
+        authorized_labels = [f for f in configured_labels if f in target_out]
+        if authorized_labels:
+            resolved.append((dep, authorized_labels))
+    return resolved
+
+
+def _apply_label_deps(inst, label_deps: list) -> dict | None:
+    """Chain each resolved dep's forward FK and build the json_agg spec for
+    it (aliased so the raw attribute name never leaks into the response)."""
+    if not label_deps:
+        return None
+    json_agg: dict = {}
+    for dep, authorized_labels in label_deps:
+        getattr(inst, dep.attr).set()
+        json_agg[dep.attr] = {'fields': authorized_labels, 'alias': f'_label_{dep.field}'}
+    return json_agg
+
+
+def _extract_labels(row: dict, label_deps: list) -> None:
+    """Pop the aliased per-dep join objects out of `row` and collapse each
+    into a single joined string under row['_labels'][field] (None if the FK
+    is null or none of its authorized label values are set) — mutates `row`
+    in place."""
+    if not label_deps:
+        return
+    labels: dict = {}
+    for dep, authorized_labels in label_deps:
+        obj = row.pop(f'_label_{dep.field}', None)
+        if obj:
+            values = [str(obj[f]) for f in authorized_labels if obj.get(f) is not None]
+            labels[dep.field] = ' '.join(values) if values else None
+        else:
+            labels[dep.field] = None
+    row['_labels'] = labels
+
+
 def _make_via_handler(
     path: str, cls, resource: str, sides: tuple[_PivotSide, _PivotSide],
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
@@ -227,14 +327,19 @@ def _make_via_handler(
     fall back to displaying target_pk itself); extra is the pivot's own
     non-FK/PK fields, authorized exactly like its normal list view.
 
-    Two independent ho_aselect(json_agg=...) calls, both starting from the
-    FIXED side's own class filtered by its own PK — half_orm's own
-    FK-navigation + aggregation mechanism (Fkey.set() chaining, ho_aselect's
-    json_agg parameter), not a hand-rolled SELECT + IN-query:
-      - unchained: the pivot's own extra fields (leaf = the pivot itself).
-      - chained through the pivot to the target (leaf = the target class):
-        its own PK + authorized label fields.
-    Merged here by the shared target id.
+    A single paginated ho_aselect(json_agg=...), anchored on the PIVOT's own
+    rows (WHERE fixed_field = value) and forward-chained — not aggregated —
+    to the target. half_orm's json_agg only GROUP BYs for a *reverse*,
+    non-singleton fkey (relation.py: `is_list = fkey.is_reverse and not
+    fkey.is_singleton`); target.fwd_attr is the pivot's own *direct* FK to
+    the target, so this is a plain per-row LEFT JOIN and limit/offset apply
+    to the real SQL query, same as any normal list handler.
+
+    (An earlier version anchored on the FIXED side instead and aggregated
+    its reverse relation to the pivot — a single group with no way to bound
+    the array via limit/offset, so it fetched every matching pivot row
+    before slicing in Python. Unusable once the pivot's cardinality gets
+    anywhere near e.g. `rental` (16k+ rows) for one customer/staff.)
     """
     by_field = {s.field: s for s in sides}
 
@@ -280,52 +385,35 @@ def _make_via_handler(
         ) or []
         authorized_labels = [f for f in configured_labels if f in target_out]
 
-        FixedCls = cls._ho_model.get_relation_class(f'{side.schema}.{side.table}')
-
-        # Pivot's own extra data — unchained, leaf is the pivot itself.
-        extra_inst = FixedCls(**{side.remote_pk_field: value})
-        getattr(extra_inst, side.rev_attr).set(cls())
-        extra_rows = await extra_inst.ho_aselect(
-            json_agg={side.rev_attr: pivot_extra_fields + [target.field]}
-        )
-        pivot_entries = extra_rows[0][side.rev_attr] if extra_rows else []
-        if not pivot_entries:
-            return {'data': [], 'meta': {
-                'target_resource': target_resource, 'offset': offset, 'limit': limit, 'has_more': False,
-            }}
-
-        # Far side's label — chained through the pivot, leaf is the target class.
-        pivot_rel = cls()
+        pivot_rel = cls(**{side.field: value})
         getattr(pivot_rel, target.fwd_attr).set()
-        label_inst = FixedCls(**{side.remote_pk_field: value})
-        getattr(label_inst, side.rev_attr).set(pivot_rel)
-        label_rows = await label_inst.ho_aselect(
-            json_agg={side.rev_attr: [target.remote_pk_field] + authorized_labels}
+        # order_by must be qualified with the pivot's own alias: target.field
+        # (e.g. "category_id") can collide with a same-named column on the
+        # joined target table, which Postgres then rejects as ambiguous.
+        rows = await pivot_rel.ho_aselect(
+            *pivot_extra_fields,
+            json_agg={target.fwd_attr: [target.remote_pk_field] + authorized_labels},
+            order_by=f'r{pivot_rel.ho_id}."{target.field}"', limit=limit, offset=offset,
         )
-        label_entries = label_rows[0][side.rev_attr] if label_rows else []
-        label_by_id = {row[target.remote_pk_field]: row for row in label_entries}
 
         data = []
-        for entry in pivot_entries:
-            target_id = entry.get(target.field)
-            extra = {k: v for k, v in entry.items() if k != target.field}
-            label_row = label_by_id.get(target_id, {})
+        for row in rows:
+            target_obj = row.get(target.fwd_attr)
+            target_id = target_obj.get(target.remote_pk_field) if target_obj else None
             label_values = [
-                str(label_row[f]) for f in authorized_labels
-                if label_row.get(f) is not None
+                str(target_obj[f]) for f in authorized_labels
+                if target_obj and target_obj.get(f) is not None
             ]
             data.append({
                 'target_pk': target_id,
                 'target_resource': target_resource,
                 'target_label': ' '.join(label_values) if label_values else None,
-                'extra': extra,
+                'extra': {k: row[k] for k in pivot_extra_fields if k in row},
             })
 
-        total = len(data)
-        page = data[offset:offset + limit]
-        return {'data': page, 'meta': {
+        return {'data': data, 'meta': {
             'target_resource': target_resource, 'offset': offset, 'limit': limit,
-            'has_more': offset + limit < total,
+            'has_more': len(data) == limit,
         }}
 
     handler.__name__ = handler.__qualname__ = f'via_{resource.replace("/", "_")}'
@@ -347,6 +435,7 @@ def _make_list_handler(
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
     parent_map_holder: list, pk_names: list | None = None,
     field_types_by_res: dict | None = None,
+    fwd_label_deps: list | None = None, meta_model=None,
 ):
     slug = resource.replace('/', '_')
     schema_name, table_name = resource.split('/')
@@ -405,7 +494,14 @@ def _make_list_handler(
                 field < op2val
         for col in search_cols:
             getattr(inst, col).unaccent = True
-        data = await inst.ho_aselect(*(projection or []), limit=limit, offset=offset)
+        label_deps = await _resolve_label_deps(
+            fwd_label_deps or [], crud_access_by_res, api_excluded_by_res,
+            all_fields_by_res, roles, meta_model,
+        )
+        json_agg = _apply_label_deps(inst, label_deps)
+        data = await inst.ho_aselect(*(projection or []), json_agg=json_agg, limit=limit, offset=offset)
+        for row in data:
+            _extract_labels(row, label_deps)
         dynamic_roles: dict = {}
         crud_access = crud_access_by_res.get(resource, {})
         _all_verbs = ('GET', 'POST', 'PUT', 'DELETE')
@@ -441,6 +537,7 @@ def _make_get_handler(
     crud_access_by_res: dict, api_excluded_by_res: dict, all_fields_by_res: dict,
     pk_info: list[tuple[str, str]],
     parent_map_holder: list,
+    fwd_label_deps: list | None = None, meta_model=None,
 ):
     pk_names = [p[0] for p in pk_info]
     is_simple = len(pk_names) == 1
@@ -463,10 +560,17 @@ def _make_get_handler(
             fn = _FILTER_REGISTRY.get((schema_name, table_name, filter_name))
             if fn:
                 inst = fn(inst, request) or inst
-        rows = await inst.ho_aselect(*authorized)
+        label_deps = await _resolve_label_deps(
+            fwd_label_deps or [], crud_access_by_res, api_excluded_by_res,
+            all_fields_by_res, roles, meta_model,
+        )
+        json_agg = _apply_label_deps(inst, label_deps)
+        rows = await inst.ho_aselect(*authorized, json_agg=json_agg)
         if not rows:
             raise HTTPException(status_code=404)
-        return rows[0]
+        row = rows[0]
+        _extract_labels(row, label_deps)
+        return row
 
     handler.__name__ = handler.__qualname__ = f'get_{slug}'
     return get(f'{path}/{{id:str}}')(handler)
@@ -1003,12 +1107,14 @@ def build_crud_app(
         if pk_info and len(pk_info) == 1:
             ws_rmap[resource] = (cls, pk_info[0][0])
 
+        fwd_label_deps = _forward_fk_deps(cls)
+
         relation_handlers.append(
-            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder, [p[0] for p in pk_info] if pk_info else None, field_types_by_res)
+            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, parent_map_holder, [p[0] for p in pk_info] if pk_info else None, field_types_by_res, fwd_label_deps, ctx.meta_model)
         )
         if pk_info:
             relation_handlers.append(
-                _make_get_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info, parent_map_holder)
+                _make_get_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, all_fields_by_res, pk_info, parent_map_holder, fwd_label_deps, ctx.meta_model)
             )
             if not read_only:
                 relation_handlers.append(

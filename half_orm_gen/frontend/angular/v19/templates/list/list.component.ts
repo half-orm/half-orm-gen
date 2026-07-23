@@ -10,7 +10,7 @@ import { isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTit
 import type { FieldType } from '../../../generated/stores/filters';
 import { PermissionsMatrixComponent } from '../../../generated/permissions-matrix.component';
 import { HoTooltipComponent } from '../../../generated/ho-tooltip.component';
-${new_items_badge_import}@Component({
+$fk_label_import${new_items_badge_import}@Component({
   selector: '$selector',
   standalone: true,
   imports: [$imports_str],
@@ -18,7 +18,7 @@ ${new_items_badge_import}@Component({
   styleUrl: './list.component.css',
 })
 export class ${iname}ListComponent {
-  protected silo   = inject(SiloRegistry).get('$map_key');
+  $silo_registry_lines
   protected auth   = inject(AuthService);
   protected router = inject(Router);
   private route = inject(ActivatedRoute);
@@ -85,7 +85,7 @@ $display_items_block
 
     this.destroyRef.onDestroy(() => {
       this.observer?.disconnect();
-    });
+    });$fk_label_fetch_effects
   }
 
   private updateObservedElement() {
@@ -203,5 +203,5 @@ $display_items_block
       if (rule === 'context' && f[field] != null) params[field] = String(f[field]);
     }
     return params;
-  }$select_fn$delete_fn
+  }$fk_label_method$select_fn$delete_fn
 }
