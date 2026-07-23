@@ -138,6 +138,8 @@ def _detail_component(
         assoc_sections += assoc_section_tpl.substitute(
             target_rs=target_schema, target_rt=target_table,
             target_title=_title(target_schema, target_table),
+            pivot_rs=pivot_schema, pivot_rt=pivot_table,
+            pivot_title=_title(pivot_schema, pivot_table),
             signal_name=signal_name,
         )
 
