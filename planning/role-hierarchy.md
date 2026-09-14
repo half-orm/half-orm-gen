@@ -37,13 +37,23 @@ Pas de `ON DELETE` : la suppression d'un rôle parent est interdite tant qu'il a
 des enfants (PostgreSQL lève une `ForeignKeyViolationError`, renvoyée en HTTP 409
 par l'endpoint delete). L'utilisateur doit d'abord réassigner les enfants.
 
-Données initiales insérées au bootstrap :
+Données initiales — insérées par un patch half-orm-dev, pas au bootstrap
+(le mécanisme bootstrap a été remplacé par `.hop/model/data-X.Y.Z.sql`) :
 
 | name        | deletable | parent_name |
 |-------------|-----------|-------------|
 | `anonymous` | FALSE     | NULL        |
 | `connected` | FALSE     | `anonymous` |
 | `admin`     | FALSE     | `connected` |
+
+`half_orm dev patch apply` reconstruit la base depuis la baseline de
+production (`.hop/model/schema-X.Y.Z.sql` + `data-X.Y.Z.sql`) puis rejoue les
+patches : toute ligne insérée hors patch est donc perdue au prochain apply.
+C'est le cas de `Role.ensure_system_roles()` (appelé par `gen api` et au
+démarrage de l'API), qui suffit pour un projet autonome (`--database`, sans
+patches) mais pas pour un projet half-orm-dev. Les démos insèrent donc ces
+trois lignes via `Patches/1-gen-api-schema/02_roles.sql` — voir
+`tests/e2e/scripts/demo_blog.sh` et `demo_pages.sh`.
 
 ### Protection contre les cycles
 

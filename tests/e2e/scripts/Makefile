@@ -296,7 +296,7 @@ demo-federate:  ## Enregistre blog_demo et pages_demo comme peers de confiance m
 	printf '%s\n' "INSERT INTO \"half_orm_meta.identity\".peer (id, name, url, frontend_url, jwt_public_key) VALUES (:'pages_id', :'pages_name', :'pages_url', :'pages_frontend_url', :'pages_key') ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, url = EXCLUDED.url, frontend_url = EXCLUDED.frontend_url, jwt_public_key = EXCLUDED.jwt_public_key;" \
 	  | psql blog_demo -v pages_id="$$PAGES_ID" -v pages_name="$$PAGES_NAME" -v pages_url="$$PAGES_URL" -v pages_frontend_url="$$PAGES_FRONTEND_URL" -v pages_key="$$PAGES_KEY"
 	@echo "Registered blog_demo <-> pages_demo as trusted peers"
-	psql pages_demo -f fixtures/pages_demo_data.sql
+	psql pages_demo -v ON_ERROR_STOP=1 -f fixtures/pages_demo_data.sql
 	@echo "Loaded fixtures/pages_demo_data.sql (pre-seeded identities + wiki pages)"
 
 .PHONY: demo-access-load

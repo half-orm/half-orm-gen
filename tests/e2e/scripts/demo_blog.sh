@@ -85,6 +85,28 @@ from half_orm_gen.backend.ho_api.ddl import HO_API_DDL, HO_IDENTITY_DDL
 open('Patches/1-gen-api-schema/01_schema.sql', 'w').write(HO_API_DDL + '\n' + HO_IDENTITY_DDL)
 "
 
+# The three system roles every instance of this demo needs
+# (planning/role-hierarchy.md). They must be part of the patch, not left to
+# the live side-effect of `half_orm gen api`: ensure_system_roles() inserts
+# them imperatively at generation/startup, but the next `patch apply`
+# restores the DB from model/schema.sql + data-X.Y.Z.sql and replays only
+# the patches — wiping every row no patch accounts for. Same reason patch 1
+# captures the gen-api DDL above. Without this, loading
+# fixtures/*_data.sql fails on user_role_role_name_fkey (role_name =
+# 'admin' is absent from "half_orm_meta.api".role).
+#
+# One INSERT per row, parent before child: parent_name is a self-FK and
+# trg_check_role_cycle walks the parent chain on every insert. 02_ so it
+# applies after 01_schema.sql — patch files run in sorted-name order.
+cat > "Patches/1-gen-api-schema/02_roles.sql" << 'SQL'
+INSERT INTO "half_orm_meta.api".role (name, deletable, parent_name)
+    VALUES ('anonymous', FALSE, NULL) ON CONFLICT (name) DO NOTHING;
+INSERT INTO "half_orm_meta.api".role (name, deletable, parent_name)
+    VALUES ('connected', FALSE, 'anonymous') ON CONFLICT (name) DO NOTHING;
+INSERT INTO "half_orm_meta.api".role (name, deletable, parent_name)
+    VALUES ('admin', FALSE, 'connected') ON CONFLICT (name) DO NOTHING;
+SQL
+
 half_orm dev patch apply
 git add .
 git commit -m "Add half_orm_meta.api/.identity schema"
@@ -281,7 +303,11 @@ half_orm dev release promote prod
 # 7. Load fixtures (access rules + demo data)
 # ---------------------------------------------------------------------------
 echo -e "${GREEN}=== LOAD FIXTURES ===${NC}"
-psql "$PROJECT" \
+# ON_ERROR_STOP so a fixture that aborts fails the demo instead of printing
+# the ✓ below: psql otherwise exits 0 after rolling the transaction back,
+# which is how the empty-role FK violation on user_role went unnoticed here.
+# Same flag as the access-load targets in the Makefile.
+psql "$PROJECT" -v ON_ERROR_STOP=1 \
     -f "$FIXTURES_DIR/blog_demo_data.sql"
 echo -e "${GREEN}✓ Fixtures loaded${NC}"
 
