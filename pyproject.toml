@@ -63,3 +63,16 @@ half_orm_gen = [
 
 [tool.setuptools.dynamic]
 version = {file = "half_orm_gen/version.txt"}
+
+[tool.pytest.ini_options]
+# Bare `pytest` must only collect this repo's own tests. Without testpaths it
+# also sweeps up tests/e2e/scripts/demos/*/tests — the demo projects the
+# demo_*.sh scripts generate — whose conftest.py imports the generated package
+# ({demo}_demo) that is only importable from inside the demo project itself.
+# Those dirs are gitignored, so they exist only on machines that ran the demos,
+# which is why the collection errors show up there and not on a fresh clone.
+testpaths = ["tests"]
+norecursedirs = [
+    "demos",
+    "*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}",
+]
