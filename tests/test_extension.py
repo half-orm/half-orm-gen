@@ -6,7 +6,7 @@ half-orm-dev auto-discovery), HalfOrmContext, api_dir scaffolding, and the
 
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import click
 import pytest
@@ -122,7 +122,10 @@ class TestCLIPrecedence:
                         self.cli, ['gen', 'api', '--litestar', '--database', 'mydb']
                     )
         assert result.exit_code == 0, result.output
-        mock_ensure.assert_called_once_with('mydb', 'mydb', tmp_path)
+        mock_ensure.assert_called_once_with(
+            'mydb', 'mydb', tmp_path,
+            with_half_orm_meta='half_orm_meta.identity.user',
+        )
         _, kwargs = mock_genapi.call_args
         assert kwargs['module_name'] == 'mydb'
         assert kwargs['ctx'].business_model is fake_model
@@ -154,12 +157,35 @@ class TestCLIPrecedence:
                         self.cli, ['gen', 'api', '--litestar', '--meta-database', 'metadb']
                     )
         assert result.exit_code == 0, result.output
-        mock_ensure.assert_called_once_with('metadb', 'metadb', tmp_path)
+        mock_ensure.assert_called_once_with(
+            'metadb', 'metadb', tmp_path,
+            with_half_orm_meta='half_orm_meta.identity.user',
+        )
         _, kwargs = mock_genapi.call_args
         ctx = kwargs['ctx']
         assert ctx.business_model is repo.model
         assert ctx.meta_model is fake_meta_model
         assert ctx.split is True
+
+    def test_database_and_meta_database_scopes_half_orm_meta_to_meta_model(self, tmp_path, monkeypatch):
+        """Fully standalone split: only the meta model may claim
+        half_orm_meta, otherwise it would shadow the meta model's real
+        hand-registered classes."""
+        monkeypatch.chdir(tmp_path)
+        with patch.dict('sys.modules', {'half_orm_dev': None, 'half_orm_dev.repo': None}):
+            with patch('half_orm_gen.cli_extension._ensure_standalone_model') as mock_ensure:
+                with patch('half_orm_gen.cli_extension.GenApi'):
+                    result = self.runner.invoke(
+                        self.cli,
+                        ['gen', 'api', '--litestar',
+                         '--database', 'mydb', '--meta-database', 'metadb'],
+                    )
+        assert result.exit_code == 0, result.output
+        assert mock_ensure.call_args_list == [
+            call('mydb', 'mydb', tmp_path, with_half_orm_meta=False),
+            call('metadb', 'metadb', tmp_path,
+                 with_half_orm_meta='half_orm_meta.identity.user'),
+        ]
 
     def test_frontend_command_exists(self):
         gen = self.cli.commands['gen']
